@@ -78,24 +78,26 @@ MainWindow::MainWindow(QWidget *parent)
     modeLabel->setContentsMargins(8, 0, 8, 0);
     statusBar()->addPermanentWidget(modeLabel);
 
-    const auto addModeAction = [modeMenu, modeGroup, modeLabel](
+    const auto addModeAction = [modeMenu, modeGroup, modeLabel, editor](
                                    const QString &name,
                                    const QKeySequence &shortcut,
+                                   MapEditor::Mode mode,
                                    bool checked = false) {
         auto *action = modeMenu->addAction(name);
         action->setActionGroup(modeGroup);
         action->setCheckable(true);
         action->setChecked(checked);
         action->setShortcut(shortcut);
-        QObject::connect(action, &QAction::triggered, modeLabel, [modeLabel, name] {
+        QObject::connect(action, &QAction::triggered, modeLabel, [modeLabel, editor, name, mode] {
+            editor->setMode(mode);
             modeLabel->setText("Mode: " + name);
         });
         return action;
     };
 
-    addModeAction("Draw", QKeySequence(Qt::CTRL | Qt::Key_D), true);
-    addModeAction("Lines", QKeySequence(Qt::Key_L));
-    addModeAction("Vertices", QKeySequence(Qt::Key_V));
+    addModeAction("Draw", QKeySequence(Qt::CTRL | Qt::Key_D), MapEditor::Mode::Draw, true);
+    addModeAction("Lines", QKeySequence(Qt::Key_L), MapEditor::Mode::Lines);
+    addModeAction("Vertices", QKeySequence(Qt::Key_V), MapEditor::Mode::Vertices);
 
     auto *helpMenu = menuBar()->addMenu("&Help");
     auto *aboutAction = helpMenu->addAction("&About");

@@ -44,9 +44,19 @@ public:
         : QGraphicsLineItem(line)
     {
         setPen(cosmeticPen(wallColor, 1.6));
-        setFlag(QGraphicsItem::ItemIsSelectable);
-        setAcceptHoverEvents(true);
-        setCursor(Qt::PointingHandCursor);
+        setInteractive(false);
+    }
+
+    void setInteractive(bool interactive)
+    {
+        setFlag(QGraphicsItem::ItemIsSelectable, interactive);
+        setAcceptHoverEvents(interactive);
+        setCursor(interactive ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        if (!interactive) {
+            m_hovered = false;
+            setSelected(false);
+            update();
+        }
     }
 
     QPainterPath shape() const override
@@ -94,10 +104,20 @@ public:
                                hoveredVertexRadiusPixels * 2.0,
                                hoveredVertexRadiusPixels * 2.0)
     {
-        setFlag(QGraphicsItem::ItemIsSelectable);
         setFlag(QGraphicsItem::ItemIgnoresTransformations);
-        setAcceptHoverEvents(true);
-        setCursor(Qt::PointingHandCursor);
+        setInteractive(false);
+    }
+
+    void setInteractive(bool interactive)
+    {
+        setFlag(QGraphicsItem::ItemIsSelectable, interactive);
+        setAcceptHoverEvents(interactive);
+        setCursor(interactive ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        if (!interactive) {
+            m_hovered = false;
+            setSelected(false);
+            update();
+        }
     }
 
 protected:
@@ -240,6 +260,25 @@ void MapEditor::newMap()
     reportStatus("New map");
 }
 
+void MapEditor::setMode(Mode mode)
+{
+    if (m_mode == mode) {
+        return;
+    }
+
+    cancelDrawing();
+    m_mode = mode;
+    m_scene->clearSelection();
+
+    for (QGraphicsItem *item : m_scene->items()) {
+        if (auto *wall = dynamic_cast<WallItem *>(item)) {
+            wall->setInteractive(mode == Mode::Lines);
+        } else if (auto *vertex = dynamic_cast<VertexItem *>(item)) {
+            vertex->setInteractive(mode == Mode::Vertices);
+        }
+    }
+}
+
 void MapEditor::setGridVisible(bool visible)
 {
     m_scene->setGridVisible(visible);
@@ -300,6 +339,10 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
     }
 
     if (event->button() == Qt::LeftButton) {
+        if (m_mode != Mode::Draw) {
+            QGraphicsView::mousePressEvent(event);
+            return;
+        }
         if (m_drawingPoints.empty()) {
             QGraphicsItem *item = itemAt(event->position().toPoint());
             if (item && item->flags().testFlag(QGraphicsItem::ItemIsSelectable)) {
@@ -496,12 +539,14 @@ void MapEditor::rebuildScene()
         const QPointF start = m_document.vertices()[wall.start].position;
         const QPointF end = m_document.vertices()[wall.end].position;
         auto *item = new WallItem(QLineF(start, end));
+        item->setInteractive(m_mode == Mode::Lines);
         m_scene->addItem(item);
         item->setZValue(1.0);
     }
 
     for (const MapDocument::Vertex &vertex : m_document.vertices()) {
         auto *item = new VertexItem();
+        item->setInteractive(m_mode == Mode::Vertices);
         m_scene->addItem(item);
         item->setPos(vertex.position);
         item->setZValue(10.0);

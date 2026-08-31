@@ -33,9 +33,16 @@ private:
 class MapEditor final : public QGraphicsView
 {
 public:
+    enum class Mode {
+        Draw,
+        Lines,
+        Vertices,
+    };
+
     explicit MapEditor(QWidget *parent = nullptr);
 
     void newMap();
+    void setMode(Mode mode);
     void setGridVisible(bool visible);
     [[nodiscard]] bool isGridVisible() const;
     void setStatusCallback(std::function<void(const QString &)> callback);
@@ -64,5 +71,6 @@ private:
     std::vector<QPointF> m_drawingPoints;
     QPoint m_lastPanPosition;
     bool m_panning = false;
+    Mode m_mode = Mode::Draw;
     std::function<void(const QString &)> m_statusCallback;
 };
