@@ -37,6 +37,7 @@ public:
         Draw,
         Lines,
         Vertices,
+        Sectors,
     };
 
     explicit MapEditor(QWidget *parent = nullptr);

@@ -4,6 +4,7 @@
 #include <QGraphicsEllipseItem>
 #include <QGraphicsLineItem>
 #include <QGraphicsPathItem>
+#include <QGraphicsPolygonItem>
 #include <QGraphicsSceneHoverEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -27,6 +28,7 @@ const QColor wallColor(226, 231, 240);
 const QColor vertexColor(255, 190, 72);
 const QColor hoverColor(80, 210, 255);
 const QColor selectedColor(255, 110, 92);
+const QColor sectorColor(50, 116, 158, 38);
 
 QPen cosmeticPen(const QColor &color, qreal width)
 {
@@ -143,6 +145,62 @@ protected:
         const qreal radius = (m_hovered || isSelected())
             ? hoveredVertexRadiusPixels : vertexRadiusPixels;
         painter->drawEllipse(QPointF(0.0, 0.0), radius, radius);
+    }
+
+private:
+    bool m_hovered = false;
+};
+
+class SectorItem final : public QGraphicsPolygonItem
+{
+public:
+    explicit SectorItem(const QPolygonF &polygon)
+        : QGraphicsPolygonItem(polygon)
+    {
+        setPen(Qt::NoPen);
+        setInteractive(false);
+    }
+
+    void setInteractive(bool interactive)
+    {
+        setFlag(QGraphicsItem::ItemIsSelectable, interactive);
+        setAcceptHoverEvents(interactive);
+        setCursor(interactive ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        if (!interactive) {
+            m_hovered = false;
+            setSelected(false);
+            update();
+        }
+    }
+
+protected:
+    void hoverEnterEvent(QGraphicsSceneHoverEvent *event) override
+    {
+        m_hovered = true;
+        update();
+        QGraphicsPolygonItem::hoverEnterEvent(event);
+    }
+
+    void hoverLeaveEvent(QGraphicsSceneHoverEvent *event) override
+    {
+        m_hovered = false;
+        update();
+        QGraphicsPolygonItem::hoverLeaveEvent(event);
+    }
+
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
+    {
+        QColor color = sectorColor;
+        if (isSelected()) {
+            color = selectedColor;
+            color.setAlpha(105);
+        } else if (m_hovered) {
+            color = hoverColor;
+            color.setAlpha(80);
+        }
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(color);
+        painter->drawPolygon(polygon());
     }
 
 private:
@@ -267,6 +325,8 @@ void MapEditor::setMode(Mode mode)
             wall->setInteractive(mode == Mode::Lines);
         } else if (auto *vertex = dynamic_cast<VertexItem *>(item)) {
             vertex->setInteractive(mode == Mode::Vertices);
+        } else if (auto *sector = dynamic_cast<SectorItem *>(item)) {
+            sector->setInteractive(mode == Mode::Sectors);
         }
     }
 }
@@ -510,14 +570,14 @@ void MapEditor::rebuildScene()
     m_scene->clear();
     m_previewItem = nullptr;
 
-    const QBrush sectorBrush(QColor(50, 116, 158, 38));
-    const QPen noPen(Qt::NoPen);
     for (const MapDocument::Sector &sector : m_document.sectors()) {
         QPolygonF polygon;
         for (const MapDocument::VertexId vertexId : sector.vertices) {
             polygon.append(m_document.vertices()[vertexId].position);
         }
-        auto *item = m_scene->addPolygon(polygon, noPen, sectorBrush);
+        auto *item = new SectorItem(polygon);
+        item->setInteractive(m_mode == Mode::Sectors);
+        m_scene->addItem(item);
         item->setZValue(-10.0);
     }
 

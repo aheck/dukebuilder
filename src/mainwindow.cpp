@@ -129,6 +129,7 @@ MainWindow::MainWindow(QWidget *parent)
     addModeAction("Draw", QKeySequence(Qt::CTRL | Qt::Key_D), MapEditor::Mode::Draw, true);
     addModeAction("Lines", QKeySequence(Qt::Key_L), MapEditor::Mode::Lines);
     addModeAction("Vertices", QKeySequence(Qt::Key_V), MapEditor::Mode::Vertices);
+    addModeAction("Sectors", QKeySequence(Qt::Key_S), MapEditor::Mode::Sectors);
 
     auto *helpMenu = menuBar()->addMenu("&Help");
     auto *aboutAction = helpMenu->addAction("&About");
