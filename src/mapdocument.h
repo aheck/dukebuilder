@@ -3,6 +3,7 @@
 #include <QPointF>
 
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 class MapDocument
@@ -27,6 +28,7 @@ public:
 
     void clear();
     void addPolyline(const std::vector<QPointF> &points, bool closed);
+    void setVertexPositions(const std::vector<std::pair<VertexId, QPointF>> &positions);
 
     [[nodiscard]] const std::vector<Vertex> &vertices() const { return m_vertices; }
     [[nodiscard]] const std::vector<Wall> &walls() const { return m_walls; }

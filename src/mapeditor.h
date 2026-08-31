@@ -7,6 +7,7 @@
 #include <QPoint>
 
 #include <functional>
+#include <utility>
 #include <vector>
 
 class QGraphicsPathItem;
@@ -70,8 +71,11 @@ private:
     MapScene *m_scene = nullptr;
     QGraphicsPathItem *m_previewItem = nullptr;
     std::vector<QPointF> m_drawingPoints;
+    std::vector<std::pair<MapDocument::VertexId, QPointF>> m_draggedVertices;
+    QPointF m_vertexDragStart;
     QPoint m_lastPanPosition;
     bool m_panning = false;
+    bool m_draggingVertices = false;
     Mode m_mode = Mode::Draw;
     std::function<void(const QString &)> m_statusCallback;
 };

@@ -57,6 +57,17 @@ void MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed)
     rebuildSectors();
 }
 
+void MapDocument::setVertexPositions(
+    const std::vector<std::pair<VertexId, QPointF>> &positions)
+{
+    for (const auto &[vertexId, position] : positions) {
+        if (vertexId < m_vertices.size()) {
+            m_vertices[vertexId].position = position;
+        }
+    }
+    rebuildSectors();
+}
+
 void MapDocument::rebuildSectors()
 {
     struct OutgoingEdge {
