@@ -26,6 +26,7 @@ constexpr qreal hoveredVertexRadiusPixels = 5.0;
 constexpr qreal snapRadiusPixels = 10.0;
 constexpr qreal wallHitWidth = 10.0;
 constexpr int vertexIdRole = Qt::UserRole;
+constexpr int wallIdRole = Qt::UserRole + 1;
 
 const QColor wallColor(226, 231, 240);
 const QColor vertexColor(255, 190, 72);
@@ -350,7 +351,7 @@ void MapEditor::setMode(Mode mode)
     cancelDrawing();
     m_mode = mode;
     m_scene->clearSelection();
-    setDragMode(mode == Mode::Vertices
+    setDragMode(mode == Mode::Vertices || mode == Mode::Lines
                     ? QGraphicsView::RubberBandDrag
                     : QGraphicsView::NoDrag);
 
@@ -430,7 +431,12 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
     }
 
     if (event->button() == Qt::RightButton && m_mode == Mode::Vertices) {
-        auto *vertex = dynamic_cast<VertexItem *>(itemAt(event->position().toPoint()));
+        VertexItem *vertex = nullptr;
+        for (QGraphicsItem *item : items(event->position().toPoint())) {
+            if ((vertex = dynamic_cast<VertexItem *>(item))) {
+                break;
+            }
+        }
         if (vertex && vertex->isSelected()) {
             m_draggingVertices = true;
             m_vertexDragStart = mapToScene(event->position().toPoint());
@@ -447,10 +453,50 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
             return;
         }
     }
+    if (event->button() == Qt::RightButton && m_mode == Mode::Lines) {
+        WallItem *wall = nullptr;
+        for (QGraphicsItem *item : items(event->position().toPoint())) {
+            if ((wall = dynamic_cast<WallItem *>(item))) {
+                break;
+            }
+        }
+        if (wall && wall->isSelected()) {
+            m_draggingVertices = true;
+            m_vertexDragStart = mapToScene(event->position().toPoint());
+            m_draggedVertices.clear();
+            m_draggedWalls.clear();
+
+            std::vector<MapDocument::VertexId> vertexIds;
+            for (QGraphicsItem *selectedItem : m_scene->selectedItems()) {
+                if (auto *selectedWall = dynamic_cast<WallItem *>(selectedItem)) {
+                    const auto wallId = static_cast<MapDocument::WallId>(
+                        selectedWall->data(wallIdRole).toULongLong());
+                    m_draggedWalls.push_back(wallId);
+                    const MapDocument::Wall &selectedDocumentWall = m_document.walls()[wallId];
+                    for (MapDocument::VertexId vertexId
+                         : {selectedDocumentWall.start, selectedDocumentWall.end}) {
+                        if (std::find(vertexIds.begin(), vertexIds.end(), vertexId) == vertexIds.end()) {
+                            vertexIds.push_back(vertexId);
+                            m_draggedVertices.emplace_back(
+                                vertexId, m_document.vertices()[vertexId].position);
+                        }
+                    }
+                }
+            }
+            setCursor(Qt::ClosedHandCursor);
+            event->accept();
+            return;
+        }
+    }
 
     if (event->button() == Qt::LeftButton) {
         if (m_mode == Mode::Vertices) {
-            auto *vertex = dynamic_cast<VertexItem *>(itemAt(event->position().toPoint()));
+            VertexItem *vertex = nullptr;
+            for (QGraphicsItem *item : items(event->position().toPoint())) {
+                if ((vertex = dynamic_cast<VertexItem *>(item))) {
+                    break;
+                }
+            }
             const bool extendSelection = event->modifiers().testFlag(Qt::ShiftModifier);
 
             if (vertex) {
@@ -458,6 +504,28 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
                     m_scene->clearSelection();
                 }
                 vertex->setSelected(extendSelection ? !vertex->isSelected() : true);
+                event->accept();
+                return;
+            }
+
+            QGraphicsView::mousePressEvent(event);
+            return;
+        }
+
+        if (m_mode == Mode::Lines) {
+            WallItem *wall = nullptr;
+            for (QGraphicsItem *item : items(event->position().toPoint())) {
+                if ((wall = dynamic_cast<WallItem *>(item))) {
+                    break;
+                }
+            }
+            const bool extendSelection = event->modifiers().testFlag(Qt::ShiftModifier);
+
+            if (wall) {
+                if (!extendSelection) {
+                    m_scene->clearSelection();
+                }
+                wall->setSelected(extendSelection ? !wall->isSelected() : true);
                 event->accept();
                 return;
             }
@@ -505,13 +573,26 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
         rebuildScene();
 
         for (QGraphicsItem *item : m_scene->items()) {
-            if (auto *vertex = dynamic_cast<VertexItem *>(item)) {
+            if (m_mode == Mode::Vertices) {
+                auto *vertex = dynamic_cast<VertexItem *>(item);
+                if (!vertex) {
+                    continue;
+                }
                 const auto vertexId = static_cast<MapDocument::VertexId>(
                     vertex->data(vertexIdRole).toULongLong());
                 const bool wasDragged = std::any_of(
                     m_draggedVertices.begin(), m_draggedVertices.end(),
                     [vertexId](const auto &entry) { return entry.first == vertexId; });
                 vertex->setSelected(wasDragged);
+            } else if (m_mode == Mode::Lines) {
+                auto *wall = dynamic_cast<WallItem *>(item);
+                if (!wall) {
+                    continue;
+                }
+                const auto wallId = static_cast<MapDocument::WallId>(
+                    wall->data(wallIdRole).toULongLong());
+                wall->setSelected(std::find(m_draggedWalls.begin(), m_draggedWalls.end(), wallId)
+                                  != m_draggedWalls.end());
             }
         }
         event->accept();
@@ -554,6 +635,7 @@ void MapEditor::mouseReleaseEvent(QMouseEvent *event)
     if (event->button() == Qt::RightButton && m_draggingVertices) {
         m_draggingVertices = false;
         m_draggedVertices.clear();
+        m_draggedWalls.clear();
         setCursor(Qt::CrossCursor);
         event->accept();
         return;
@@ -683,11 +765,13 @@ void MapEditor::rebuildScene()
         item->setZValue(-10.0);
     }
 
-    for (const MapDocument::Wall &wall : m_document.walls()) {
+    for (MapDocument::WallId wallId = 0; wallId < m_document.walls().size(); ++wallId) {
+        const MapDocument::Wall &wall = m_document.walls()[wallId];
         const QPointF start = m_document.vertices()[wall.start].position;
         const QPointF end = m_document.vertices()[wall.end].position;
         auto *item = new WallItem(QLineF(start, end));
         item->setInteractive(m_mode == Mode::Lines);
+        item->setData(wallIdRole, static_cast<qulonglong>(wallId));
         m_scene->addItem(item);
         item->setZValue(1.0);
     }

@@ -72,6 +72,7 @@ private:
     QGraphicsPathItem *m_previewItem = nullptr;
     std::vector<QPointF> m_drawingPoints;
     std::vector<std::pair<MapDocument::VertexId, QPointF>> m_draggedVertices;
+    std::vector<MapDocument::WallId> m_draggedWalls;
     QPointF m_vertexDragStart;
     QPoint m_lastPanPosition;
     bool m_panning = false;
