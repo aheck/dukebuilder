@@ -97,9 +97,14 @@ MainWindow::MainWindow(QWidget *parent)
     gridSizeCombo->setToolTip("Grid size");
     gridSizeCombo->setFixedWidth(76);
     for (int size : {1, 2, 4, 8, 16, 32}) {
-        gridSizeCombo->addItem(gridIcon, QString::number(size));
+        gridSizeCombo->addItem(gridIcon, QString::number(size), size);
     }
     gridSizeCombo->setCurrentText("16");
+    editor->setGridSize(16);
+    connect(gridSizeCombo, &QComboBox::currentIndexChanged, editor,
+            [gridSizeCombo, editor](int index) {
+                editor->setGridSize(gridSizeCombo->itemData(index).toReal());
+            });
 
     statusBar()->addPermanentWidget(gridSizeCombo);
     statusBar()->addPermanentWidget(modeLabel);

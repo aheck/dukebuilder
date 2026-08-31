@@ -43,6 +43,7 @@ public:
 
     void newMap();
     void setMode(Mode mode);
+    void setGridSize(qreal size);
     void setGridVisible(bool visible);
     [[nodiscard]] bool isGridVisible() const;
     void setStatusCallback(std::function<void(const QString &)> callback);
@@ -62,7 +63,6 @@ private:
     void cancelDrawing();
     void updatePreview(const QPointF &cursorPosition);
     void rebuildScene();
-    void changeGridSize(bool increase);
     void reportStatus(const QString &message) const;
 
     MapDocument m_document;

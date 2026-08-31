@@ -180,13 +180,7 @@ void MapScene::paintBackground(QPainter *painter, const QRectF &rect)
         return;
     }
 
-    const qreal scale = std::abs(painter->worldTransform().m11());
-    qreal visibleSpacing = m_gridSize;
-    int skippedLevels = 0;
-    while (visibleSpacing * scale < 10.0) {
-        visibleSpacing *= 2.0;
-        ++skippedLevels;
-    }
+    const qreal visibleSpacing = m_gridSize;
 
     const qreal left = std::floor(rect.left() / visibleSpacing) * visibleSpacing;
     const qreal top = std::floor(rect.top() / visibleSpacing) * visibleSpacing;
@@ -211,10 +205,8 @@ void MapScene::paintBackground(QPainter *painter, const QRectF &rect)
         }
     }
 
-    if (skippedLevels == 0) {
-        painter->setPen(cosmeticPen(QColor(43, 47, 55), 1.0));
-        painter->drawLines(minorLines);
-    }
+    painter->setPen(cosmeticPen(QColor(43, 47, 55), 1.0));
+    painter->drawLines(minorLines);
     painter->setPen(cosmeticPen(QColor(60, 66, 77), 1.0));
     painter->drawLines(majorLines);
 
@@ -249,7 +241,7 @@ MapEditor::MapEditor(QWidget *parent)
 void MapEditor::setStatusCallback(std::function<void(const QString &)> callback)
 {
     m_statusCallback = std::move(callback);
-    reportStatus("Draw: left click | Finish: right click/Enter | Cancel: Esc | Pan: middle mouse | Grid: [ ]");
+    reportStatus("Draw: left click | Finish: right click/Enter | Cancel: Esc | Pan: middle mouse");
 }
 
 void MapEditor::newMap()
@@ -277,6 +269,11 @@ void MapEditor::setMode(Mode mode)
             vertex->setInteractive(mode == Mode::Vertices);
         }
     }
+}
+
+void MapEditor::setGridSize(qreal size)
+{
+    m_scene->setGridSize(size);
 }
 
 void MapEditor::setGridVisible(bool visible)
@@ -449,16 +446,6 @@ void MapEditor::keyPressEvent(QKeyEvent *event)
         event->accept();
         return;
     }
-    if (event->key() == Qt::Key_BracketLeft) {
-        changeGridSize(false);
-        event->accept();
-        return;
-    }
-    if (event->key() == Qt::Key_BracketRight) {
-        changeGridSize(true);
-        event->accept();
-        return;
-    }
     QGraphicsView::keyPressEvent(event);
 }
 
@@ -550,13 +537,6 @@ void MapEditor::rebuildScene()
         item->setPos(vertex.position);
         item->setZValue(10.0);
     }
-}
-
-void MapEditor::changeGridSize(bool increase)
-{
-    const qreal size = m_scene->gridSize() * (increase ? 2.0 : 0.5);
-    m_scene->setGridSize(size);
-    reportStatus(QString("Grid size: %1").arg(m_scene->gridSize(), 0, 'f', 0));
 }
 
 void MapEditor::reportStatus(const QString &message) const
