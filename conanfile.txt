@@ -1,0 +1,6 @@
+[requires]
+qt/6.8.3
+
+[generators]
+PkgConfigDeps
+MesonToolchain
