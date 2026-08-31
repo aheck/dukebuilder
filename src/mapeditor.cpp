@@ -10,7 +10,9 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QProxyStyle>
 #include <QScrollBar>
+#include <QStyleOption>
 #include <QWheelEvent>
 
 #include <algorithm>
@@ -38,6 +40,30 @@ QPen cosmeticPen(const QColor &color, qreal width)
     pen.setJoinStyle(Qt::RoundJoin);
     return pen;
 }
+
+class OutlineRubberBandStyle final : public QProxyStyle
+{
+public:
+    OutlineRubberBandStyle()
+        : QProxyStyle()
+    {
+    }
+
+    void drawControl(ControlElement element, const QStyleOption *option,
+                     QPainter *painter, const QWidget *widget = nullptr) const override
+    {
+        if (element != CE_RubberBand) {
+            QProxyStyle::drawControl(element, option, painter, widget);
+            return;
+        }
+
+        painter->save();
+        painter->setBrush(Qt::NoBrush);
+        painter->setPen(cosmeticPen(hoverColor, 1.0));
+        painter->drawRect(option->rect.adjusted(0, 0, -1, -1));
+        painter->restore();
+    }
+};
 
 class WallItem final : public QGraphicsLineItem
 {
@@ -286,6 +312,10 @@ MapEditor::MapEditor(QWidget *parent)
     setResizeAnchor(QGraphicsView::AnchorViewCenter);
     setDragMode(QGraphicsView::NoDrag);
     setMouseTracking(true);
+    auto *rubberBandStyle = new OutlineRubberBandStyle();
+    rubberBandStyle->setParent(this);
+    setStyle(rubberBandStyle);
+    viewport()->setStyle(rubberBandStyle);
     setFocusPolicy(Qt::StrongFocus);
     setCursor(Qt::CrossCursor);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -319,6 +349,9 @@ void MapEditor::setMode(Mode mode)
     cancelDrawing();
     m_mode = mode;
     m_scene->clearSelection();
+    setDragMode(mode == Mode::Vertices
+                    ? QGraphicsView::RubberBandDrag
+                    : QGraphicsView::NoDrag);
 
     for (QGraphicsItem *item : m_scene->items()) {
         if (auto *wall = dynamic_cast<WallItem *>(item)) {
@@ -405,11 +438,11 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
                     m_scene->clearSelection();
                 }
                 vertex->setSelected(extendSelection ? !vertex->isSelected() : true);
-            } else if (!extendSelection) {
-                m_scene->clearSelection();
+                event->accept();
+                return;
             }
 
-            event->accept();
+            QGraphicsView::mousePressEvent(event);
             return;
         }
 
