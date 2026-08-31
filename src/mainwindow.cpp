@@ -4,11 +4,15 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QComboBox>
+#include <QIcon>
 #include <QKeySequence>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QPainter>
+#include <QPixmap>
 #include <QStatusBar>
 #include <QToolBar>
 
@@ -76,6 +80,28 @@ MainWindow::MainWindow(QWidget *parent)
     auto *modeLabel = new QLabel(this);
     modeLabel->setText("Mode: Draw");
     modeLabel->setContentsMargins(8, 0, 8, 0);
+
+    QPixmap gridPixmap(16, 16);
+    gridPixmap.fill(Qt::transparent);
+    {
+        QPainter painter(&gridPixmap);
+        painter.setPen(QColor(130, 140, 155));
+        for (int coordinate : {2, 7, 12}) {
+            painter.drawLine(coordinate, 1, coordinate, 14);
+            painter.drawLine(1, coordinate, 14, coordinate);
+        }
+    }
+    const QIcon gridIcon(gridPixmap);
+
+    auto *gridSizeCombo = new QComboBox(this);
+    gridSizeCombo->setToolTip("Grid size");
+    gridSizeCombo->setFixedWidth(76);
+    for (int size : {1, 2, 4, 8, 16, 32}) {
+        gridSizeCombo->addItem(gridIcon, QString::number(size));
+    }
+    gridSizeCombo->setCurrentText("16");
+
+    statusBar()->addPermanentWidget(gridSizeCombo);
     statusBar()->addPermanentWidget(modeLabel);
 
     const auto addModeAction = [modeMenu, modeGroup, modeLabel, editor](
