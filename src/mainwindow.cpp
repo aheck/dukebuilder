@@ -2,8 +2,10 @@
 #include "mapeditor.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QKeySequence>
+#include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -66,6 +68,34 @@ MainWindow::MainWindow(QWidget *parent)
     auto *quitAction = fileMenu->addAction("&Quit");
     quitAction->setShortcut(QKeySequence::Quit);
     connect(quitAction, &QAction::triggered, qApp, &QApplication::quit);
+
+    auto *modeMenu = menuBar()->addMenu("&Mode");
+    auto *modeGroup = new QActionGroup(this);
+    modeGroup->setExclusive(true);
+
+    auto *modeLabel = new QLabel(this);
+    modeLabel->setText("Mode: Draw");
+    modeLabel->setContentsMargins(8, 0, 8, 0);
+    statusBar()->addPermanentWidget(modeLabel);
+
+    const auto addModeAction = [modeMenu, modeGroup, modeLabel](
+                                   const QString &name,
+                                   const QKeySequence &shortcut,
+                                   bool checked = false) {
+        auto *action = modeMenu->addAction(name);
+        action->setActionGroup(modeGroup);
+        action->setCheckable(true);
+        action->setChecked(checked);
+        action->setShortcut(shortcut);
+        QObject::connect(action, &QAction::triggered, modeLabel, [modeLabel, name] {
+            modeLabel->setText("Mode: " + name);
+        });
+        return action;
+    };
+
+    addModeAction("Draw", QKeySequence(Qt::CTRL | Qt::Key_D), true);
+    addModeAction("Lines", QKeySequence(Qt::Key_L));
+    addModeAction("Vertices", QKeySequence(Qt::Key_V));
 
     auto *helpMenu = menuBar()->addMenu("&Help");
     auto *aboutAction = helpMenu->addAction("&About");
