@@ -527,9 +527,8 @@ void MapEditor::rebuildScene()
     const QPen noPen(Qt::NoPen);
     for (const MapDocument::Sector &sector : m_document.sectors()) {
         QPolygonF polygon;
-        for (const MapDocument::WallId wallId : sector.walls) {
-            const MapDocument::Wall &wall = m_document.walls()[wallId];
-            polygon.append(m_document.vertices()[wall.start].position);
+        for (const MapDocument::VertexId vertexId : sector.vertices) {
+            polygon.append(m_document.vertices()[vertexId].position);
         }
         auto *item = m_scene->addPolygon(polygon, noPen, sectorBrush);
         item->setZValue(-10.0);

@@ -22,6 +22,7 @@ public:
 
     struct Sector {
         std::vector<WallId> walls;
+        std::vector<VertexId> vertices;
     };
 
     void clear();
@@ -33,6 +34,7 @@ public:
 
 private:
     VertexId findOrAddVertex(const QPointF &position);
+    void rebuildSectors();
 
     std::vector<Vertex> m_vertices;
     std::vector<Wall> m_walls;
