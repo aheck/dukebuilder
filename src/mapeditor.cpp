@@ -396,6 +396,23 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
     }
 
     if (event->button() == Qt::LeftButton) {
+        if (m_mode == Mode::Vertices) {
+            auto *vertex = dynamic_cast<VertexItem *>(itemAt(event->position().toPoint()));
+            const bool extendSelection = event->modifiers().testFlag(Qt::ShiftModifier);
+
+            if (vertex) {
+                if (!extendSelection) {
+                    m_scene->clearSelection();
+                }
+                vertex->setSelected(extendSelection ? !vertex->isSelected() : true);
+            } else if (!extendSelection) {
+                m_scene->clearSelection();
+            }
+
+            event->accept();
+            return;
+        }
+
         if (m_mode != Mode::Draw) {
             QGraphicsView::mousePressEvent(event);
             return;
