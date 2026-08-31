@@ -5,6 +5,8 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QComboBox>
+#include <QDockWidget>
+#include <QHeaderView>
 #include <QIcon>
 #include <QKeySequence>
 #include <QLabel>
@@ -15,6 +17,7 @@
 #include <QPixmap>
 #include <QStatusBar>
 #include <QToolBar>
+#include <QTreeWidget>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -27,6 +30,22 @@ MainWindow::MainWindow(QWidget *parent)
         statusBar()->showMessage(message);
     });
     setCentralWidget(editor);
+
+    auto *propertiesDock = new QDockWidget("Properties", this);
+    propertiesDock->setObjectName("PropertiesDock");
+    propertiesDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    propertiesDock->setMinimumWidth(220);
+
+    auto *propertiesControl = new QTreeWidget(propertiesDock);
+    propertiesControl->setObjectName("PropertiesControl");
+    propertiesControl->setColumnCount(2);
+    propertiesControl->setHeaderLabels({"Property", "Value"});
+    propertiesControl->setRootIsDecorated(false);
+    propertiesControl->setAlternatingRowColors(true);
+    propertiesControl->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    propertiesControl->header()->setSectionResizeMode(1, QHeaderView::Stretch);
+    propertiesDock->setWidget(propertiesControl);
+    addDockWidget(Qt::LeftDockWidgetArea, propertiesDock);
 
     auto *editorToolBar = addToolBar("Editor");
     editorToolBar->setObjectName("EditorToolBar");
