@@ -27,6 +27,7 @@ constexpr qreal snapRadiusPixels = 10.0;
 constexpr qreal wallHitWidth = 10.0;
 constexpr int vertexIdRole = Qt::UserRole;
 constexpr int wallIdRole = Qt::UserRole + 1;
+constexpr int sectorIdRole = Qt::UserRole + 2;
 
 const QColor wallColor(226, 231, 240);
 const QColor vertexColor(255, 190, 72);
@@ -351,7 +352,7 @@ void MapEditor::setMode(Mode mode)
     cancelDrawing();
     m_mode = mode;
     m_scene->clearSelection();
-    setDragMode(mode == Mode::Vertices || mode == Mode::Lines
+    setDragMode(mode == Mode::Vertices || mode == Mode::Lines || mode == Mode::Sectors
                     ? QGraphicsView::RubberBandDrag
                     : QGraphicsView::NoDrag);
 
@@ -488,6 +489,40 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
             return;
         }
     }
+    if (event->button() == Qt::RightButton && m_mode == Mode::Sectors) {
+        SectorItem *sector = nullptr;
+        for (QGraphicsItem *item : items(event->position().toPoint())) {
+            if ((sector = dynamic_cast<SectorItem *>(item))) {
+                break;
+            }
+        }
+        if (sector && sector->isSelected()) {
+            m_draggingVertices = true;
+            m_vertexDragStart = mapToScene(event->position().toPoint());
+            m_draggedVertices.clear();
+            m_draggedSectors.clear();
+
+            std::vector<MapDocument::VertexId> vertexIds;
+            for (QGraphicsItem *selectedItem : m_scene->selectedItems()) {
+                if (auto *selectedSector = dynamic_cast<SectorItem *>(selectedItem)) {
+                    const std::size_t sectorId = static_cast<std::size_t>(
+                        selectedSector->data(sectorIdRole).toULongLong());
+                    m_draggedSectors.push_back(sectorId);
+                    for (MapDocument::VertexId vertexId
+                         : m_document.sectors()[sectorId].vertices) {
+                        if (std::find(vertexIds.begin(), vertexIds.end(), vertexId) == vertexIds.end()) {
+                            vertexIds.push_back(vertexId);
+                            m_draggedVertices.emplace_back(
+                                vertexId, m_document.vertices()[vertexId].position);
+                        }
+                    }
+                }
+            }
+            setCursor(Qt::ClosedHandCursor);
+            event->accept();
+            return;
+        }
+    }
 
     if (event->button() == Qt::LeftButton) {
         if (m_mode == Mode::Vertices) {
@@ -526,6 +561,28 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
                     m_scene->clearSelection();
                 }
                 wall->setSelected(extendSelection ? !wall->isSelected() : true);
+                event->accept();
+                return;
+            }
+
+            QGraphicsView::mousePressEvent(event);
+            return;
+        }
+
+        if (m_mode == Mode::Sectors) {
+            SectorItem *sector = nullptr;
+            for (QGraphicsItem *item : items(event->position().toPoint())) {
+                if ((sector = dynamic_cast<SectorItem *>(item))) {
+                    break;
+                }
+            }
+            const bool extendSelection = event->modifiers().testFlag(Qt::ShiftModifier);
+
+            if (sector) {
+                if (!extendSelection) {
+                    m_scene->clearSelection();
+                }
+                sector->setSelected(extendSelection ? !sector->isSelected() : true);
                 event->accept();
                 return;
             }
@@ -593,6 +650,16 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
                     wall->data(wallIdRole).toULongLong());
                 wall->setSelected(std::find(m_draggedWalls.begin(), m_draggedWalls.end(), wallId)
                                   != m_draggedWalls.end());
+            } else if (m_mode == Mode::Sectors) {
+                auto *sector = dynamic_cast<SectorItem *>(item);
+                if (!sector) {
+                    continue;
+                }
+                const std::size_t sectorId = static_cast<std::size_t>(
+                    sector->data(sectorIdRole).toULongLong());
+                sector->setSelected(
+                    std::find(m_draggedSectors.begin(), m_draggedSectors.end(), sectorId)
+                    != m_draggedSectors.end());
             }
         }
         event->accept();
@@ -636,6 +703,7 @@ void MapEditor::mouseReleaseEvent(QMouseEvent *event)
         m_draggingVertices = false;
         m_draggedVertices.clear();
         m_draggedWalls.clear();
+        m_draggedSectors.clear();
         setCursor(Qt::CrossCursor);
         event->accept();
         return;
@@ -754,13 +822,15 @@ void MapEditor::rebuildScene()
     m_scene->clear();
     m_previewItem = nullptr;
 
-    for (const MapDocument::Sector &sector : m_document.sectors()) {
+    for (std::size_t sectorId = 0; sectorId < m_document.sectors().size(); ++sectorId) {
+        const MapDocument::Sector &sector = m_document.sectors()[sectorId];
         QPolygonF polygon;
         for (const MapDocument::VertexId vertexId : sector.vertices) {
             polygon.append(m_document.vertices()[vertexId].position);
         }
         auto *item = new SectorItem(polygon);
         item->setInteractive(m_mode == Mode::Sectors);
+        item->setData(sectorIdRole, static_cast<qulonglong>(sectorId));
         m_scene->addItem(item);
         item->setZValue(-10.0);
     }
