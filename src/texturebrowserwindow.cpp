@@ -43,3 +43,13 @@ std::optional<TextureBrowserWindow::Selection> TextureBrowserWindow::chooseTextu
     }
     return Selection{*tile, m_browser->textureImage(*tile)};
 }
+
+QImage TextureBrowserWindow::textureImage(int tile)
+{
+    QImage image = m_browser->textureImage(tile);
+    if (image.isNull()) {
+        m_browser->reload();
+        image = m_browser->textureImage(tile);
+    }
+    return image;
+}

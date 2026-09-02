@@ -46,8 +46,12 @@ public:
     SpriteId addSprite(const QPointF &position);
     void removeSprites(const std::vector<SpriteId> &spriteIds);
     void setSpritePositions(const std::vector<std::pair<SpriteId, QPointF>> &positions);
+    void setSpriteZ(SpriteId spriteId, qreal z);
+    void setSpriteAngle(SpriteId spriteId, qreal angle);
     void setSpriteTexture(SpriteId spriteId, int texture);
     void setPlayerStartPosition(const QPointF &position);
+    void setPlayerStartZ(qreal z);
+    void setPlayerStartAngle(qreal angle);
 
     [[nodiscard]] const std::vector<Vertex> &vertices() const { return m_vertices; }
     [[nodiscard]] const std::vector<Wall> &walls() const { return m_walls; }

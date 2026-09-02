@@ -127,9 +127,33 @@ void MapDocument::setSpriteTexture(SpriteId spriteId, int texture)
     }
 }
 
+void MapDocument::setSpriteZ(SpriteId spriteId, qreal z)
+{
+    if (spriteId < m_sprites.size()) {
+        m_sprites[spriteId].z = z;
+    }
+}
+
+void MapDocument::setSpriteAngle(SpriteId spriteId, qreal angle)
+{
+    if (spriteId < m_sprites.size()) {
+        m_sprites[spriteId].angle = angle;
+    }
+}
+
 void MapDocument::setPlayerStartPosition(const QPointF &position)
 {
     m_playerStart.position = position;
+}
+
+void MapDocument::setPlayerStartZ(qreal z)
+{
+    m_playerStart.z = z;
+}
+
+void MapDocument::setPlayerStartAngle(qreal angle)
+{
+    m_playerStart.angle = angle;
 }
 
 void MapDocument::rebuildSectors()

@@ -60,6 +60,14 @@ public:
         std::optional<int> texture;
     };
 
+    enum class SpriteProperty {
+        X,
+        Y,
+        Z,
+        Angle,
+        Texture,
+    };
+
     void newMap();
     void setMode(Mode mode);
     void setGridSize(qreal size);
@@ -69,8 +77,10 @@ public:
     void setZoomCallback(std::function<void(qreal)> callback);
     void setTextureSelector(std::function<std::optional<SpriteTexture>(
                                 std::optional<int>)> selector);
+    void setSpriteTextureResolver(std::function<QImage(int)> resolver);
     void setSpritePropertiesCallback(
         std::function<void(std::optional<SpriteProperties>)> callback);
+    void setSelectedSpriteProperty(SpriteProperty property, qreal value);
     void setStatusCallback(std::function<void(const QString &)> callback);
 
 protected:
@@ -115,5 +125,6 @@ private:
     std::function<void(const QString &)> m_statusCallback;
     std::function<void(qreal)> m_zoomCallback;
     std::function<std::optional<SpriteTexture>(std::optional<int>)> m_textureSelector;
+    std::function<QImage(int)> m_spriteTextureResolver;
     std::function<void(std::optional<SpriteProperties>)> m_spritePropertiesCallback;
 };

@@ -20,11 +20,29 @@
 #include <QPixmap>
 #include <QStatusBar>
 #include <QSignalBlocker>
+#include <QStyledItemDelegate>
 #include <QToolBar>
 #include <QTreeWidget>
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+
+namespace {
+class PropertyValueDelegate final : public QStyledItemDelegate
+{
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    QWidget *createEditor(QWidget *parent, const QStyleOptionViewItem &option,
+                          const QModelIndex &index) const override
+    {
+        return index.column() == 1
+            ? QStyledItemDelegate::createEditor(parent, option, index)
+            : nullptr;
+    }
+};
+}
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -49,13 +67,35 @@ MainWindow::MainWindow(QWidget *parent)
     propertiesControl->setHeaderLabels({"Property", "Value"});
     propertiesControl->setRootIsDecorated(false);
     propertiesControl->setAlternatingRowColors(true);
+    propertiesControl->setItemDelegate(new PropertyValueDelegate(propertiesControl));
     propertiesControl->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     propertiesControl->header()->setSectionResizeMode(1, QHeaderView::Stretch);
     propertiesDock->setWidget(propertiesControl);
     addDockWidget(Qt::LeftDockWidgetArea, propertiesDock);
 
+    connect(propertiesControl, &QTreeWidget::itemChanged, editor,
+            [editor](QTreeWidgetItem *item, int column) {
+                if (column != 1) {
+                    return;
+                }
+                bool valid = false;
+                const qreal value = item->text(1).toDouble(&valid);
+                if (!valid) {
+                    editor->setSelectedSpriteProperty(
+                        static_cast<MapEditor::SpriteProperty>(
+                            item->data(0, Qt::UserRole).toInt()),
+                        std::numeric_limits<qreal>::quiet_NaN());
+                    return;
+                }
+                editor->setSelectedSpriteProperty(
+                    static_cast<MapEditor::SpriteProperty>(
+                        item->data(0, Qt::UserRole).toInt()),
+                    value);
+            });
+
     editor->setSpritePropertiesCallback(
         [propertiesControl](std::optional<MapEditor::SpriteProperties> properties) {
+            const QSignalBlocker blocker(propertiesControl);
             propertiesControl->clear();
             if (!properties) {
                 return;
@@ -66,15 +106,20 @@ MainWindow::MainWindow(QWidget *parent)
                     : QString::number(value, 'f', 2);
             };
             const auto addProperty = [propertiesControl](
-                                         const QString &name, const QString &value) {
-                new QTreeWidgetItem(propertiesControl, {name, value});
+                                         const QString &name, const QString &value,
+                                         MapEditor::SpriteProperty property) {
+                auto *item = new QTreeWidgetItem(propertiesControl, {name, value});
+                item->setFlags(item->flags() | Qt::ItemIsEditable);
+                item->setData(0, Qt::UserRole, static_cast<int>(property));
             };
-            addProperty("X", number(properties->x));
-            addProperty("Y", number(properties->y));
-            addProperty("Z", number(properties->z));
-            addProperty("Angle", number(std::clamp(properties->angle, 0.0, 360.0)));
+            addProperty("X", number(properties->x), MapEditor::SpriteProperty::X);
+            addProperty("Y", number(properties->y), MapEditor::SpriteProperty::Y);
+            addProperty("Z", number(properties->z), MapEditor::SpriteProperty::Z);
+            addProperty("Angle", number(std::clamp(properties->angle, 0.0, 360.0)),
+                        MapEditor::SpriteProperty::Angle);
             if (properties->texture) {
-                addProperty("Texture", QString::number(*properties->texture));
+                addProperty("Texture", QString::number(*properties->texture),
+                            MapEditor::SpriteProperty::Texture);
             }
         });
 
@@ -223,6 +268,9 @@ MainWindow::MainWindow(QWidget *parent)
             return std::nullopt;
         }
         return MapEditor::SpriteTexture{selection->tile, selection->image};
+    });
+    editor->setSpriteTextureResolver([textureBrowserWindow](int tile) {
+        return textureBrowserWindow->textureImage(tile);
     });
     connect(textureBrowserAction, &QAction::triggered, this,
             [textureBrowserWindow] {

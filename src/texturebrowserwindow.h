@@ -21,6 +21,7 @@ public:
     void browse();
     [[nodiscard]] std::optional<Selection> chooseTexture(
         std::optional<int> currentTexture = std::nullopt);
+    [[nodiscard]] QImage textureImage(int tile);
 
 private:
     TextureBrowserWidget *m_browser = nullptr;
