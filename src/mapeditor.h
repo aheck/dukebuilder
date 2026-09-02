@@ -39,6 +39,7 @@ public:
         Lines,
         Vertices,
         Sectors,
+        Sprites,
     };
 
     explicit MapEditor(QWidget *parent = nullptr);

@@ -47,6 +47,7 @@ Run it:
 - **Mouse wheel:** zoom around the cursor.
 - **[ / ]:** decrease or increase the snapping grid size.
 - **G or the Grid toolbar button:** show or hide the grid.
+- **T:** enter Sprites mode. Drawing and selection are currently disabled in this mode.
 - **Alt:** temporarily disable snapping while placing or previewing a point.
 
 Drawing snaps to existing vertices before snapping to the grid. Sector fills are
