@@ -1109,6 +1109,22 @@ void MapEditor::drawBackground(QPainter *painter, const QRectF &rect)
 
 void MapEditor::keyPressEvent(QKeyEvent *event)
 {
+    if (event->key() == Qt::Key_Delete && m_mode == Mode::Sprites) {
+        std::vector<MapDocument::SpriteId> spriteIds;
+        for (QGraphicsItem *item : m_scene->selectedItems()) {
+            if (auto *sprite = dynamic_cast<SpriteItem *>(item)) {
+                spriteIds.push_back(static_cast<MapDocument::SpriteId>(
+                    sprite->data(spriteIdRole).toULongLong()));
+            }
+        }
+        if (!spriteIds.empty()) {
+            m_document.removeSprites(spriteIds);
+            rebuildScene();
+            reportStatus(QString("%1 sprite(s) deleted").arg(spriteIds.size()));
+        }
+        event->accept();
+        return;
+    }
     if (event->key() == Qt::Key_Escape && !m_drawingPoints.empty()) {
         cancelDrawing();
         event->accept();

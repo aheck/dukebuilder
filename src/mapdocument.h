@@ -40,6 +40,7 @@ public:
     [[nodiscard]] bool addPolyline(const std::vector<QPointF> &points, bool closed);
     void setVertexPositions(const std::vector<std::pair<VertexId, QPointF>> &positions);
     SpriteId addSprite(const QPointF &position);
+    void removeSprites(const std::vector<SpriteId> &spriteIds);
     void setSpritePositions(const std::vector<std::pair<SpriteId, QPointF>> &positions);
     void setSpriteTexture(SpriteId spriteId, int texture);
     void setPlayerStartPosition(const QPointF &position);

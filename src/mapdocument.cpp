@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <algorithm>
+#include <functional>
 
 namespace {
 constexpr qreal coordinateEpsilon = 0.001;
@@ -95,6 +96,18 @@ MapDocument::SpriteId MapDocument::addSprite(const QPointF &position)
 {
     m_sprites.push_back({position, -1});
     return m_sprites.size() - 1;
+}
+
+void MapDocument::removeSprites(const std::vector<SpriteId> &spriteIds)
+{
+    std::vector<SpriteId> sortedIds = spriteIds;
+    std::sort(sortedIds.begin(), sortedIds.end(), std::greater<SpriteId>());
+    sortedIds.erase(std::unique(sortedIds.begin(), sortedIds.end()), sortedIds.end());
+    for (const SpriteId spriteId : sortedIds) {
+        if (spriteId < m_sprites.size()) {
+            m_sprites.erase(m_sprites.begin() + static_cast<std::ptrdiff_t>(spriteId));
+        }
+    }
 }
 
 void MapDocument::setSpritePositions(
