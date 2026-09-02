@@ -204,6 +204,15 @@ MainWindow::MainWindow(QWidget *parent)
                 textureBrowserWindow->browse();
             });
 
+    auto *viewMenu = menuBar()->addMenu("&View");
+    auto *propertyEditorAction = viewMenu->addAction("&Property Editor");
+    propertyEditorAction->setCheckable(true);
+    propertyEditorAction->setChecked(!propertiesDock->isHidden());
+    connect(propertyEditorAction, &QAction::toggled,
+            propertiesDock, &QDockWidget::setVisible);
+    connect(propertiesDock, &QDockWidget::visibilityChanged,
+            propertyEditorAction, &QAction::setChecked);
+
     auto *helpMenu = menuBar()->addMenu("&Help");
     auto *aboutAction = helpMenu->addAction("&About");
     connect(aboutAction, &QAction::triggered, this, [this] {
