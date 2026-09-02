@@ -33,6 +33,8 @@ executable(
     'src/mapdocument.h',
     'src/mapeditor.cpp',
     'src/mapeditor.h',
+    'src/settingsdialog.cpp',
+    'src/settingsdialog.h',
   ],
   cpp_args: app_cpp_args,
   dependencies: app_dependencies,

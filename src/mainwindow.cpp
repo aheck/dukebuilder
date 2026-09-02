@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "mapeditor.h"
+#include "settingsdialog.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -93,7 +94,11 @@ MainWindow::MainWindow(QWidget *parent)
     connect(quitAction, &QAction::triggered, qApp, &QApplication::quit);
 
     auto *editMenu = menuBar()->addMenu("&Edit");
-    editMenu->addAction("&Settings");
+    auto *settingsAction = editMenu->addAction("&Settings");
+    connect(settingsAction, &QAction::triggered, this, [this] {
+        SettingsDialog dialog(this);
+        dialog.exec();
+    });
 
     auto *modeMenu = menuBar()->addMenu("&Mode");
     auto *modeGroup = new QActionGroup(this);
