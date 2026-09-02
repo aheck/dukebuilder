@@ -9,6 +9,7 @@ the native file Meson uses to find it.
 - Meson
 - Ninja
 - A C++17 compiler
+- A configured and built `../libduke` checkout
 
 Create a Conan profile once if you do not already have one:
 

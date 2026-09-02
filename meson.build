@@ -3,6 +3,8 @@ project(
   'cpp',
   version: '0.1.0',
   default_options: [
+    'b_sanitize=address',
+    'b_lundef=false',
     'cpp_std=c++17',
     'warning_level=3',
   ],
@@ -11,10 +13,19 @@ project(
 qt6 = dependency('qt6', modules: ['Core', 'Widgets'])
 cpp = meson.get_compiler('cpp')
 
+libduke_root = meson.current_source_dir() / '..' / 'libduke'
+libduke = cpp.find_library(
+  'duke',
+  dirs: libduke_root / 'build',
+  static: true,
+  required: true,
+)
+libduke_inc = include_directories('../libduke/include')
+
 # Qt's static Conan package uses the system BLAKE2 implementation, but its
 # generated pkg-config metadata does not currently propagate this dependency.
 libb2 = cpp.find_library('b2', required: true)
-app_dependencies = [qt6, libb2]
+app_dependencies = [qt6, libb2, libduke]
 app_cpp_args = []
 
 if host_machine.system() == 'linux'
@@ -38,5 +49,6 @@ executable(
   ],
   cpp_args: app_cpp_args,
   dependencies: app_dependencies,
+  include_directories: libduke_inc,
   install: true,
 )
