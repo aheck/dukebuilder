@@ -30,11 +30,15 @@ MapDocument::VertexId MapDocument::findOrAddVertex(const QPointF &position)
     return m_vertices.size() - 1;
 }
 
-void MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed)
+bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed)
 {
     if (points.size() < 2) {
-        return;
+        return false;
     }
+
+    const std::size_t originalVertexCount = m_vertices.size();
+    const std::size_t originalWallCount = m_walls.size();
+    const std::size_t originalSectorCount = m_sectors.size();
 
     std::vector<VertexId> vertexIds;
     vertexIds.reserve(points.size());
@@ -51,10 +55,27 @@ void MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed)
             continue;
         }
 
+        const bool wallExists = std::any_of(
+            m_walls.begin(), m_walls.end(), [start, end](const Wall &wall) {
+                return (wall.start == start && wall.end == end)
+                    || (wall.start == end && wall.end == start);
+            });
+        if (wallExists) {
+            continue;
+        }
+
         m_walls.push_back({start, end});
     }
 
     rebuildSectors();
+    if (m_sectors.size() > originalSectorCount) {
+        return true;
+    }
+
+    m_vertices.resize(originalVertexCount);
+    m_walls.resize(originalWallCount);
+    rebuildSectors();
+    return false;
 }
 
 void MapDocument::setVertexPositions(

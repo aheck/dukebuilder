@@ -27,7 +27,7 @@ public:
     };
 
     void clear();
-    void addPolyline(const std::vector<QPointF> &points, bool closed);
+    [[nodiscard]] bool addPolyline(const std::vector<QPointF> &points, bool closed);
     void setVertexPositions(const std::vector<std::pair<VertexId, QPointF>> &positions);
 
     [[nodiscard]] const std::vector<Vertex> &vertices() const { return m_vertices; }

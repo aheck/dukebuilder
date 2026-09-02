@@ -332,7 +332,7 @@ MapEditor::MapEditor(QWidget *parent)
 void MapEditor::setStatusCallback(std::function<void(const QString &)> callback)
 {
     m_statusCallback = std::move(callback);
-    reportStatus("Draw: left click | Finish: right click/Enter | Cancel: Esc | Pan: middle mouse");
+    reportStatus("Draw: left click | Finish: right click/Enter | Close: click first vertex | Cancel: Esc | Pan: middle mouse");
 }
 
 void MapEditor::newMap()
@@ -778,12 +778,10 @@ void MapEditor::addDrawingPoint(const QPointF &position)
 
 void MapEditor::finishDrawing(bool close)
 {
-    if (m_drawingPoints.size() >= 2) {
-        m_document.addPolyline(m_drawingPoints, close);
-    }
+    const bool sectorCreated = m_document.addPolyline(m_drawingPoints, close);
     m_drawingPoints.clear();
     rebuildScene();
-    reportStatus(close ? "Sector created" : "Line chain created");
+    reportStatus(sectorCreated ? "Sector created" : "Drawing discarded");
 }
 
 void MapEditor::cancelDrawing()

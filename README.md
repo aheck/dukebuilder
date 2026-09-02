@@ -39,7 +39,8 @@ Run it:
 
 - **Left click:** place connected wall vertices. Lines can be drawn at any angle.
 - **Click the first vertex:** close the current shape and create a sector.
-- **Right click or Enter:** finish the current line chain without closing it.
+- **Right click or Enter:** finish the current line chain. It is kept only if its
+  walls, together with existing walls, create a sector.
 - **Backspace:** remove the last point from the active drawing.
 - **Escape:** cancel the active drawing.
 - **Middle-mouse drag:** pan the map.
