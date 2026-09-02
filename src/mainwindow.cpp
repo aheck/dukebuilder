@@ -29,7 +29,7 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
     setWindowTitle("Duke Builder");
-    resize(960, 640);
+    resize(1280, 800);
 
     auto *editor = new MapEditor(this);
     editor->setStatusCallback([this](const QString &message) {
