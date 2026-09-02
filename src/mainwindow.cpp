@@ -92,6 +92,9 @@ MainWindow::MainWindow(QWidget *parent)
     quitAction->setShortcut(QKeySequence::Quit);
     connect(quitAction, &QAction::triggered, qApp, &QApplication::quit);
 
+    auto *editMenu = menuBar()->addMenu("&Edit");
+    editMenu->addAction("&Settings");
+
     auto *modeMenu = menuBar()->addMenu("&Mode");
     auto *modeGroup = new QActionGroup(this);
     modeGroup->setExclusive(true);
