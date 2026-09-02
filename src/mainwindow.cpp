@@ -9,6 +9,7 @@
 #include <QComboBox>
 #include <QDockWidget>
 #include <QHeaderView>
+#include <QHBoxLayout>
 #include <QIcon>
 #include <QKeySequence>
 #include <QLabel>
@@ -18,6 +19,7 @@
 #include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
+#include <QPushButton>
 #include <QStatusBar>
 #include <QSignalBlocker>
 #include <QStyledItemDelegate>
@@ -29,18 +31,93 @@
 #include <limits>
 
 namespace {
+class TexturePropertyEditor final : public QWidget
+{
+public:
+    explicit TexturePropertyEditor(QWidget *parent)
+        : QWidget(parent)
+        , value(new QLineEdit(this))
+        , browse(new QPushButton("...", this))
+    {
+        auto *layout = new QHBoxLayout(this);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(2);
+        browse->setFixedWidth(28);
+        browse->setToolTip("Choose texture");
+        layout->addWidget(value, 1);
+        layout->addWidget(browse);
+    }
+
+    QLineEdit *value;
+    QPushButton *browse;
+};
+
 class PropertyValueDelegate final : public QStyledItemDelegate
 {
 public:
     using QStyledItemDelegate::QStyledItemDelegate;
 
+    void setTextureChooser(
+        std::function<std::optional<int>(std::optional<int>)> chooser)
+    {
+        m_textureChooser = std::move(chooser);
+    }
+
     QWidget *createEditor(QWidget *parent, const QStyleOptionViewItem &option,
                           const QModelIndex &index) const override
     {
-        return index.column() == 1
-            ? QStyledItemDelegate::createEditor(parent, option, index)
-            : nullptr;
+        if (index.column() != 1) {
+            return nullptr;
+        }
+        const auto property = static_cast<MapEditor::SpriteProperty>(
+            index.siblingAtColumn(0).data(Qt::UserRole).toInt());
+        if (property != MapEditor::SpriteProperty::Texture) {
+            return QStyledItemDelegate::createEditor(parent, option, index);
+        }
+
+        auto *editor = new TexturePropertyEditor(parent);
+        connect(editor->value, &QLineEdit::editingFinished, editor,
+                [this, editor] {
+                    emit const_cast<PropertyValueDelegate *>(this)->commitData(editor);
+                });
+        connect(editor->browse, &QPushButton::clicked, editor,
+                [this, editor] {
+                    bool valid = false;
+                    const int currentTexture = editor->value->text().toInt(&valid);
+                    if (!m_textureChooser) {
+                        return;
+                    }
+                    const std::optional<int> texture = m_textureChooser(
+                        valid ? std::optional<int>(currentTexture) : std::nullopt);
+                    if (texture) {
+                        editor->value->setText(QString::number(*texture));
+                        emit const_cast<PropertyValueDelegate *>(this)->commitData(editor);
+                    }
+                });
+        return editor;
     }
+
+    void setEditorData(QWidget *editor, const QModelIndex &index) const override
+    {
+        if (auto *textureEditor = dynamic_cast<TexturePropertyEditor *>(editor)) {
+            textureEditor->value->setText(index.data(Qt::EditRole).toString());
+            return;
+        }
+        QStyledItemDelegate::setEditorData(editor, index);
+    }
+
+    void setModelData(QWidget *editor, QAbstractItemModel *model,
+                      const QModelIndex &index) const override
+    {
+        if (auto *textureEditor = dynamic_cast<TexturePropertyEditor *>(editor)) {
+            model->setData(index, textureEditor->value->text(), Qt::EditRole);
+            return;
+        }
+        QStyledItemDelegate::setModelData(editor, model, index);
+    }
+
+private:
+    std::function<std::optional<int>(std::optional<int>)> m_textureChooser;
 };
 }
 
@@ -67,7 +144,8 @@ MainWindow::MainWindow(QWidget *parent)
     propertiesControl->setHeaderLabels({"Property", "Value"});
     propertiesControl->setRootIsDecorated(false);
     propertiesControl->setAlternatingRowColors(true);
-    propertiesControl->setItemDelegate(new PropertyValueDelegate(propertiesControl));
+    auto *propertyDelegate = new PropertyValueDelegate(propertiesControl);
+    propertiesControl->setItemDelegate(propertyDelegate);
     propertiesControl->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     propertiesControl->header()->setSectionResizeMode(1, QHeaderView::Stretch);
     propertiesDock->setWidget(propertiesControl);
@@ -120,6 +198,10 @@ MainWindow::MainWindow(QWidget *parent)
             if (properties->texture) {
                 addProperty("Texture", QString::number(*properties->texture),
                             MapEditor::SpriteProperty::Texture);
+                propertiesControl->openPersistentEditor(
+                    propertiesControl->topLevelItem(
+                        propertiesControl->topLevelItemCount() - 1),
+                    1);
             }
         });
 
@@ -260,6 +342,11 @@ MainWindow::MainWindow(QWidget *parent)
     auto *toolsMenu = menuBar()->addMenu("&Tools");
     auto *textureBrowserAction = toolsMenu->addAction("&Texture Browser");
     auto *textureBrowserWindow = new TextureBrowserWindow(this);
+    propertyDelegate->setTextureChooser(
+        [textureBrowserWindow](std::optional<int> currentTexture) -> std::optional<int> {
+            const auto selection = textureBrowserWindow->chooseTexture(currentTexture);
+            return selection ? std::optional<int>(selection->tile) : std::nullopt;
+        });
     editor->setTextureSelector([textureBrowserWindow](std::optional<int> currentTexture)
                                    -> std::optional<MapEditor::SpriteTexture> {
         const std::optional<TextureBrowserWindow::Selection> selection
