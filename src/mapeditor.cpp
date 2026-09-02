@@ -261,7 +261,13 @@ void MapScene::setGridVisible(bool visible)
 
 void MapScene::paintBackground(QPainter *painter, const QRectF &rect)
 {
-    painter->fillRect(rect, QColor(24, 26, 31));
+    painter->fillRect(rect, Qt::black);
+
+    const QRectF gridRect = rect.intersected(sceneRect());
+    if (gridRect.isEmpty()) {
+        return;
+    }
+    painter->fillRect(gridRect, QColor(24, 26, 31));
 
     if (!m_gridVisible) {
         return;
@@ -269,26 +275,26 @@ void MapScene::paintBackground(QPainter *painter, const QRectF &rect)
 
     const qreal visibleSpacing = m_gridSize;
 
-    const qreal left = std::floor(rect.left() / visibleSpacing) * visibleSpacing;
-    const qreal top = std::floor(rect.top() / visibleSpacing) * visibleSpacing;
+    const qreal left = std::floor(gridRect.left() / visibleSpacing) * visibleSpacing;
+    const qreal top = std::floor(gridRect.top() / visibleSpacing) * visibleSpacing;
 
     QList<QLineF> minorLines;
     QList<QLineF> majorLines;
     int xIndex = static_cast<int>(std::llround(left / visibleSpacing));
-    for (qreal x = left; x <= rect.right(); x += visibleSpacing, ++xIndex) {
+    for (qreal x = left; x <= gridRect.right(); x += visibleSpacing, ++xIndex) {
         if (xIndex % 8 == 0) {
-            majorLines.append(QLineF(x, rect.top(), x, rect.bottom()));
+            majorLines.append(QLineF(x, gridRect.top(), x, gridRect.bottom()));
         } else {
-            minorLines.append(QLineF(x, rect.top(), x, rect.bottom()));
+            minorLines.append(QLineF(x, gridRect.top(), x, gridRect.bottom()));
         }
     }
 
     int yIndex = static_cast<int>(std::llround(top / visibleSpacing));
-    for (qreal y = top; y <= rect.bottom(); y += visibleSpacing, ++yIndex) {
+    for (qreal y = top; y <= gridRect.bottom(); y += visibleSpacing, ++yIndex) {
         if (yIndex % 8 == 0) {
-            majorLines.append(QLineF(rect.left(), y, rect.right(), y));
+            majorLines.append(QLineF(gridRect.left(), y, gridRect.right(), y));
         } else {
-            minorLines.append(QLineF(rect.left(), y, rect.right(), y));
+            minorLines.append(QLineF(gridRect.left(), y, gridRect.right(), y));
         }
     }
 
@@ -298,9 +304,9 @@ void MapScene::paintBackground(QPainter *painter, const QRectF &rect)
     painter->drawLines(majorLines);
 
     painter->setPen(cosmeticPen(QColor(89, 72, 72), 1.25));
-    painter->drawLine(QLineF(0.0, rect.top(), 0.0, rect.bottom()));
+    painter->drawLine(QLineF(0.0, gridRect.top(), 0.0, gridRect.bottom()));
     painter->setPen(cosmeticPen(QColor(67, 82, 72), 1.25));
-    painter->drawLine(QLineF(rect.left(), 0.0, rect.right(), 0.0));
+    painter->drawLine(QLineF(gridRect.left(), 0.0, gridRect.right(), 0.0));
 }
 
 MapEditor::MapEditor(QWidget *parent)
@@ -308,7 +314,7 @@ MapEditor::MapEditor(QWidget *parent)
     , m_scene(new MapScene(this))
 {
     setScene(m_scene);
-    setBackgroundBrush(QColor(24, 26, 31));
+    setBackgroundBrush(Qt::black);
     setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
     setViewportUpdateMode(QGraphicsView::BoundingRectViewportUpdate);
     setTransformationAnchor(QGraphicsView::NoAnchor);
@@ -603,6 +609,11 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
             }
         }
         const bool disableSnapping = event->modifiers().testFlag(Qt::AltModifier);
+        if (!m_scene->sceneRect().contains(mapToScene(event->position().toPoint()))) {
+            reportStatus("Outside Build map coordinate range");
+            event->accept();
+            return;
+        }
         addDrawingPoint(snappedPosition(event->position().toPoint(), disableSnapping));
         event->accept();
         return;
@@ -620,7 +631,23 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
 void MapEditor::mouseMoveEvent(QMouseEvent *event)
 {
     if (m_draggingVertices) {
-        const QPointF delta = mapToScene(event->position().toPoint()) - m_vertexDragStart;
+        QPointF delta = mapToScene(event->position().toPoint()) - m_vertexDragStart;
+        qreal minimumX = std::numeric_limits<qreal>::max();
+        qreal maximumX = std::numeric_limits<qreal>::lowest();
+        qreal minimumY = std::numeric_limits<qreal>::max();
+        qreal maximumY = std::numeric_limits<qreal>::lowest();
+        for (const auto &[vertexId, originalPosition] : m_draggedVertices) {
+            Q_UNUSED(vertexId);
+            minimumX = std::min(minimumX, originalPosition.x());
+            maximumX = std::max(maximumX, originalPosition.x());
+            minimumY = std::min(minimumY, originalPosition.y());
+            maximumY = std::max(maximumY, originalPosition.y());
+        }
+        const QRectF bounds = m_scene->sceneRect();
+        delta.setX(std::clamp(delta.x(), bounds.left() - minimumX,
+                              bounds.right() - maximumX));
+        delta.setY(std::clamp(delta.y(), bounds.top() - minimumY,
+                              bounds.bottom() - maximumY));
         std::vector<std::pair<MapDocument::VertexId, QPointF>> positions;
         positions.reserve(m_draggedVertices.size());
         for (const auto &[vertexId, originalPosition] : m_draggedVertices) {
@@ -676,7 +703,10 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
     }
 
     const bool disableSnapping = event->modifiers().testFlag(Qt::AltModifier);
-    const QPointF position = snappedPosition(event->position().toPoint(), disableSnapping);
+    QPointF position = snappedPosition(event->position().toPoint(), disableSnapping);
+    const QRectF bounds = m_scene->sceneRect();
+    position.setX(std::clamp(position.x(), bounds.left(), bounds.right()));
+    position.setY(std::clamp(position.y(), bounds.top(), bounds.bottom()));
     updatePreview(position);
 
     if (!m_drawingPoints.empty()) {
@@ -723,7 +753,7 @@ void MapEditor::wheelEvent(QWheelEvent *event)
     const QPointF before = mapToScene(event->position().toPoint());
     const qreal factor = std::pow(1.0015, event->angleDelta().y());
     const qreal currentScale = std::abs(transform().m11());
-    const qreal targetScale = std::clamp(currentScale * factor, 0.02, 64.0);
+    const qreal targetScale = std::clamp(currentScale * factor, 0.001, 64.0);
     scale(targetScale / currentScale, targetScale / currentScale);
     const QPointF after = mapToScene(event->position().toPoint());
     translate(after.x() - before.x(), after.y() - before.y());
