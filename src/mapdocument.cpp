@@ -14,6 +14,7 @@ void MapDocument::clear()
     m_vertices.clear();
     m_walls.clear();
     m_sectors.clear();
+    m_sprites.clear();
 }
 
 MapDocument::VertexId MapDocument::findOrAddVertex(const QPointF &position)
@@ -87,6 +88,29 @@ void MapDocument::setVertexPositions(
         }
     }
     rebuildSectors();
+}
+
+MapDocument::SpriteId MapDocument::addSprite(const QPointF &position)
+{
+    m_sprites.push_back({position, -1});
+    return m_sprites.size() - 1;
+}
+
+void MapDocument::setSpritePositions(
+    const std::vector<std::pair<SpriteId, QPointF>> &positions)
+{
+    for (const auto &[spriteId, position] : positions) {
+        if (spriteId < m_sprites.size()) {
+            m_sprites[spriteId].position = position;
+        }
+    }
+}
+
+void MapDocument::setSpriteTexture(SpriteId spriteId, int texture)
+{
+    if (spriteId < m_sprites.size()) {
+        m_sprites[spriteId].texture = texture;
+    }
 }
 
 void MapDocument::rebuildSectors()

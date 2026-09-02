@@ -4,9 +4,12 @@
 
 #include <QGraphicsScene>
 #include <QGraphicsView>
+#include <QImage>
+#include <QMap>
 #include <QPoint>
 
 #include <functional>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -44,6 +47,11 @@ public:
 
     explicit MapEditor(QWidget *parent = nullptr);
 
+    struct SpriteTexture {
+        int tile;
+        QImage image;
+    };
+
     void newMap();
     void setMode(Mode mode);
     void setGridSize(qreal size);
@@ -51,6 +59,8 @@ public:
     [[nodiscard]] bool isGridVisible() const;
     void setZoomPercent(qreal percent);
     void setZoomCallback(std::function<void(qreal)> callback);
+    void setTextureSelector(std::function<std::optional<SpriteTexture>(
+                                std::optional<int>)> selector);
     void setStatusCallback(std::function<void(const QString &)> callback);
 
 protected:
@@ -77,11 +87,18 @@ private:
     std::vector<std::pair<MapDocument::VertexId, QPointF>> m_draggedVertices;
     std::vector<MapDocument::WallId> m_draggedWalls;
     std::vector<std::size_t> m_draggedSectors;
+    std::vector<std::pair<MapDocument::SpriteId, QPointF>> m_draggedSprites;
+    QMap<int, QImage> m_spriteTextures;
     QPointF m_vertexDragStart;
     QPoint m_lastPanPosition;
+    QPoint m_spriteRightPressPosition;
+    MapDocument::SpriteId m_clickedSprite = 0;
     bool m_panning = false;
     bool m_draggingVertices = false;
+    bool m_draggingSprites = false;
+    bool m_spriteDragMoved = false;
     Mode m_mode = Mode::Draw;
     std::function<void(const QString &)> m_statusCallback;
     std::function<void(qreal)> m_zoomCallback;
+    std::function<std::optional<SpriteTexture>(std::optional<int>)> m_textureSelector;
 };

@@ -112,6 +112,7 @@ TextureBrowserWidget::TextureBrowserWidget(QWidget *parent)
 void TextureBrowserWidget::reload()
 {
     m_textureList->clear();
+    m_images.clear();
     const QStringList grpPaths = QSettings().value(grpFilesSettingsKey).toStringList();
     if (grpPaths.isEmpty()) {
         m_statusLabel->setText("No GRP files configured in Settings → Game Data.");
@@ -213,6 +214,7 @@ void TextureBrowserWidget::reload()
                              .arg(texture.width)
                              .arg(texture.height));
         m_textureList->addItem(item);
+        m_images.insert(iterator.key(), texture.image);
     }
 
     updateFilter(m_filter->text());
@@ -225,6 +227,33 @@ void TextureBrowserWidget::reload()
                       .arg(failedArtFiles);
     }
     m_statusLabel->setText(status);
+}
+
+std::optional<int> TextureBrowserWidget::selectedTile() const
+{
+    const QListWidgetItem *item = m_textureList->currentItem();
+    if (!item) {
+        return std::nullopt;
+    }
+    return item->data(Qt::UserRole).toInt();
+}
+
+QImage TextureBrowserWidget::textureImage(int tile) const
+{
+    return m_images.value(tile);
+}
+
+void TextureBrowserWidget::selectTile(int tile)
+{
+    for (int index = 0; index < m_textureList->count(); ++index) {
+        QListWidgetItem *item = m_textureList->item(index);
+        if (item->data(Qt::UserRole).toInt() == tile) {
+            m_textureList->setCurrentItem(item);
+            m_textureList->scrollToItem(item);
+            return;
+        }
+    }
+    m_textureList->setCurrentItem(nullptr);
 }
 
 void TextureBrowserWidget::updateFilter(const QString &text)

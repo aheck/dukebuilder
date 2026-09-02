@@ -190,12 +190,18 @@ MainWindow::MainWindow(QWidget *parent)
     auto *toolsMenu = menuBar()->addMenu("&Tools");
     auto *textureBrowserAction = toolsMenu->addAction("&Texture Browser");
     auto *textureBrowserWindow = new TextureBrowserWindow(this);
+    editor->setTextureSelector([textureBrowserWindow](std::optional<int> currentTexture)
+                                   -> std::optional<MapEditor::SpriteTexture> {
+        const std::optional<TextureBrowserWindow::Selection> selection
+            = textureBrowserWindow->chooseTexture(currentTexture);
+        if (!selection) {
+            return std::nullopt;
+        }
+        return MapEditor::SpriteTexture{selection->tile, selection->image};
+    });
     connect(textureBrowserAction, &QAction::triggered, this,
             [textureBrowserWindow] {
-                textureBrowserWindow->reload();
-                textureBrowserWindow->show();
-                textureBrowserWindow->raise();
-                textureBrowserWindow->activateWindow();
+                textureBrowserWindow->browse();
             });
 
     auto *helpMenu = menuBar()->addMenu("&Help");

@@ -5,6 +5,7 @@
 #include <QGraphicsLineItem>
 #include <QGraphicsPathItem>
 #include <QGraphicsPolygonItem>
+#include <QGraphicsRectItem>
 #include <QGraphicsSceneHoverEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -28,6 +29,7 @@ constexpr qreal wallHitWidth = 10.0;
 constexpr int vertexIdRole = Qt::UserRole;
 constexpr int wallIdRole = Qt::UserRole + 1;
 constexpr int sectorIdRole = Qt::UserRole + 2;
+constexpr int spriteIdRole = Qt::UserRole + 3;
 
 const QColor wallColor(226, 231, 240);
 const QColor vertexColor(255, 190, 72);
@@ -235,6 +237,67 @@ protected:
 private:
     bool m_hovered = false;
 };
+
+class SpriteItem final : public QGraphicsRectItem
+{
+public:
+    explicit SpriteItem(const QImage &texture)
+        : QGraphicsRectItem(-22.0, -18.0, 44.0, 36.0)
+        , m_texture(texture)
+    {
+        setFlag(QGraphicsItem::ItemIgnoresTransformations);
+        setInteractive(false);
+    }
+
+    void setInteractive(bool interactive)
+    {
+        setFlag(QGraphicsItem::ItemIsSelectable, interactive);
+        setAcceptHoverEvents(interactive);
+        setCursor(interactive ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        if (!interactive) {
+            m_hovered = false;
+            setSelected(false);
+            update();
+        }
+    }
+
+protected:
+    void hoverEnterEvent(QGraphicsSceneHoverEvent *event) override
+    {
+        m_hovered = true;
+        update();
+        QGraphicsRectItem::hoverEnterEvent(event);
+    }
+
+    void hoverLeaveEvent(QGraphicsSceneHoverEvent *event) override
+    {
+        m_hovered = false;
+        update();
+        QGraphicsRectItem::hoverLeaveEvent(event);
+    }
+
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
+    {
+        const QRectF body = rect();
+        QPainterPath rounded;
+        rounded.addRoundedRect(body, 8.0, 8.0);
+        painter->setClipPath(rounded);
+        painter->fillRect(body, QColor(42, 46, 54));
+        if (!m_texture.isNull()) {
+            painter->drawImage(body.adjusted(4.0, 4.0, -4.0, -4.0), m_texture);
+        }
+        painter->setClipping(false);
+        painter->setBrush(Qt::NoBrush);
+        painter->setPen(cosmeticPen(
+            isSelected() ? selectedColor : (m_hovered ? hoverColor : vertexColor),
+            (isSelected() || m_hovered) ? 2.5 : 1.5));
+        painter->drawRoundedRect(body, 8.0, 8.0);
+    }
+
+private:
+    QImage m_texture;
+    bool m_hovered = false;
+};
 }
 
 MapScene::MapScene(QObject *parent)
@@ -341,6 +404,12 @@ void MapEditor::setStatusCallback(std::function<void(const QString &)> callback)
     reportStatus("Draw: left click | Finish: right click/Enter | Close: click first vertex | Cancel: Esc | Pan: middle mouse");
 }
 
+void MapEditor::setTextureSelector(
+    std::function<std::optional<SpriteTexture>(std::optional<int>)> selector)
+{
+    m_textureSelector = std::move(selector);
+}
+
 void MapEditor::newMap()
 {
     cancelDrawing();
@@ -359,6 +428,7 @@ void MapEditor::setMode(Mode mode)
     m_mode = mode;
     m_scene->clearSelection();
     setDragMode(mode == Mode::Vertices || mode == Mode::Lines || mode == Mode::Sectors
+                    || mode == Mode::Sprites
                     ? QGraphicsView::RubberBandDrag
                     : QGraphicsView::NoDrag);
 
@@ -369,6 +439,8 @@ void MapEditor::setMode(Mode mode)
             vertex->setInteractive(mode == Mode::Vertices);
         } else if (auto *sector = dynamic_cast<SectorItem *>(item)) {
             sector->setInteractive(mode == Mode::Sectors);
+        } else if (auto *sprite = dynamic_cast<SpriteItem *>(item)) {
+            sprite->setInteractive(mode == Mode::Sprites);
         }
     }
 }
@@ -453,6 +525,51 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
         m_panning = true;
         m_lastPanPosition = event->position().toPoint();
         setCursor(Qt::ClosedHandCursor);
+        event->accept();
+        return;
+    }
+
+    if (event->button() == Qt::RightButton && m_mode == Mode::Sprites) {
+        SpriteItem *sprite = nullptr;
+        for (QGraphicsItem *item : items(event->position().toPoint())) {
+            if ((sprite = dynamic_cast<SpriteItem *>(item))) {
+                break;
+            }
+        }
+        if (!sprite) {
+            const QPointF scenePosition = mapToScene(event->position().toPoint());
+            if (!m_scene->sceneRect().contains(scenePosition)) {
+                reportStatus("Outside Build map coordinate range");
+            } else {
+                const bool disableSnapping = event->modifiers().testFlag(Qt::AltModifier);
+                m_document.addSprite(snappedPosition(
+                    event->position().toPoint(), disableSnapping));
+                rebuildScene();
+                reportStatus("Sprite created");
+            }
+            event->accept();
+            return;
+        }
+
+        if (!sprite->isSelected()) {
+            m_scene->clearSelection();
+            sprite->setSelected(true);
+        }
+        m_draggingSprites = true;
+        m_spriteDragMoved = false;
+        m_spriteRightPressPosition = event->position().toPoint();
+        m_vertexDragStart = mapToScene(m_spriteRightPressPosition);
+        m_clickedSprite = static_cast<MapDocument::SpriteId>(
+            sprite->data(spriteIdRole).toULongLong());
+        m_draggedSprites.clear();
+        for (QGraphicsItem *selectedItem : m_scene->selectedItems()) {
+            if (auto *selectedSprite = dynamic_cast<SpriteItem *>(selectedItem)) {
+                const auto spriteId = static_cast<MapDocument::SpriteId>(
+                    selectedSprite->data(spriteIdRole).toULongLong());
+                m_draggedSprites.emplace_back(
+                    spriteId, m_document.sprites()[spriteId].position);
+            }
+        }
         event->accept();
         return;
     }
@@ -551,6 +668,26 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
     }
 
     if (event->button() == Qt::LeftButton) {
+        if (m_mode == Mode::Sprites) {
+            SpriteItem *sprite = nullptr;
+            for (QGraphicsItem *item : items(event->position().toPoint())) {
+                if ((sprite = dynamic_cast<SpriteItem *>(item))) {
+                    break;
+                }
+            }
+            const bool extendSelection = event->modifiers().testFlag(Qt::ShiftModifier);
+            if (sprite) {
+                if (!extendSelection) {
+                    m_scene->clearSelection();
+                }
+                sprite->setSelected(extendSelection ? !sprite->isSelected() : true);
+                event->accept();
+                return;
+            }
+            QGraphicsView::mousePressEvent(event);
+            return;
+        }
+
         if (m_mode == Mode::Vertices) {
             VertexItem *vertex = nullptr;
             for (QGraphicsItem *item : items(event->position().toPoint())) {
@@ -650,6 +787,57 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
 
 void MapEditor::mouseMoveEvent(QMouseEvent *event)
 {
+    if (m_draggingSprites) {
+        const QPoint viewportDelta = event->position().toPoint()
+            - m_spriteRightPressPosition;
+        if (!m_spriteDragMoved
+                && viewportDelta.manhattanLength() < QApplication::startDragDistance()) {
+            event->accept();
+            return;
+        }
+        m_spriteDragMoved = true;
+        setCursor(Qt::ClosedHandCursor);
+        QPointF delta = mapToScene(event->position().toPoint()) - m_vertexDragStart;
+        qreal minimumX = std::numeric_limits<qreal>::max();
+        qreal maximumX = std::numeric_limits<qreal>::lowest();
+        qreal minimumY = std::numeric_limits<qreal>::max();
+        qreal maximumY = std::numeric_limits<qreal>::lowest();
+        for (const auto &[spriteId, originalPosition] : m_draggedSprites) {
+            Q_UNUSED(spriteId);
+            minimumX = std::min(minimumX, originalPosition.x());
+            maximumX = std::max(maximumX, originalPosition.x());
+            minimumY = std::min(minimumY, originalPosition.y());
+            maximumY = std::max(maximumY, originalPosition.y());
+        }
+        const QRectF bounds = m_scene->sceneRect();
+        delta.setX(std::clamp(delta.x(), bounds.left() - minimumX,
+                              bounds.right() - maximumX));
+        delta.setY(std::clamp(delta.y(), bounds.top() - minimumY,
+                              bounds.bottom() - maximumY));
+
+        std::vector<std::pair<MapDocument::SpriteId, QPointF>> positions;
+        positions.reserve(m_draggedSprites.size());
+        for (const auto &[spriteId, originalPosition] : m_draggedSprites) {
+            positions.emplace_back(spriteId, originalPosition + delta);
+        }
+        m_document.setSpritePositions(positions);
+        rebuildScene();
+        for (QGraphicsItem *item : m_scene->items()) {
+            auto *sprite = dynamic_cast<SpriteItem *>(item);
+            if (!sprite) {
+                continue;
+            }
+            const auto spriteId = static_cast<MapDocument::SpriteId>(
+                sprite->data(spriteIdRole).toULongLong());
+            const bool wasDragged = std::any_of(
+                m_draggedSprites.begin(), m_draggedSprites.end(),
+                [spriteId](const auto &entry) { return entry.first == spriteId; });
+            sprite->setSelected(wasDragged);
+        }
+        event->accept();
+        return;
+    }
+
     if (m_draggingVertices) {
         QPointF delta = mapToScene(event->position().toPoint()) - m_vertexDragStart;
         qreal minimumX = std::numeric_limits<qreal>::max();
@@ -749,6 +937,40 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
 
 void MapEditor::mouseReleaseEvent(QMouseEvent *event)
 {
+    if (event->button() == Qt::RightButton && m_draggingSprites) {
+        const bool chooseTexture = !m_spriteDragMoved;
+        const MapDocument::SpriteId spriteId = m_clickedSprite;
+        m_draggingSprites = false;
+        m_spriteDragMoved = false;
+        m_draggedSprites.clear();
+        setCursor(Qt::CrossCursor);
+
+        if (chooseTexture && spriteId < m_document.sprites().size()
+                && m_textureSelector) {
+            const int currentTexture = m_document.sprites()[spriteId].texture;
+            const std::optional<SpriteTexture> selection = m_textureSelector(
+                currentTexture >= 0 ? std::optional<int>(currentTexture)
+                                    : std::nullopt);
+            if (selection) {
+                m_document.setSpriteTexture(spriteId, selection->tile);
+                m_spriteTextures.insert(selection->tile, selection->image);
+                rebuildScene();
+                for (QGraphicsItem *item : m_scene->items()) {
+                    auto *sprite = dynamic_cast<SpriteItem *>(item);
+                    if (sprite && static_cast<MapDocument::SpriteId>(
+                            sprite->data(spriteIdRole).toULongLong()) == spriteId) {
+                        sprite->setSelected(true);
+                        break;
+                    }
+                }
+                reportStatus(QString("Sprite texture set to tile %1")
+                                 .arg(selection->tile));
+            }
+        }
+        event->accept();
+        return;
+    }
+
     if (event->button() == Qt::RightButton && m_draggingVertices) {
         m_draggingVertices = false;
         m_draggedVertices.clear();
@@ -906,6 +1128,17 @@ void MapEditor::rebuildScene()
         m_scene->addItem(item);
         item->setPos(vertex.position);
         item->setZValue(10.0);
+    }
+
+    for (MapDocument::SpriteId spriteId = 0;
+         spriteId < m_document.sprites().size(); ++spriteId) {
+        const MapDocument::Sprite &sprite = m_document.sprites()[spriteId];
+        auto *item = new SpriteItem(m_spriteTextures.value(sprite.texture));
+        item->setInteractive(m_mode == Mode::Sprites);
+        item->setData(spriteIdRole, static_cast<qulonglong>(spriteId));
+        m_scene->addItem(item);
+        item->setPos(sprite.position);
+        item->setZValue(12.0);
     }
 }
 
