@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "mapeditor.h"
 #include "settingsdialog.h"
+#include "texturebrowserwindow.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -158,6 +159,17 @@ MainWindow::MainWindow(QWidget *parent)
     addModeAction("Vertices", QKeySequence(Qt::Key_V), MapEditor::Mode::Vertices);
     addModeAction("Sectors", QKeySequence(Qt::Key_S), MapEditor::Mode::Sectors);
     addModeAction("Sprites", QKeySequence(Qt::Key_T), MapEditor::Mode::Sprites);
+
+    auto *toolsMenu = menuBar()->addMenu("&Tools");
+    auto *textureBrowserAction = toolsMenu->addAction("&Texture Browser");
+    auto *textureBrowserWindow = new TextureBrowserWindow(this);
+    connect(textureBrowserAction, &QAction::triggered, this,
+            [textureBrowserWindow] {
+                textureBrowserWindow->reload();
+                textureBrowserWindow->show();
+                textureBrowserWindow->raise();
+                textureBrowserWindow->activateWindow();
+            });
 
     auto *helpMenu = menuBar()->addMenu("&Help");
     auto *aboutAction = helpMenu->addAction("&About");
