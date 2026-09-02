@@ -435,6 +435,24 @@ MapEditor::MapEditor(QWidget *parent)
     , m_scene(new MapScene(this))
 {
     setScene(m_scene);
+    connect(m_scene, &QGraphicsScene::selectionChanged, this, [this] {
+        if (m_mode != Mode::Sprites) {
+            return;
+        }
+
+        PlayerStartItem *selectedPlayerStart = nullptr;
+        bool ordinarySpriteSelected = false;
+        for (QGraphicsItem *item : m_scene->selectedItems()) {
+            if (auto *playerStart = dynamic_cast<PlayerStartItem *>(item)) {
+                selectedPlayerStart = playerStart;
+            } else if (dynamic_cast<SpriteItem *>(item)) {
+                ordinarySpriteSelected = true;
+            }
+        }
+        if (selectedPlayerStart && ordinarySpriteSelected) {
+            selectedPlayerStart->setSelected(false);
+        }
+    });
     setBackgroundBrush(Qt::black);
     setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
     setViewportUpdateMode(QGraphicsView::BoundingRectViewportUpdate);

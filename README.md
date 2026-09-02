@@ -53,7 +53,8 @@ Run it:
   rubber-band to select; right-drag to move; right-click a sprite to choose its
   texture; Delete removes selected sprites.
 - **Player start:** the permanent arrow can be selected and right-dragged only
-  in Sprites mode; it has no selectable texture.
+  in Sprites mode; it has no selectable texture and is omitted from selections
+  containing ordinary sprites.
 - **Alt:** temporarily disable snapping while placing or previewing a point.
 
 Drawing snaps to existing vertices before snapping to the grid. Sector fills are
