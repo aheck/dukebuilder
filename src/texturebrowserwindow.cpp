@@ -7,6 +7,7 @@ TextureBrowserWindow::TextureBrowserWindow(QWidget *parent)
     , m_browser(new TextureBrowserWidget(this))
 {
     setWindowTitle("Texture Browser");
+    setWindowModality(Qt::ApplicationModal);
     resize(800, 600);
     setCentralWidget(m_browser);
 }
