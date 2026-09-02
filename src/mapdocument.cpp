@@ -16,7 +16,7 @@ void MapDocument::clear()
     m_walls.clear();
     m_sectors.clear();
     m_sprites.clear();
-    m_playerStart.position = QPointF(0.0, 0.0);
+    m_playerStart = {{0.0, 0.0}, 0.0, 0.0};
 }
 
 MapDocument::VertexId MapDocument::findOrAddVertex(const QPointF &position)
@@ -94,7 +94,7 @@ void MapDocument::setVertexPositions(
 
 MapDocument::SpriteId MapDocument::addSprite(const QPointF &position)
 {
-    m_sprites.push_back({position, -1});
+    m_sprites.push_back({position, 0.0, 0.0, -1});
     return m_sprites.size() - 1;
 }
 

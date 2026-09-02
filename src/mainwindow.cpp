@@ -23,6 +23,7 @@
 #include <QToolBar>
 #include <QTreeWidget>
 
+#include <algorithm>
 #include <cmath>
 
 MainWindow::MainWindow(QWidget *parent)
@@ -52,6 +53,30 @@ MainWindow::MainWindow(QWidget *parent)
     propertiesControl->header()->setSectionResizeMode(1, QHeaderView::Stretch);
     propertiesDock->setWidget(propertiesControl);
     addDockWidget(Qt::LeftDockWidgetArea, propertiesDock);
+
+    editor->setSpritePropertiesCallback(
+        [propertiesControl](std::optional<MapEditor::SpriteProperties> properties) {
+            propertiesControl->clear();
+            if (!properties) {
+                return;
+            }
+            const auto number = [](qreal value) {
+                return qFuzzyCompare(value, std::round(value))
+                    ? QString::number(value, 'f', 0)
+                    : QString::number(value, 'f', 2);
+            };
+            const auto addProperty = [propertiesControl](
+                                         const QString &name, const QString &value) {
+                new QTreeWidgetItem(propertiesControl, {name, value});
+            };
+            addProperty("X", number(properties->x));
+            addProperty("Y", number(properties->y));
+            addProperty("Z", number(properties->z));
+            addProperty("Angle", number(std::clamp(properties->angle, 0.0, 360.0)));
+            if (properties->texture) {
+                addProperty("Texture", QString::number(*properties->texture));
+            }
+        });
 
     auto *editorToolBar = addToolBar("Editor");
     editorToolBar->setObjectName("EditorToolBar");

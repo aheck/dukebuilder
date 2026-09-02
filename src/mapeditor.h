@@ -52,6 +52,14 @@ public:
         QImage image;
     };
 
+    struct SpriteProperties {
+        qreal x;
+        qreal y;
+        qreal z;
+        qreal angle;
+        std::optional<int> texture;
+    };
+
     void newMap();
     void setMode(Mode mode);
     void setGridSize(qreal size);
@@ -61,6 +69,8 @@ public:
     void setZoomCallback(std::function<void(qreal)> callback);
     void setTextureSelector(std::function<std::optional<SpriteTexture>(
                                 std::optional<int>)> selector);
+    void setSpritePropertiesCallback(
+        std::function<void(std::optional<SpriteProperties>)> callback);
     void setStatusCallback(std::function<void(const QString &)> callback);
 
 protected:
@@ -78,6 +88,7 @@ private:
     void cancelDrawing();
     void updatePreview(const QPointF &cursorPosition);
     void rebuildScene();
+    void updateSpriteProperties() const;
     void reportStatus(const QString &message) const;
 
     MapDocument m_document;
@@ -104,4 +115,5 @@ private:
     std::function<void(const QString &)> m_statusCallback;
     std::function<void(qreal)> m_zoomCallback;
     std::function<std::optional<SpriteTexture>(std::optional<int>)> m_textureSelector;
+    std::function<void(std::optional<SpriteProperties>)> m_spritePropertiesCallback;
 };

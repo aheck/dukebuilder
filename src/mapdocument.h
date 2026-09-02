@@ -29,11 +29,15 @@ public:
 
     struct Sprite {
         QPointF position;
+        qreal z = 0.0;
+        qreal angle = 0.0;
         int texture = -1;
     };
 
     struct PlayerStart {
         QPointF position;
+        qreal z = 0.0;
+        qreal angle = 0.0;
     };
 
     void clear();
@@ -59,5 +63,5 @@ private:
     std::vector<Wall> m_walls;
     std::vector<Sector> m_sectors;
     std::vector<Sprite> m_sprites;
-    PlayerStart m_playerStart{{0.0, 0.0}};
+    PlayerStart m_playerStart{{0.0, 0.0}, 0.0, 0.0};
 };

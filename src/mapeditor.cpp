@@ -437,6 +437,7 @@ MapEditor::MapEditor(QWidget *parent)
     setScene(m_scene);
     connect(m_scene, &QGraphicsScene::selectionChanged, this, [this] {
         if (m_mode != Mode::Sprites) {
+            updateSpriteProperties();
             return;
         }
 
@@ -452,6 +453,7 @@ MapEditor::MapEditor(QWidget *parent)
         if (selectedPlayerStart && ordinarySpriteSelected) {
             selectedPlayerStart->setSelected(false);
         }
+        updateSpriteProperties();
     });
     setBackgroundBrush(Qt::black);
     setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
@@ -484,6 +486,13 @@ void MapEditor::setTextureSelector(
     std::function<std::optional<SpriteTexture>(std::optional<int>)> selector)
 {
     m_textureSelector = std::move(selector);
+}
+
+void MapEditor::setSpritePropertiesCallback(
+    std::function<void(std::optional<SpriteProperties>)> callback)
+{
+    m_spritePropertiesCallback = std::move(callback);
+    updateSpriteProperties();
 }
 
 void MapEditor::newMap()
@@ -521,6 +530,7 @@ void MapEditor::setMode(Mode mode)
             playerStart->setInteractive(mode == Mode::Sprites);
         }
     }
+    updateSpriteProperties();
 }
 
 void MapEditor::setGridSize(qreal size)
@@ -1277,6 +1287,40 @@ void MapEditor::rebuildScene()
     m_scene->addItem(playerStart);
     playerStart->setPos(m_document.playerStart().position);
     playerStart->setZValue(13.0);
+}
+
+void MapEditor::updateSpriteProperties() const
+{
+    if (!m_spritePropertiesCallback) {
+        return;
+    }
+    if (m_mode != Mode::Sprites || m_scene->selectedItems().size() != 1) {
+        m_spritePropertiesCallback(std::nullopt);
+        return;
+    }
+
+    QGraphicsItem *item = m_scene->selectedItems().front();
+    if (dynamic_cast<PlayerStartItem *>(item)) {
+        const MapDocument::PlayerStart &playerStart = m_document.playerStart();
+        m_spritePropertiesCallback(SpriteProperties{
+            playerStart.position.x(), playerStart.position.y(), playerStart.z,
+            playerStart.angle, std::nullopt});
+        return;
+    }
+
+    auto *spriteItem = dynamic_cast<SpriteItem *>(item);
+    if (spriteItem) {
+        const auto spriteId = static_cast<MapDocument::SpriteId>(
+            spriteItem->data(spriteIdRole).toULongLong());
+        if (spriteId < m_document.sprites().size()) {
+            const MapDocument::Sprite &sprite = m_document.sprites()[spriteId];
+            m_spritePropertiesCallback(SpriteProperties{
+                sprite.position.x(), sprite.position.y(), sprite.z, sprite.angle,
+                sprite.texture});
+            return;
+        }
+    }
+    m_spritePropertiesCallback(std::nullopt);
 }
 
 void MapEditor::reportStatus(const QString &message) const
