@@ -49,6 +49,8 @@ public:
     void setGridSize(qreal size);
     void setGridVisible(bool visible);
     [[nodiscard]] bool isGridVisible() const;
+    void setZoomPercent(qreal percent);
+    void setZoomCallback(std::function<void(qreal)> callback);
     void setStatusCallback(std::function<void(const QString &)> callback);
 
 protected:
@@ -81,4 +83,5 @@ private:
     bool m_draggingVertices = false;
     Mode m_mode = Mode::Draw;
     std::function<void(const QString &)> m_statusCallback;
+    std::function<void(qreal)> m_zoomCallback;
 };

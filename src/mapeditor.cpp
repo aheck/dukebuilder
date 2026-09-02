@@ -389,6 +389,26 @@ bool MapEditor::isGridVisible() const
     return m_scene->isGridVisible();
 }
 
+void MapEditor::setZoomPercent(qreal percent)
+{
+    const qreal currentScale = std::abs(transform().m11());
+    const qreal targetScale = std::clamp(percent / 100.0, 0.001, 64.0);
+    const QPointF center = mapToScene(viewport()->rect().center());
+    scale(targetScale / currentScale, targetScale / currentScale);
+    centerOn(center);
+    if (m_zoomCallback) {
+        m_zoomCallback(targetScale * 100.0);
+    }
+}
+
+void MapEditor::setZoomCallback(std::function<void(qreal)> callback)
+{
+    m_zoomCallback = std::move(callback);
+    if (m_zoomCallback) {
+        m_zoomCallback(std::abs(transform().m11()) * 100.0);
+    }
+}
+
 QPointF MapEditor::snappedPosition(const QPoint &viewportPosition, bool disableSnapping) const
 {
     const QPointF scenePosition = mapToScene(viewportPosition);
@@ -757,6 +777,9 @@ void MapEditor::wheelEvent(QWheelEvent *event)
     scale(targetScale / currentScale, targetScale / currentScale);
     const QPointF after = mapToScene(event->position().toPoint());
     translate(after.x() - before.x(), after.y() - before.y());
+    if (m_zoomCallback) {
+        m_zoomCallback(targetScale * 100.0);
+    }
     event->accept();
 }
 

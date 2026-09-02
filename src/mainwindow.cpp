@@ -12,14 +12,18 @@
 #include <QIcon>
 #include <QKeySequence>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
 #include <QStatusBar>
+#include <QSignalBlocker>
 #include <QToolBar>
 #include <QTreeWidget>
+
+#include <cmath>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -135,6 +139,29 @@ MainWindow::MainWindow(QWidget *parent)
             });
 
     statusBar()->addPermanentWidget(gridSizeCombo);
+
+    auto *zoomCombo = new QComboBox(this);
+    zoomCombo->setToolTip("Zoom level");
+    zoomCombo->setEditable(true);
+    zoomCombo->lineEdit()->setReadOnly(true);
+    zoomCombo->setFixedWidth(76);
+    for (int percent : {10, 25, 50, 75, 100, 200, 400, 800}) {
+        zoomCombo->addItem(QString::number(percent) + "%", percent);
+    }
+    connect(zoomCombo, &QComboBox::textActivated, editor,
+            [editor](const QString &text) {
+                QString value = text;
+                value.remove('%');
+                editor->setZoomPercent(value.toDouble());
+            });
+    editor->setZoomCallback([zoomCombo](qreal percent) {
+        const QSignalBlocker blocker(zoomCombo);
+        const QString value = qFuzzyCompare(percent, std::round(percent))
+            ? QString::number(std::round(percent), 'f', 0)
+            : QString::number(percent, 'f', 1);
+        zoomCombo->setEditText(value + "%");
+    });
+    statusBar()->addPermanentWidget(zoomCombo);
     statusBar()->addPermanentWidget(modeLabel);
 
     const auto addModeAction = [modeMenu, modeGroup, modeLabel, editor](
