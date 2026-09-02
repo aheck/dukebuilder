@@ -298,6 +298,64 @@ private:
     QImage m_texture;
     bool m_hovered = false;
 };
+
+class PlayerStartItem final : public QGraphicsPathItem
+{
+public:
+    PlayerStartItem()
+    {
+        QPainterPath arrow;
+        arrow.moveTo(0.0, -13.0);
+        arrow.lineTo(8.0, -3.0);
+        arrow.lineTo(3.0, -3.0);
+        arrow.lineTo(3.0, 10.0);
+        arrow.lineTo(-3.0, 10.0);
+        arrow.lineTo(-3.0, -3.0);
+        arrow.lineTo(-8.0, -3.0);
+        arrow.closeSubpath();
+        setPath(arrow);
+        setFlag(QGraphicsItem::ItemIgnoresTransformations);
+        setInteractive(false);
+    }
+
+    void setInteractive(bool interactive)
+    {
+        setFlag(QGraphicsItem::ItemIsSelectable, interactive);
+        setAcceptHoverEvents(interactive);
+        setCursor(interactive ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        if (!interactive) {
+            m_hovered = false;
+            setSelected(false);
+            update();
+        }
+    }
+
+protected:
+    void hoverEnterEvent(QGraphicsSceneHoverEvent *event) override
+    {
+        m_hovered = true;
+        update();
+        QGraphicsPathItem::hoverEnterEvent(event);
+    }
+
+    void hoverLeaveEvent(QGraphicsSceneHoverEvent *event) override
+    {
+        m_hovered = false;
+        update();
+        QGraphicsPathItem::hoverLeaveEvent(event);
+    }
+
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
+    {
+        painter->setPen(cosmeticPen(QColor(24, 26, 31), 1.5));
+        painter->setBrush(isSelected() ? selectedColor
+                                       : (m_hovered ? hoverColor : QColor(88, 220, 118)));
+        painter->drawPath(path());
+    }
+
+private:
+    bool m_hovered = false;
+};
 }
 
 MapScene::MapScene(QObject *parent)
@@ -441,6 +499,8 @@ void MapEditor::setMode(Mode mode)
             sector->setInteractive(mode == Mode::Sectors);
         } else if (auto *sprite = dynamic_cast<SpriteItem *>(item)) {
             sprite->setInteractive(mode == Mode::Sprites);
+        } else if (auto *playerStart = dynamic_cast<PlayerStartItem *>(item)) {
+            playerStart->setInteractive(mode == Mode::Sprites);
         }
     }
 }
@@ -531,12 +591,16 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
 
     if (event->button() == Qt::RightButton && m_mode == Mode::Sprites) {
         SpriteItem *sprite = nullptr;
+        PlayerStartItem *playerStart = nullptr;
         for (QGraphicsItem *item : items(event->position().toPoint())) {
             if ((sprite = dynamic_cast<SpriteItem *>(item))) {
                 break;
             }
+            if ((playerStart = dynamic_cast<PlayerStartItem *>(item))) {
+                break;
+            }
         }
-        if (!sprite) {
+        if (!sprite && !playerStart) {
             const QPointF scenePosition = mapToScene(event->position().toPoint());
             if (!m_scene->sceneRect().contains(scenePosition)) {
                 reportStatus("Outside Build map coordinate range");
@@ -551,23 +615,33 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
             return;
         }
 
-        if (!sprite->isSelected()) {
+        QGraphicsItem *clickedItem = sprite
+            ? static_cast<QGraphicsItem *>(sprite)
+            : static_cast<QGraphicsItem *>(playerStart);
+        if (!clickedItem->isSelected()) {
             m_scene->clearSelection();
-            sprite->setSelected(true);
+            clickedItem->setSelected(true);
         }
         m_draggingSprites = true;
         m_spriteDragMoved = false;
         m_spriteRightPressPosition = event->position().toPoint();
         m_vertexDragStart = mapToScene(m_spriteRightPressPosition);
-        m_clickedSprite = static_cast<MapDocument::SpriteId>(
-            sprite->data(spriteIdRole).toULongLong());
+        m_clickedPlayerStart = playerStart != nullptr;
+        if (sprite) {
+            m_clickedSprite = static_cast<MapDocument::SpriteId>(
+                sprite->data(spriteIdRole).toULongLong());
+        }
         m_draggedSprites.clear();
+        m_draggingPlayerStart = false;
         for (QGraphicsItem *selectedItem : m_scene->selectedItems()) {
             if (auto *selectedSprite = dynamic_cast<SpriteItem *>(selectedItem)) {
                 const auto spriteId = static_cast<MapDocument::SpriteId>(
                     selectedSprite->data(spriteIdRole).toULongLong());
                 m_draggedSprites.emplace_back(
                     spriteId, m_document.sprites()[spriteId].position);
+            } else if (dynamic_cast<PlayerStartItem *>(selectedItem)) {
+                m_draggingPlayerStart = true;
+                m_draggedPlayerStart = m_document.playerStart().position;
             }
         }
         event->accept();
@@ -670,17 +744,25 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
     if (event->button() == Qt::LeftButton) {
         if (m_mode == Mode::Sprites) {
             SpriteItem *sprite = nullptr;
+            PlayerStartItem *playerStart = nullptr;
             for (QGraphicsItem *item : items(event->position().toPoint())) {
                 if ((sprite = dynamic_cast<SpriteItem *>(item))) {
                     break;
                 }
+                if ((playerStart = dynamic_cast<PlayerStartItem *>(item))) {
+                    break;
+                }
             }
             const bool extendSelection = event->modifiers().testFlag(Qt::ShiftModifier);
-            if (sprite) {
+            QGraphicsItem *clickedItem = sprite
+                ? static_cast<QGraphicsItem *>(sprite)
+                : static_cast<QGraphicsItem *>(playerStart);
+            if (clickedItem) {
                 if (!extendSelection) {
                     m_scene->clearSelection();
                 }
-                sprite->setSelected(extendSelection ? !sprite->isSelected() : true);
+                clickedItem->setSelected(
+                    extendSelection ? !clickedItem->isSelected() : true);
                 event->accept();
                 return;
             }
@@ -809,6 +891,12 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
             minimumY = std::min(minimumY, originalPosition.y());
             maximumY = std::max(maximumY, originalPosition.y());
         }
+        if (m_draggingPlayerStart) {
+            minimumX = std::min(minimumX, m_draggedPlayerStart.x());
+            maximumX = std::max(maximumX, m_draggedPlayerStart.x());
+            minimumY = std::min(minimumY, m_draggedPlayerStart.y());
+            maximumY = std::max(maximumY, m_draggedPlayerStart.y());
+        }
         const QRectF bounds = m_scene->sceneRect();
         delta.setX(std::clamp(delta.x(), bounds.left() - minimumX,
                               bounds.right() - maximumX));
@@ -821,8 +909,15 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
             positions.emplace_back(spriteId, originalPosition + delta);
         }
         m_document.setSpritePositions(positions);
+        if (m_draggingPlayerStart) {
+            m_document.setPlayerStartPosition(m_draggedPlayerStart + delta);
+        }
         rebuildScene();
         for (QGraphicsItem *item : m_scene->items()) {
+            if (auto *playerStart = dynamic_cast<PlayerStartItem *>(item)) {
+                playerStart->setSelected(m_draggingPlayerStart);
+                continue;
+            }
             auto *sprite = dynamic_cast<SpriteItem *>(item);
             if (!sprite) {
                 continue;
@@ -938,11 +1033,13 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
 void MapEditor::mouseReleaseEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::RightButton && m_draggingSprites) {
-        const bool chooseTexture = !m_spriteDragMoved;
+        const bool chooseTexture = !m_spriteDragMoved && !m_clickedPlayerStart;
         const MapDocument::SpriteId spriteId = m_clickedSprite;
         m_draggingSprites = false;
         m_spriteDragMoved = false;
         m_draggedSprites.clear();
+        m_draggingPlayerStart = false;
+        m_clickedPlayerStart = false;
         setCursor(Qt::CrossCursor);
 
         if (chooseTexture && spriteId < m_document.sprites().size()
@@ -1140,6 +1237,12 @@ void MapEditor::rebuildScene()
         item->setPos(sprite.position);
         item->setZValue(12.0);
     }
+
+    auto *playerStart = new PlayerStartItem();
+    playerStart->setInteractive(m_mode == Mode::Sprites);
+    m_scene->addItem(playerStart);
+    playerStart->setPos(m_document.playerStart().position);
+    playerStart->setZValue(13.0);
 }
 
 void MapEditor::reportStatus(const QString &message) const

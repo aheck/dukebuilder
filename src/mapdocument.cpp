@@ -15,6 +15,7 @@ void MapDocument::clear()
     m_walls.clear();
     m_sectors.clear();
     m_sprites.clear();
+    m_playerStart.position = QPointF(0.0, 0.0);
 }
 
 MapDocument::VertexId MapDocument::findOrAddVertex(const QPointF &position)
@@ -111,6 +112,11 @@ void MapDocument::setSpriteTexture(SpriteId spriteId, int texture)
     if (spriteId < m_sprites.size()) {
         m_sprites[spriteId].texture = texture;
     }
+}
+
+void MapDocument::setPlayerStartPosition(const QPointF &position)
+{
+    m_playerStart.position = position;
 }
 
 void MapDocument::rebuildSectors()

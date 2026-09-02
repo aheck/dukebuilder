@@ -90,6 +90,7 @@ private:
     std::vector<std::pair<MapDocument::SpriteId, QPointF>> m_draggedSprites;
     QMap<int, QImage> m_spriteTextures;
     QPointF m_vertexDragStart;
+    QPointF m_draggedPlayerStart;
     QPoint m_lastPanPosition;
     QPoint m_spriteRightPressPosition;
     MapDocument::SpriteId m_clickedSprite = 0;
@@ -97,6 +98,8 @@ private:
     bool m_draggingVertices = false;
     bool m_draggingSprites = false;
     bool m_spriteDragMoved = false;
+    bool m_draggingPlayerStart = false;
+    bool m_clickedPlayerStart = false;
     Mode m_mode = Mode::Draw;
     std::function<void(const QString &)> m_statusCallback;
     std::function<void(qreal)> m_zoomCallback;

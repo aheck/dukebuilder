@@ -52,6 +52,8 @@ Run it:
 - **Sprites mode:** right-click empty space to add a sprite; left-click or
   rubber-band to select; right-drag to move; right-click a sprite to choose its
   texture.
+- **Player start:** the permanent arrow can be selected and right-dragged only
+  in Sprites mode; it has no selectable texture.
 - **Alt:** temporarily disable snapping while placing or previewing a point.
 
 Drawing snaps to existing vertices before snapping to the grid. Sector fills are
