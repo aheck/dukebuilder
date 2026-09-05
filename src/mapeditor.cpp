@@ -437,7 +437,7 @@ MapEditor::MapEditor(QWidget *parent)
     setScene(m_scene);
     connect(m_scene, &QGraphicsScene::selectionChanged, this, [this] {
         if (m_mode != Mode::Sprites) {
-            updateSpriteProperties();
+            updateProperties();
             return;
         }
 
@@ -453,7 +453,7 @@ MapEditor::MapEditor(QWidget *parent)
         if (selectedPlayerStart && ordinarySpriteSelected) {
             selectedPlayerStart->setSelected(false);
         }
-        updateSpriteProperties();
+        updateProperties();
     });
     setBackgroundBrush(Qt::black);
     setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
@@ -493,24 +493,54 @@ void MapEditor::setSpriteTextureResolver(std::function<QImage(int)> resolver)
     m_spriteTextureResolver = std::move(resolver);
 }
 
-void MapEditor::setSpritePropertiesCallback(
-    std::function<void(std::optional<SpriteProperties>)> callback)
+void MapEditor::setPropertiesCallback(
+    std::function<void(std::optional<SelectionProperties>)> callback)
 {
-    m_spritePropertiesCallback = std::move(callback);
-    updateSpriteProperties();
+    m_propertiesCallback = std::move(callback);
+    updateProperties();
 }
 
-void MapEditor::setSelectedSpriteProperty(SpriteProperty property, qreal value)
+void MapEditor::setSelectedProperty(Property property, qreal value)
 {
-    if (m_mode != Mode::Sprites || m_scene->selectedItems().size() != 1) {
+    if ((m_mode != Mode::Sprites && m_mode != Mode::Sectors)
+        || m_scene->selectedItems().size() != 1) {
         return;
     }
     if (!std::isfinite(value)) {
-        updateSpriteProperties();
+        updateProperties();
         return;
     }
 
     QGraphicsItem *selectedItem = m_scene->selectedItems().front();
+    if (m_mode == Mode::Sectors) {
+        if (!dynamic_cast<SectorItem *>(selectedItem)) {
+            return;
+        }
+        const auto sectorId = static_cast<std::size_t>(
+            selectedItem->data(sectorIdRole).toULongLong());
+        switch (property) {
+        case Property::FloorZ:
+            m_document.setSectorFloorZ(sectorId, value);
+            break;
+        case Property::CeilingZ:
+            m_document.setSectorCeilingZ(sectorId, value);
+            break;
+        case Property::FloorTexture:
+        case Property::CeilingTexture: {
+            const int texture = static_cast<int>(std::round(std::clamp(value, 0.0, 32767.0)));
+            if (property == Property::FloorTexture) {
+                m_document.setSectorFloorTexture(sectorId, texture);
+            } else {
+                m_document.setSectorCeilingTexture(sectorId, texture);
+            }
+            break;
+        }
+        default:
+            return;
+        }
+        updateProperties();
+        return;
+    }
     const bool isPlayerStart = dynamic_cast<PlayerStartItem *>(selectedItem) != nullptr;
     auto *spriteItem = dynamic_cast<SpriteItem *>(selectedItem);
     if (!isPlayerStart && !spriteItem) {
@@ -532,54 +562,63 @@ void MapEditor::setSelectedSpriteProperty(SpriteProperty property, qreal value)
     if (isPlayerStart) {
         const MapDocument::PlayerStart &playerStart = m_document.playerStart();
         switch (property) {
-        case SpriteProperty::X:
+        case Property::X:
             m_document.setPlayerStartPosition(
                 {boundedCoordinate(value), playerStart.position.y()});
             break;
-        case SpriteProperty::Y:
+        case Property::Y:
             m_document.setPlayerStartPosition(
                 {playerStart.position.x(), boundedCoordinate(value)});
             break;
-        case SpriteProperty::Z:
+        case Property::Z:
             m_document.setPlayerStartZ(value);
             break;
-        case SpriteProperty::Angle:
+        case Property::Angle:
             m_document.setPlayerStartAngle(std::clamp(value, 0.0, 360.0));
             break;
-        case SpriteProperty::Texture:
-        case SpriteProperty::Hitag:
-        case SpriteProperty::Lotag:
+        case Property::Texture:
+        case Property::Hitag:
+        case Property::Lotag:
+        case Property::FloorZ:
+        case Property::CeilingZ:
+        case Property::FloorTexture:
+        case Property::CeilingTexture:
             return;
         }
     } else {
         const MapDocument::Sprite &sprite = m_document.sprites()[spriteId];
         switch (property) {
-        case SpriteProperty::X:
+        case Property::FloorZ:
+        case Property::CeilingZ:
+        case Property::FloorTexture:
+        case Property::CeilingTexture:
+            return;
+        case Property::X:
             m_document.setSpritePositions(
                 {{spriteId, {boundedCoordinate(value), sprite.position.y()}}});
             break;
-        case SpriteProperty::Y:
+        case Property::Y:
             m_document.setSpritePositions(
                 {{spriteId, {sprite.position.x(), boundedCoordinate(value)}}});
             break;
-        case SpriteProperty::Z:
+        case Property::Z:
             m_document.setSpriteZ(spriteId, value);
             break;
-        case SpriteProperty::Angle:
+        case Property::Angle:
             m_document.setSpriteAngle(spriteId, std::clamp(value, 0.0, 360.0));
             break;
-        case SpriteProperty::Hitag:
-        case SpriteProperty::Lotag: {
+        case Property::Hitag:
+        case Property::Lotag: {
             const int tag = static_cast<int>(std::round(std::clamp(
                 value, -32768.0, 32767.0)));
-            if (property == SpriteProperty::Hitag) {
+            if (property == Property::Hitag) {
                 m_document.setSpriteHitag(spriteId, tag);
             } else {
                 m_document.setSpriteLotag(spriteId, tag);
             }
             break;
         }
-        case SpriteProperty::Texture: {
+        case Property::Texture: {
             const int texture = static_cast<int>(std::clamp(
                 std::llround(value), 0LL,
                 static_cast<long long>(std::numeric_limits<short>::max())));
@@ -641,7 +680,7 @@ void MapEditor::setMode(Mode mode)
             playerStart->setInteractive(mode == Mode::Sprites);
         }
     }
-    updateSpriteProperties();
+    updateProperties();
 }
 
 void MapEditor::setGridSize(qreal size)
@@ -1400,20 +1439,37 @@ void MapEditor::rebuildScene()
     playerStart->setZValue(13.0);
 }
 
-void MapEditor::updateSpriteProperties() const
+void MapEditor::updateProperties() const
 {
-    if (!m_spritePropertiesCallback) {
+    if (!m_propertiesCallback) {
         return;
     }
-    if (m_mode != Mode::Sprites || m_scene->selectedItems().size() != 1) {
-        m_spritePropertiesCallback(std::nullopt);
+    if ((m_mode != Mode::Sprites && m_mode != Mode::Sectors)
+        || m_scene->selectedItems().size() != 1) {
+        m_propertiesCallback(std::nullopt);
         return;
     }
 
     QGraphicsItem *item = m_scene->selectedItems().front();
+    if (m_mode == Mode::Sectors) {
+        if (dynamic_cast<SectorItem *>(item)) {
+            const auto sectorId = static_cast<std::size_t>(
+                item->data(sectorIdRole).toULongLong());
+            if (sectorId < m_document.sectors().size()) {
+                const auto &sector = m_document.sectors()[sectorId];
+                SelectionProperties properties{};
+                properties.sector = SectorProperties{
+                    sector.floorz, sector.ceilingz, sector.floorTexture, sector.ceilingTexture};
+                m_propertiesCallback(properties);
+                return;
+            }
+        }
+        m_propertiesCallback(std::nullopt);
+        return;
+    }
     if (dynamic_cast<PlayerStartItem *>(item)) {
         const MapDocument::PlayerStart &playerStart = m_document.playerStart();
-        m_spritePropertiesCallback(SpriteProperties{
+        m_propertiesCallback(SelectionProperties{
             playerStart.position.x(), playerStart.position.y(), playerStart.z,
             playerStart.angle, std::nullopt, std::nullopt, std::nullopt});
         return;
@@ -1425,13 +1481,13 @@ void MapEditor::updateSpriteProperties() const
             spriteItem->data(spriteIdRole).toULongLong());
         if (spriteId < m_document.sprites().size()) {
             const MapDocument::Sprite &sprite = m_document.sprites()[spriteId];
-            m_spritePropertiesCallback(SpriteProperties{
+            m_propertiesCallback(SelectionProperties{
                 sprite.position.x(), sprite.position.y(), sprite.z, sprite.angle,
                 sprite.texture, sprite.hitag, sprite.lotag});
             return;
         }
     }
-    m_spritePropertiesCallback(std::nullopt);
+    m_propertiesCallback(std::nullopt);
 }
 
 void MapEditor::reportStatus(const QString &message) const

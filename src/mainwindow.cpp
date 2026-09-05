@@ -112,9 +112,9 @@ public:
         if (index.column() != 1) {
             return nullptr;
         }
-        const auto property = static_cast<MapEditor::SpriteProperty>(
+        const auto property = static_cast<MapEditor::Property>(
             index.siblingAtColumn(0).data(Qt::UserRole).toInt());
-        if (property == MapEditor::SpriteProperty::Lotag) {
+        if (property == MapEditor::Property::Lotag) {
             auto *editor = new QComboBox(parent);
             editor->setEditable(true);
             editor->setInsertPolicy(QComboBox::NoInsert);
@@ -137,7 +137,9 @@ public:
                     editor, commit, Qt::QueuedConnection);
             return editor;
         }
-        if (property != MapEditor::SpriteProperty::Texture) {
+        if (property != MapEditor::Property::Texture
+            && property != MapEditor::Property::FloorTexture
+            && property != MapEditor::Property::CeilingTexture) {
             return QStyledItemDelegate::createEditor(parent, option, index);
         }
 
@@ -250,20 +252,20 @@ MainWindow::MainWindow(QWidget *parent)
                 bool valid = false;
                 const qreal value = item->text(1).toDouble(&valid);
                 if (!valid) {
-                    editor->setSelectedSpriteProperty(
-                        static_cast<MapEditor::SpriteProperty>(
+                    editor->setSelectedProperty(
+                        static_cast<MapEditor::Property>(
                             item->data(0, Qt::UserRole).toInt()),
                         std::numeric_limits<qreal>::quiet_NaN());
                     return;
                 }
-                editor->setSelectedSpriteProperty(
-                    static_cast<MapEditor::SpriteProperty>(
+                editor->setSelectedProperty(
+                    static_cast<MapEditor::Property>(
                         item->data(0, Qt::UserRole).toInt()),
                     value);
             });
 
-    editor->setSpritePropertiesCallback(
-        [propertiesControl, propertyDelegate](std::optional<MapEditor::SpriteProperties> properties) {
+    editor->setPropertiesCallback(
+        [propertiesControl, propertyDelegate](std::optional<MapEditor::SelectionProperties> properties) {
             const QSignalBlocker blocker(propertiesControl);
             // Clearing the rows can finish an edit while its widget is being retired.
             const QSignalBlocker delegateBlocker(propertyDelegate);
@@ -278,31 +280,43 @@ MainWindow::MainWindow(QWidget *parent)
             };
             const auto addProperty = [propertiesControl](
                                          const QString &name, const QString &value,
-                                         MapEditor::SpriteProperty property) {
+                                         MapEditor::Property property) {
                 auto *item = new QTreeWidgetItem(propertiesControl, {name, value});
                 item->setFlags(item->flags() | Qt::ItemIsEditable);
                 item->setData(0, Qt::UserRole, static_cast<int>(property));
             };
-            addProperty("X", number(properties->x), MapEditor::SpriteProperty::X);
-            addProperty("Y", number(properties->y), MapEditor::SpriteProperty::Y);
-            addProperty("Z", number(properties->z), MapEditor::SpriteProperty::Z);
-            addProperty("Angle", number(std::clamp(properties->angle, 0.0, 360.0)),
-                        MapEditor::SpriteProperty::Angle);
-            if (properties->texture) {
-                addProperty("Texture", QString::number(*properties->texture),
-                            MapEditor::SpriteProperty::Texture);
+            const auto addTextureProperty = [&](const QString &name, int texture,
+                                                MapEditor::Property property) {
+                addProperty(name, QString::number(texture), property);
                 propertiesControl->openPersistentEditor(
                     propertiesControl->topLevelItem(
-                        propertiesControl->topLevelItemCount() - 1),
-                    1);
+                        propertiesControl->topLevelItemCount() - 1), 1);
+            };
+            if (properties->sector) {
+                const auto &sector = *properties->sector;
+                addProperty("Floor Z", number(sector.floorz), MapEditor::Property::FloorZ);
+                addProperty("Ceiling Z", number(sector.ceilingz), MapEditor::Property::CeilingZ);
+                addTextureProperty("Floor texture", sector.floorTexture,
+                                   MapEditor::Property::FloorTexture);
+                addTextureProperty("Ceiling texture", sector.ceilingTexture,
+                                   MapEditor::Property::CeilingTexture);
+                return;
+            }
+            addProperty("X", number(properties->x), MapEditor::Property::X);
+            addProperty("Y", number(properties->y), MapEditor::Property::Y);
+            addProperty("Z", number(properties->z), MapEditor::Property::Z);
+            addProperty("Angle", number(std::clamp(properties->angle, 0.0, 360.0)),
+                        MapEditor::Property::Angle);
+            if (properties->texture) {
+                addTextureProperty("Texture", *properties->texture, MapEditor::Property::Texture);
             }
             if (properties->hitag) {
                 addProperty("Hitag", QString::number(*properties->hitag),
-                            MapEditor::SpriteProperty::Hitag);
+                            MapEditor::Property::Hitag);
             }
             if (properties->lotag) {
                 addProperty("Lotag", QString::number(*properties->lotag),
-                            MapEditor::SpriteProperty::Lotag);
+                            MapEditor::Property::Lotag);
                 propertiesControl->openPersistentEditor(
                     propertiesControl->topLevelItem(
                         propertiesControl->topLevelItemCount() - 1),

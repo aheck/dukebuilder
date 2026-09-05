@@ -92,6 +92,34 @@ void MapDocument::setVertexPositions(
     rebuildSectors();
 }
 
+void MapDocument::setSectorFloorZ(std::size_t sectorId, qreal z)
+{
+    if (sectorId < m_sectors.size()) {
+        m_sectors[sectorId].floorz = z;
+    }
+}
+
+void MapDocument::setSectorCeilingZ(std::size_t sectorId, qreal z)
+{
+    if (sectorId < m_sectors.size()) {
+        m_sectors[sectorId].ceilingz = z;
+    }
+}
+
+void MapDocument::setSectorFloorTexture(std::size_t sectorId, int texture)
+{
+    if (sectorId < m_sectors.size()) {
+        m_sectors[sectorId].floorTexture = texture;
+    }
+}
+
+void MapDocument::setSectorCeilingTexture(std::size_t sectorId, int texture)
+{
+    if (sectorId < m_sectors.size()) {
+        m_sectors[sectorId].ceilingTexture = texture;
+    }
+}
+
 MapDocument::SpriteId MapDocument::addSprite(const QPointF &position)
 {
     m_sprites.push_back({position, 0.0, 0.0, -1});
@@ -179,6 +207,7 @@ void MapDocument::rebuildSectors()
         bool reversed;
     };
 
+    const auto previousSectors = std::move(m_sectors);
     m_sectors.clear();
     std::vector<std::vector<OutgoingEdge>> outgoing(m_vertices.size());
     for (WallId wallId = 0; wallId < m_walls.size(); ++wallId) {
@@ -245,6 +274,20 @@ void MapDocument::rebuildSectors()
 
                 if (wallId * 2 + (reversed ? 1 : 0) == initialHalfEdge) {
                     if (sector.vertices.size() >= 3 && twiceArea > coordinateEpsilon) {
+                        // Geometry edits rebuild faces; retain properties of the same boundary.
+                        const auto previous = std::find_if(
+                            previousSectors.begin(), previousSectors.end(),
+                            [&sector](const Sector &candidate) {
+                                return std::is_permutation(
+                                    sector.walls.begin(), sector.walls.end(),
+                                    candidate.walls.begin(), candidate.walls.end());
+                            });
+                        if (previous != previousSectors.end()) {
+                            sector.floorz = previous->floorz;
+                            sector.ceilingz = previous->ceilingz;
+                            sector.floorTexture = previous->floorTexture;
+                            sector.ceilingTexture = previous->ceilingTexture;
+                        }
                         m_sectors.push_back(std::move(sector));
                     }
                     break;

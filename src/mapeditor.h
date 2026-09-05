@@ -52,7 +52,14 @@ public:
         QImage image;
     };
 
-    struct SpriteProperties {
+    struct SectorProperties {
+        qreal floorz;
+        qreal ceilingz;
+        int floorTexture;
+        int ceilingTexture;
+    };
+
+    struct SelectionProperties {
         qreal x;
         qreal y;
         qreal z;
@@ -60,9 +67,10 @@ public:
         std::optional<int> texture;
         std::optional<int> hitag;
         std::optional<int> lotag;
+        std::optional<SectorProperties> sector = std::nullopt;
     };
 
-    enum class SpriteProperty {
+    enum class Property {
         X,
         Y,
         Z,
@@ -70,6 +78,10 @@ public:
         Texture,
         Hitag,
         Lotag,
+        FloorZ,
+        CeilingZ,
+        FloorTexture,
+        CeilingTexture,
     };
 
     void newMap();
@@ -82,9 +94,9 @@ public:
     void setTextureSelector(std::function<std::optional<SpriteTexture>(
                                 std::optional<int>)> selector);
     void setSpriteTextureResolver(std::function<QImage(int)> resolver);
-    void setSpritePropertiesCallback(
-        std::function<void(std::optional<SpriteProperties>)> callback);
-    void setSelectedSpriteProperty(SpriteProperty property, qreal value);
+    void setPropertiesCallback(
+        std::function<void(std::optional<SelectionProperties>)> callback);
+    void setSelectedProperty(Property property, qreal value);
     void setStatusCallback(std::function<void(const QString &)> callback);
 
 protected:
@@ -102,7 +114,7 @@ private:
     void cancelDrawing();
     void updatePreview(const QPointF &cursorPosition);
     void rebuildScene();
-    void updateSpriteProperties() const;
+    void updateProperties() const;
     void reportStatus(const QString &message) const;
 
     MapDocument m_document;
@@ -130,5 +142,5 @@ private:
     std::function<void(qreal)> m_zoomCallback;
     std::function<std::optional<SpriteTexture>(std::optional<int>)> m_textureSelector;
     std::function<QImage(int)> m_spriteTextureResolver;
-    std::function<void(std::optional<SpriteProperties>)> m_spritePropertiesCallback;
+    std::function<void(std::optional<SelectionProperties>)> m_propertiesCallback;
 };

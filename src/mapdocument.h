@@ -25,6 +25,10 @@ public:
     struct Sector {
         std::vector<WallId> walls;
         std::vector<VertexId> vertices;
+        qreal floorz = 0.0;
+        qreal ceilingz = -8192.0;
+        int floorTexture = 0;
+        int ceilingTexture = 0;
     };
 
     struct Sprite {
@@ -45,6 +49,10 @@ public:
     void clear();
     [[nodiscard]] bool addPolyline(const std::vector<QPointF> &points, bool closed);
     void setVertexPositions(const std::vector<std::pair<VertexId, QPointF>> &positions);
+    void setSectorFloorZ(std::size_t sectorId, qreal z);
+    void setSectorCeilingZ(std::size_t sectorId, qreal z);
+    void setSectorFloorTexture(std::size_t sectorId, int texture);
+    void setSectorCeilingTexture(std::size_t sectorId, int texture);
     SpriteId addSprite(const QPointF &position);
     void removeSprites(const std::vector<SpriteId> &spriteIds);
     void setSpritePositions(const std::vector<std::pair<SpriteId, QPointF>> &positions);
