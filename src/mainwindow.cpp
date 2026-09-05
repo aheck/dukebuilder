@@ -148,13 +148,24 @@ public:
         const auto property = static_cast<MapEditor::Property>(
             index.siblingAtColumn(0).data(Qt::UserRole).toInt());
         if (property == MapEditor::Property::Lotag
-            || property == MapEditor::Property::SectorLotag) {
+            || property == MapEditor::Property::SectorLotag
+            || property == MapEditor::Property::WallLotag) {
             auto *editor = new QComboBox(parent);
             editor->setEditable(true);
             editor->setInsertPolicy(QComboBox::NoInsert);
             editor->setMinimumContentsLength(12);
             editor->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-            if (property == MapEditor::Property::SectorLotag) {
+            if (property == MapEditor::Property::WallLotag) {
+                // Wall tags are texture-dependent channels or sound IDs, not sector effects.
+                // https://github.com/jonof/jfduke3d/blob/master/src/sector.c
+                editor->setToolTip("Wall lotags depend on the texture: switches, doors and "
+                                   "forcefields use matching channel numbers; mirrors use sound IDs. "
+                                   "Enter -32768 to 32767, or 65535 for an exit switch.");
+                editor->addItem("0 - No tag", 0);
+                editor->addItem("1 - Channel 1 (switch / door / forcefield example)", 1);
+                editor->addItem("252 - Mirror: play sound 252 on use", 252);
+                editor->addItem("-1 (65535) - Switch / door: end level", -1);
+            } else if (property == MapEditor::Property::SectorLotag) {
                 editor->setToolTip("Duke 3D sector lotags. Enter an integer from 0 to 65535. "
                                    "For a one-time sound, enter 10000 + sound ID (10xxx).");
                 for (const auto &entry : sectorLotags) {
@@ -237,10 +248,11 @@ public:
             const QString text = lotagEditor->currentText().trimmed();
             const int entry = lotagEditor->findText(text, Qt::MatchExactly);
             bool valid = false;
-            const int tag = entry >= 0 ? lotagEditor->itemData(entry).toInt(&valid)
+            int tag = entry >= 0 ? lotagEditor->itemData(entry).toInt(&valid)
                                        : text.toInt(&valid);
             const auto property = static_cast<MapEditor::Property>(
                 index.siblingAtColumn(0).data(Qt::UserRole).toInt());
+            if (property == MapEditor::Property::WallLotag && tag == 65535) tag = -1;
             const int maximum = property == MapEditor::Property::SectorLotag ? 65535 : 32767;
             if (valid && tag >= -32768 && tag <= maximum) {
                 model->setData(index, QString::number(tag), Qt::EditRole);
@@ -370,6 +382,8 @@ MainWindow::MainWindow(QWidget *parent)
                 addProperty("Flags (cstat)", QString::number(values.cstat), MapEditor::Property::Cstat);
                 addProperty("Hitag", QString::number(values.hitag), MapEditor::Property::Hitag);
                 addProperty("Lotag", QString::number(values.lotag), MapEditor::Property::WallLotag);
+                propertiesControl->openPersistentEditor(
+                    propertiesControl->topLevelItem(propertiesControl->topLevelItemCount() - 1), 1);
                 return;
             }
             if (properties->sector) {
