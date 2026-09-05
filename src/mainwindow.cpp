@@ -18,6 +18,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPainter>
+#include <QPersistentModelIndex>
 #include <QPixmap>
 #include <QPushButton>
 #include <QStatusBar>
@@ -31,6 +32,48 @@
 #include <limits>
 
 namespace {
+// Classic Duke Nukem 3D / Atomic Edition Sector Effector lotags (tile 1).
+// https://wiki.eduke32.com/wiki/Sector_Effector_Reference_Guide
+constexpr const char *sectorEffectorLotags[] = {
+    "Sector rotation",
+    "Rotation pivot",
+    "Earthquake",
+    "Shot-triggered flicker",
+    "Flickering lights",
+    "Boss sector (unfinished)",
+    "Subway engine",
+    "Teleport",
+    "Door lighting: up",
+    "Door lighting: down",
+    "Automatic door closing",
+    "Swinging door",
+    "Switched lighting",
+    "Explosive sector",
+    "Subway carriage",
+    "Sliding door",
+    "Reactor rotation (unfinished)",
+    "Transport elevator",
+    "Incremental vertical movement",
+    "Explosion-triggered ceiling drop",
+    "Stretching bridge",
+    "Dropping floor",
+    "Teeth-door component",
+    "One-way teleport exit",
+    "Conveyor / current",
+    "Piston ceiling",
+    "Escalator (unfinished)",
+    "Demo viewpoint",
+    "Lightning generator",
+    "Waves",
+    "Shuttle train",
+    "Moving floor",
+    "Moving ceiling",
+    "Quake debris",
+    "Alternate conveyor (undocumented)",
+    "Drill (unfinished)",
+    "Projectile emitter",
+};
+
 class TexturePropertyEditor final : public QWidget
 {
 public:
@@ -71,17 +114,42 @@ public:
         }
         const auto property = static_cast<MapEditor::SpriteProperty>(
             index.siblingAtColumn(0).data(Qt::UserRole).toInt());
+        if (property == MapEditor::SpriteProperty::Lotag) {
+            auto *editor = new QComboBox(parent);
+            editor->setEditable(true);
+            editor->setInsertPolicy(QComboBox::NoInsert);
+            editor->setMinimumContentsLength(12);
+            editor->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+            editor->setToolTip("Sector Effector (tile 1) meanings. Other sprites use "
+                               "lotags differently. Enter any integer from -32768 to 32767.");
+            int tag = 0;
+            for (const char *meaning : sectorEffectorLotags) {
+                editor->addItem(QString::number(tag) + " - " + meaning, tag);
+                ++tag;
+            }
+            const auto commit = [this, editor, index = QPersistentModelIndex(index)] {
+                if (index.isValid()) {
+                    emit const_cast<PropertyValueDelegate *>(this)->commitData(editor);
+                }
+            };
+            connect(editor, &QComboBox::activated, editor, commit, Qt::QueuedConnection);
+            connect(editor->lineEdit(), &QLineEdit::editingFinished,
+                    editor, commit, Qt::QueuedConnection);
+            return editor;
+        }
         if (property != MapEditor::SpriteProperty::Texture) {
             return QStyledItemDelegate::createEditor(parent, option, index);
         }
 
         auto *editor = new TexturePropertyEditor(parent);
         connect(editor->value, &QLineEdit::editingFinished, editor,
-                [this, editor] {
-                    emit const_cast<PropertyValueDelegate *>(this)->commitData(editor);
+                [this, editor, index = QPersistentModelIndex(index)] {
+                    if (index.isValid()) {
+                        emit const_cast<PropertyValueDelegate *>(this)->commitData(editor);
+                    }
                 });
         connect(editor->browse, &QPushButton::clicked, editor,
-                [this, editor] {
+                [this, editor, index = QPersistentModelIndex(index)] {
                     bool valid = false;
                     const int currentTexture = editor->value->text().toInt(&valid);
                     if (!m_textureChooser) {
@@ -89,7 +157,7 @@ public:
                     }
                     const std::optional<int> texture = m_textureChooser(
                         valid ? std::optional<int>(currentTexture) : std::nullopt);
-                    if (texture) {
+                    if (texture && index.isValid()) {
                         editor->value->setText(QString::number(*texture));
                         emit const_cast<PropertyValueDelegate *>(this)->commitData(editor);
                     }
@@ -99,6 +167,16 @@ public:
 
     void setEditorData(QWidget *editor, const QModelIndex &index) const override
     {
+        if (auto *lotagEditor = dynamic_cast<QComboBox *>(editor)) {
+            const QSignalBlocker blocker(lotagEditor);
+            const int tag = index.data(Qt::EditRole).toInt();
+            const int entry = lotagEditor->findData(tag);
+            lotagEditor->setCurrentIndex(entry);
+            if (entry < 0) {
+                lotagEditor->setEditText(QString::number(tag));
+            }
+            return;
+        }
         if (auto *textureEditor = dynamic_cast<TexturePropertyEditor *>(editor)) {
             textureEditor->value->setText(index.data(Qt::EditRole).toString());
             return;
@@ -109,6 +187,19 @@ public:
     void setModelData(QWidget *editor, QAbstractItemModel *model,
                       const QModelIndex &index) const override
     {
+        if (auto *lotagEditor = dynamic_cast<QComboBox *>(editor)) {
+            const QString text = lotagEditor->currentText().trimmed();
+            const int entry = lotagEditor->findText(text, Qt::MatchExactly);
+            bool valid = false;
+            const int tag = entry >= 0 ? lotagEditor->itemData(entry).toInt(&valid)
+                                       : text.toInt(&valid);
+            if (valid && tag >= -32768 && tag <= 32767) {
+                model->setData(index, QString::number(tag), Qt::EditRole);
+            } else {
+                setEditorData(editor, index);
+            }
+            return;
+        }
         if (auto *textureEditor = dynamic_cast<TexturePropertyEditor *>(editor)) {
             model->setData(index, textureEditor->value->text(), Qt::EditRole);
             return;
@@ -172,8 +263,10 @@ MainWindow::MainWindow(QWidget *parent)
             });
 
     editor->setSpritePropertiesCallback(
-        [propertiesControl](std::optional<MapEditor::SpriteProperties> properties) {
+        [propertiesControl, propertyDelegate](std::optional<MapEditor::SpriteProperties> properties) {
             const QSignalBlocker blocker(propertiesControl);
+            // Clearing the rows can finish an edit while its widget is being retired.
+            const QSignalBlocker delegateBlocker(propertyDelegate);
             propertiesControl->clear();
             if (!properties) {
                 return;
@@ -210,6 +303,10 @@ MainWindow::MainWindow(QWidget *parent)
             if (properties->lotag) {
                 addProperty("Lotag", QString::number(*properties->lotag),
                             MapEditor::SpriteProperty::Lotag);
+                propertiesControl->openPersistentEditor(
+                    propertiesControl->topLevelItem(
+                        propertiesControl->topLevelItemCount() - 1),
+                    1);
             }
         });
 
