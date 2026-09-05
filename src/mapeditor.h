@@ -57,14 +57,7 @@ public:
         QImage image;
     };
 
-    struct SectorProperties {
-        qreal floorz;
-        qreal ceilingz;
-        int floorTexture;
-        int ceilingTexture;
-        int hitag;
-        int lotag;
-    };
+    using SectorProperties = MapDocument::Sector;
 
     struct WallProperties {
         MapDocument::WallSide values;
@@ -83,6 +76,7 @@ public:
         std::optional<int> lotag;
         std::optional<SectorProperties> sector = std::nullopt;
         std::optional<WallProperties> wall = std::nullopt;
+        std::optional<MapDocument::Sprite> sprite = std::nullopt;
     };
 
     enum class Property {
@@ -107,6 +101,30 @@ public:
         XPanning,
         YPanning,
         Cstat,
+        Extra,
+        FloorStat,
+        CeilingStat,
+        FloorSlope,
+        CeilingSlope,
+        FloorShade,
+        CeilingShade,
+        FloorPalette,
+        CeilingPalette,
+        FloorXPanning,
+        FloorYPanning,
+        CeilingXPanning,
+        CeilingYPanning,
+        Visibility,
+        FirstWall,
+        Clipdist,
+        XOffset,
+        YOffset,
+        Status,
+        Owner,
+        XVelocity,
+        YVelocity,
+        ZVelocity,
+        Alignment,
     };
 
     void newMap();

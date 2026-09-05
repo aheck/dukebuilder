@@ -17,6 +17,16 @@ void MapDocument::setWallSide(WallId wallId, bool reversed, const WallSide &side
     }
 }
 
+void MapDocument::setSector(SectorId sectorId, const Sector &sector)
+{
+    if (sectorId < m_sectors.size()) m_sectors[sectorId] = sector;
+}
+
+void MapDocument::setSprite(SpriteId spriteId, const Sprite &sprite)
+{
+    if (spriteId < m_sprites.size()) m_sprites[spriteId] = sprite;
+}
+
 void MapDocument::clear()
 {
     m_vertices.clear();
@@ -308,12 +318,15 @@ void MapDocument::rebuildSectors()
                                     candidate.walls.begin(), candidate.walls.end());
                             });
                         if (previous != previousSectors.end()) {
-                            sector.floorz = previous->floorz;
-                            sector.ceilingz = previous->ceilingz;
-                            sector.floorTexture = previous->floorTexture;
-                            sector.ceilingTexture = previous->ceilingTexture;
-                            sector.hitag = previous->hitag;
-                            sector.lotag = previous->lotag;
+                            auto walls = std::move(sector.walls);
+                            auto vertices = std::move(sector.vertices);
+                            const auto first = std::find(walls.begin(), walls.end(), previous->walls.front());
+                            const auto offset = first - walls.begin();
+                            std::rotate(walls.begin(), first, walls.end());
+                            std::rotate(vertices.begin(), vertices.begin() + offset, vertices.end());
+                            sector = *previous;
+                            sector.walls = std::move(walls);
+                            sector.vertices = std::move(vertices);
                         }
                         const SectorId sectorId = m_sectors.size();
                         for (std::size_t index = 0; index < sector.walls.size(); ++index) {

@@ -31,6 +31,7 @@ public:
         int cstat = 0;
         int hitag = 0;
         int lotag = 0;
+        int extra = -1;
     };
 
     struct Wall {
@@ -57,6 +58,20 @@ public:
         int ceilingTexture = 0;
         int hitag = 0;
         int lotag = 0;
+        int floorstat = 0;
+        int ceilingstat = 0;
+        int floorheinum = 0;
+        int ceilingheinum = 0;
+        int floorshade = 0;
+        int ceilingshade = 0;
+        int floorpal = 0;
+        int ceilingpal = 0;
+        int floorxpanning = 0;
+        int floorypanning = 0;
+        int ceilingxpanning = 0;
+        int ceilingypanning = 0;
+        int visibility = 0;
+        int extra = -1;
     };
 
     struct Sprite {
@@ -66,6 +81,20 @@ public:
         int texture = -1;
         int hitag = 0;
         int lotag = 0;
+        int cstat = 0;
+        int shade = 0;
+        int palette = 0;
+        int clipdist = 32;
+        int xrepeat = 64;
+        int yrepeat = 64;
+        int xoffset = 0;
+        int yoffset = 0;
+        int statnum = 0;
+        int owner = -1;
+        int xvel = 0;
+        int yvel = 0;
+        int zvel = 0;
+        int extra = -1;
     };
 
     struct PlayerStart {
@@ -75,6 +104,8 @@ public:
     };
 
     void setWallSide(WallId wallId, bool reversed, const WallSide &side);
+    void setSector(SectorId sectorId, const Sector &sector);
+    void setSprite(SpriteId spriteId, const Sprite &sprite);
     void clear();
     [[nodiscard]] bool addPolyline(const std::vector<QPointF> &points, bool closed);
     void setVertexPositions(const std::vector<std::pair<VertexId, QPointF>> &positions);

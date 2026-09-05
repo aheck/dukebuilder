@@ -604,6 +604,9 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
         return;
     }
 
+    const auto integer = [value](int low, int high) {
+        return static_cast<int>(std::round(std::clamp(value, qreal(low), qreal(high))));
+    };
     QGraphicsItem *selectedItem = m_scene->selectedItems().front();
     if (m_mode == Mode::Lines) {
         if (!dynamic_cast<WallItem *>(selectedItem)) return;
@@ -628,6 +631,7 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
         case Property::Cstat: side.cstat = integer(0, 65535); break;
         case Property::Hitag: side.hitag = integer(-32768, 32767); break;
         case Property::WallLotag: side.lotag = integer(-32768, 32767); break;
+        case Property::Extra: side.extra = integer(-32768, 32767); break;
         default: return;
         }
         m_document.setWallSide(wallId, reversed, side);
@@ -640,6 +644,40 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
         }
         const auto sectorId = static_cast<std::size_t>(
             selectedItem->data(sectorIdRole).toULongLong());
+        if (sectorId >= m_document.sectors().size()) return;
+        auto updatedSector = m_document.sectors()[sectorId];
+        bool changedAdditional = true;
+        switch (property) {
+        case Property::FloorStat: updatedSector.floorstat = integer(0, 65535); break;
+        case Property::CeilingStat: updatedSector.ceilingstat = integer(0, 65535); break;
+        case Property::FloorSlope: updatedSector.floorheinum = integer(-32768, 32767); break;
+        case Property::CeilingSlope: updatedSector.ceilingheinum = integer(-32768, 32767); break;
+        case Property::FloorShade: updatedSector.floorshade = integer(-128, 127); break;
+        case Property::CeilingShade: updatedSector.ceilingshade = integer(-128, 127); break;
+        case Property::FloorPalette: updatedSector.floorpal = integer(0, 255); break;
+        case Property::CeilingPalette: updatedSector.ceilingpal = integer(0, 255); break;
+        case Property::FloorXPanning: updatedSector.floorxpanning = integer(0, 255); break;
+        case Property::FloorYPanning: updatedSector.floorypanning = integer(0, 255); break;
+        case Property::CeilingXPanning: updatedSector.ceilingxpanning = integer(0, 255); break;
+        case Property::CeilingYPanning: updatedSector.ceilingypanning = integer(0, 255); break;
+        case Property::Visibility: updatedSector.visibility = integer(0, 255); break;
+        case Property::Extra: updatedSector.extra = integer(-32768, 32767); break;
+        case Property::FirstWall: {
+            const auto first = std::find(updatedSector.walls.begin(), updatedSector.walls.end(),
+                                         static_cast<MapDocument::WallId>(integer(0, 2147483647)));
+            if (first == updatedSector.walls.end()) return;
+            const auto offset = first - updatedSector.walls.begin();
+            std::rotate(updatedSector.walls.begin(), first, updatedSector.walls.end());
+            std::rotate(updatedSector.vertices.begin(), updatedSector.vertices.begin() + offset, updatedSector.vertices.end());
+            break;
+        }
+        default: changedAdditional = false; break;
+        }
+        if (changedAdditional) {
+            m_document.setSector(sectorId, updatedSector);
+            updateProperties();
+            return;
+        }
         switch (property) {
         case Property::Hitag:
             m_document.setSectorHitag(sectorId,
@@ -726,6 +764,33 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
         }
     } else {
         const MapDocument::Sprite &sprite = m_document.sprites()[spriteId];
+        auto updatedSprite = sprite;
+        bool changedAdditional = true;
+        switch (property) {
+        case Property::Cstat: updatedSprite.cstat = integer(0, 65535); break;
+        case Property::Shade: updatedSprite.shade = integer(-128, 127); break;
+        case Property::Palette: updatedSprite.palette = integer(0, 255); break;
+        case Property::Clipdist: updatedSprite.clipdist = integer(0, 255); break;
+        case Property::XRepeat: updatedSprite.xrepeat = integer(0, 255); break;
+        case Property::YRepeat: updatedSprite.yrepeat = integer(0, 255); break;
+        case Property::XOffset: updatedSprite.xoffset = integer(-128, 127); break;
+        case Property::YOffset: updatedSprite.yoffset = integer(-128, 127); break;
+        case Property::Status: updatedSprite.statnum = integer(0, 1023); break;
+        case Property::Owner: updatedSprite.owner = integer(-32768, 32767); break;
+        case Property::XVelocity: updatedSprite.xvel = integer(-32768, 32767); break;
+        case Property::YVelocity: updatedSprite.yvel = integer(-32768, 32767); break;
+        case Property::ZVelocity: updatedSprite.zvel = integer(-32768, 32767); break;
+        case Property::Extra: updatedSprite.extra = integer(-32768, 32767); break;
+        case Property::Alignment:
+            updatedSprite.cstat = (updatedSprite.cstat & ~48) | (integer(0, 2) << 4);
+            break;
+        default: changedAdditional = false; break;
+        }
+        if (changedAdditional) {
+            m_document.setSprite(spriteId, updatedSprite);
+            updateProperties();
+            return;
+        }
         switch (property) {
         default: return;
         case Property::SectorLotag:
@@ -1642,9 +1707,7 @@ void MapEditor::updateProperties() const
             if (sectorId < m_document.sectors().size()) {
                 const auto &sector = m_document.sectors()[sectorId];
                 SelectionProperties properties{};
-                properties.sector = SectorProperties{
-                    sector.floorz, sector.ceilingz, sector.floorTexture, sector.ceilingTexture,
-                    sector.hitag, sector.lotag};
+                properties.sector = sector;
                 m_propertiesCallback(properties);
                 return;
             }
@@ -1668,7 +1731,7 @@ void MapEditor::updateProperties() const
             const MapDocument::Sprite &sprite = m_document.sprites()[spriteId];
             m_propertiesCallback(SelectionProperties{
                 sprite.position.x(), sprite.position.y(), sprite.z, sprite.angle,
-                sprite.texture, sprite.hitag, sprite.lotag});
+                sprite.texture, sprite.hitag, sprite.lotag, std::nullopt, std::nullopt, sprite});
             return;
         }
     }

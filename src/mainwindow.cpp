@@ -297,7 +297,7 @@ MainWindow::MainWindow(QWidget *parent)
     propertiesControl->setObjectName("PropertiesControl");
     propertiesControl->setColumnCount(2);
     propertiesControl->setHeaderLabels({"Property", "Value"});
-    propertiesControl->setRootIsDecorated(false);
+    propertiesControl->setRootIsDecorated(true);
     propertiesControl->setAlternatingRowColors(true);
     auto *propertyDelegate = new PropertyValueDelegate(propertiesControl);
     propertiesControl->setItemDelegate(propertyDelegate);
@@ -357,6 +357,14 @@ MainWindow::MainWindow(QWidget *parent)
                 if (column != 1) {
                     return;
                 }
+                const int mask = item->data(0, Qt::UserRole + 1).toInt();
+                if (mask && item->parent()) {
+                    int flags = item->parent()->text(1).toInt();
+                    flags = item->checkState(1) == Qt::Checked ? flags | mask : flags & ~mask;
+                    editor->setSelectedProperty(static_cast<MapEditor::Property>(
+                        item->data(0, Qt::UserRole).toInt()), flags);
+                    return;
+                }
                 bool valid = false;
                 const qreal value = item->text(1).toDouble(&valid);
                 if (!valid) {
@@ -392,10 +400,12 @@ MainWindow::MainWindow(QWidget *parent)
             };
             const auto addProperty = [propertiesControl](
                                          const QString &name, const QString &value,
-                                         MapEditor::Property property) {
-                auto *item = new QTreeWidgetItem(propertiesControl, {name, value});
+                                         MapEditor::Property property, QTreeWidgetItem *parent = nullptr) {
+                auto *item = parent ? new QTreeWidgetItem(parent, {name, value})
+                                    : new QTreeWidgetItem(propertiesControl, {name, value});
                 item->setFlags(item->flags() | Qt::ItemIsEditable);
                 item->setData(0, Qt::UserRole, static_cast<int>(property));
+                return item;
             };
             const auto addTextureProperty = [&](const QString &name, int texture,
                                                 MapEditor::Property property) {
@@ -403,6 +413,38 @@ MainWindow::MainWindow(QWidget *parent)
                 propertiesControl->openPersistentEditor(
                     propertiesControl->topLevelItem(
                         propertiesControl->topLevelItemCount() - 1), 1);
+            };
+            const auto addFlags = [&](const QString &name, int flags, MapEditor::Property property,
+                                      std::initializer_list<std::pair<int, const char *>> meanings) {
+                auto *group = addProperty(name, QString::number(flags), property);
+                for (const auto &[mask, meaning] : meanings) {
+                    auto *flag = new QTreeWidgetItem(group, {QString::fromUtf8(meaning), ""});
+                    flag->setFlags(Qt::ItemIsEnabled | Qt::ItemIsUserCheckable);
+                    flag->setData(0, Qt::UserRole, static_cast<int>(property));
+                    flag->setData(0, Qt::UserRole + 1, mask);
+                    flag->setCheckState(1, flags & mask ? Qt::Checked : Qt::Unchecked);
+                }
+                group->setExpanded(true);
+            };
+            const auto addChoice = [&](const QString &name, int value, MapEditor::Property property,
+                                       const std::vector<std::pair<int, QString>> &choices) {
+                auto *row = new QTreeWidgetItem(propertiesControl, {name, ""});
+                auto *combo = new QComboBox(propertiesControl);
+                for (const auto &[id, label] : choices) combo->addItem(label, id);
+                combo->setCurrentIndex(combo->findData(value));
+                propertiesControl->setItemWidget(row, 1, combo);
+                const QPersistentModelIndex index = propertiesControl->model()->index(
+                    propertiesControl->topLevelItemCount() - 1, 1);
+                connect(combo, &QComboBox::activated, combo,
+                        [editor, combo, property, index](int selected) {
+                            if (index.isValid()) editor->setSelectedProperty(property, combo->itemData(selected).toInt());
+                        }, Qt::QueuedConnection);
+            };
+            const auto advancedGroup = [&]() {
+                auto *group = new QTreeWidgetItem(propertiesControl, {"Advanced", ""});
+                group->setFlags(Qt::ItemIsEnabled);
+                group->setExpanded(true);
+                return group;
             };
             if (properties->wall) {
                 const auto &wall = *properties->wall;
@@ -434,11 +476,15 @@ MainWindow::MainWindow(QWidget *parent)
                 addProperty("Y repeat", QString::number(values.yrepeat), MapEditor::Property::YRepeat);
                 addProperty("X panning", QString::number(values.xpanning), MapEditor::Property::XPanning);
                 addProperty("Y panning", QString::number(values.ypanning), MapEditor::Property::YPanning);
-                addProperty("Flags (cstat)", QString::number(values.cstat), MapEditor::Property::Cstat);
+                addFlags("Flags (cstat)", values.cstat, MapEditor::Property::Cstat,
+                         {{1,"Blocking"},{2,"Swap bottom texture"},{4,"Align to bottom"},
+                          {8,"Flip X"},{16,"Masked"},{32,"One-way"},{64,"Block hitscan"},
+                          {128,"Translucent"},{256,"Flip Y"},{512,"Reverse translucency"}});
                 addProperty("Hitag", QString::number(values.hitag), MapEditor::Property::Hitag);
                 addProperty("Lotag", QString::number(values.lotag), MapEditor::Property::WallLotag);
                 propertiesControl->openPersistentEditor(
                     propertiesControl->topLevelItem(propertiesControl->topLevelItemCount() - 1), 1);
+                addProperty("Extra", QString::number(values.extra), MapEditor::Property::Extra, advancedGroup());
                 return;
             }
             if (properties->sector) {
@@ -457,6 +503,30 @@ MainWindow::MainWindow(QWidget *parent)
                 propertiesControl->openPersistentEditor(
                     propertiesControl->topLevelItem(
                         propertiesControl->topLevelItemCount() - 1), 1);
+                addFlags("Ceiling flags", sector.ceilingstat, MapEditor::Property::CeilingStat,
+                         {{1,"Parallax sky"},{2,"Sloped"},{4,"Swap texture axes"},{8,"Double texture scale"},
+                          {16,"Flip X"},{32,"Flip Y"},{64,"Align to first wall"}});
+                addProperty("Ceiling slope", QString::number(sector.ceilingheinum), MapEditor::Property::CeilingSlope);
+                addProperty("Ceiling shade", QString::number(sector.ceilingshade), MapEditor::Property::CeilingShade);
+                addProperty("Ceiling palette", QString::number(sector.ceilingpal), MapEditor::Property::CeilingPalette);
+                addProperty("Ceiling X panning", QString::number(sector.ceilingxpanning), MapEditor::Property::CeilingXPanning);
+                addProperty("Ceiling Y panning", QString::number(sector.ceilingypanning), MapEditor::Property::CeilingYPanning);
+                addFlags("Floor flags", sector.floorstat, MapEditor::Property::FloorStat,
+                         {{1,"Parallax sky"},{2,"Sloped"},{4,"Swap texture axes"},{8,"Double texture scale"},
+                          {16,"Flip X"},{32,"Flip Y"},{64,"Align to first wall"}});
+                addProperty("Floor slope", QString::number(sector.floorheinum), MapEditor::Property::FloorSlope);
+                addProperty("Floor shade", QString::number(sector.floorshade), MapEditor::Property::FloorShade);
+                addProperty("Floor palette", QString::number(sector.floorpal), MapEditor::Property::FloorPalette);
+                addProperty("Floor X panning", QString::number(sector.floorxpanning), MapEditor::Property::FloorXPanning);
+                addProperty("Floor Y panning", QString::number(sector.floorypanning), MapEditor::Property::FloorYPanning);
+                std::vector<std::pair<int, QString>> wallChoices;
+                for (const auto wallId : sector.walls) {
+                    wallChoices.emplace_back(static_cast<int>(wallId), QString("Wall %1").arg(wallId));
+                }
+                if (!sector.walls.empty()) addChoice("First wall (slope reference)", static_cast<int>(sector.walls.front()),
+                                                     MapEditor::Property::FirstWall, wallChoices);
+                addProperty("Visibility", QString::number(sector.visibility), MapEditor::Property::Visibility);
+                addProperty("Extra", QString::number(sector.extra), MapEditor::Property::Extra, advancedGroup());
                 return;
             }
             addProperty("X", number(properties->x), MapEditor::Property::X);
@@ -478,6 +548,29 @@ MainWindow::MainWindow(QWidget *parent)
                     propertiesControl->topLevelItem(
                         propertiesControl->topLevelItemCount() - 1),
                     1);
+            }
+            if (properties->sprite) {
+                const auto &sprite = *properties->sprite;
+                addFlags("Flags (cstat)", sprite.cstat, MapEditor::Property::Cstat,
+                         {{1,"Blocking"},{2,"Translucent"},{4,"Flip X"},{8,"Flip Y"},
+                          {64,"One-sided"},{128,"Centered on Z"},{256,"Block hitscan"},
+                          {512,"Reverse translucency"},{32768,"Invisible"}});
+                addChoice("Alignment", (sprite.cstat >> 4) & 3, MapEditor::Property::Alignment,
+                          {{0,"Face camera"},{1,"Wall aligned"},{2,"Floor aligned"}});
+                addProperty("Shade", QString::number(sprite.shade), MapEditor::Property::Shade);
+                addProperty("Palette", QString::number(sprite.palette), MapEditor::Property::Palette);
+                addProperty("Collision size", QString::number(sprite.clipdist), MapEditor::Property::Clipdist);
+                addProperty("X repeat", QString::number(sprite.xrepeat), MapEditor::Property::XRepeat);
+                addProperty("Y repeat", QString::number(sprite.yrepeat), MapEditor::Property::YRepeat);
+                addProperty("X offset", QString::number(sprite.xoffset), MapEditor::Property::XOffset);
+                addProperty("Y offset", QString::number(sprite.yoffset), MapEditor::Property::YOffset);
+                auto *advanced = advancedGroup();
+                addProperty("Status", QString::number(sprite.statnum), MapEditor::Property::Status, advanced);
+                addProperty("Owner", QString::number(sprite.owner), MapEditor::Property::Owner, advanced);
+                addProperty("X velocity", QString::number(sprite.xvel), MapEditor::Property::XVelocity, advanced);
+                addProperty("Y velocity", QString::number(sprite.yvel), MapEditor::Property::YVelocity, advanced);
+                addProperty("Z velocity", QString::number(sprite.zvel), MapEditor::Property::ZVelocity, advanced);
+                addProperty("Extra", QString::number(sprite.extra), MapEditor::Property::Extra, advanced);
             }
         });
 
