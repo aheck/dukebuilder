@@ -307,14 +307,48 @@ MainWindow::MainWindow(QWidget *parent)
     auto *propertiesLayout = new QVBoxLayout(propertiesPanel);
     propertiesLayout->setContentsMargins(0, 0, 0, 0);
     propertiesLayout->addWidget(propertiesControl, 1);
-    auto *wallTexturePreview = new QLabel(propertiesPanel);
-    wallTexturePreview->setObjectName("WallTexturePreview");
-    wallTexturePreview->setFixedSize(160, 160);
-    wallTexturePreview->setAlignment(Qt::AlignCenter);
-    wallTexturePreview->setFrameShape(QFrame::StyledPanel);
-    wallTexturePreview->setStyleSheet("background-color: #181a1f; color: #e2e7f0;");
+    const auto createPreview = [](QWidget *parent, const QString &name) {
+        auto *preview = new QLabel(parent);
+        preview->setObjectName(name);
+        preview->setFixedSize(160, 160);
+        preview->setAlignment(Qt::AlignCenter);
+        preview->setFrameShape(QFrame::StyledPanel);
+        preview->setStyleSheet("background-color: #181a1f; color: #e2e7f0;");
+        return preview;
+    };
+    auto *wallTexturePreview = createPreview(propertiesPanel, "WallTexturePreview");
     wallTexturePreview->hide();
     propertiesLayout->addWidget(wallTexturePreview, 0, Qt::AlignHCenter);
+    auto *sectorTexturePreviews = new QWidget(propertiesPanel);
+    sectorTexturePreviews->setObjectName("SectorTexturePreviews");
+    auto *sectorPreviewLayout = new QHBoxLayout(sectorTexturePreviews);
+    sectorPreviewLayout->setContentsMargins(4, 0, 4, 4);
+    const auto addSectorPreview = [&](const QString &title, const QString &name) {
+        auto *column = new QVBoxLayout;
+        auto *label = new QLabel(title, sectorTexturePreviews);
+        label->setAlignment(Qt::AlignCenter);
+        column->addWidget(label);
+        auto *preview = createPreview(sectorTexturePreviews, name);
+        column->addWidget(preview, 0, Qt::AlignHCenter);
+        sectorPreviewLayout->addLayout(column);
+        return preview;
+    };
+    auto *ceilingTexturePreview = addSectorPreview("Ceiling texture", "CeilingTexturePreview");
+    auto *floorTexturePreview = addSectorPreview("Floor texture", "FloorTexturePreview");
+    sectorTexturePreviews->hide();
+    propertiesLayout->addWidget(sectorTexturePreviews);
+    const auto updateTexturePreview = [textureBrowserWindow](QLabel *preview, int tile,
+                                                            const QString &surface) {
+        preview->clear();
+        preview->setToolTip(QString("%1 texture %2").arg(surface).arg(tile));
+        const QImage image = textureBrowserWindow->textureImage(tile);
+        if (image.isNull()) {
+            preview->setText(QString("Texture %1\nUnavailable").arg(tile));
+        } else {
+            preview->setPixmap(QPixmap::fromImage(image).scaled(
+                156, 156, Qt::KeepAspectRatio, Qt::FastTransformation));
+        }
+    };
     propertiesDock->setWidget(propertiesPanel);
     addDockWidget(Qt::LeftDockWidgetArea, propertiesDock);
 
@@ -339,13 +373,15 @@ MainWindow::MainWindow(QWidget *parent)
             });
 
     editor->setPropertiesCallback(
-        [propertiesControl, propertyDelegate, editor, wallTexturePreview, textureBrowserWindow](std::optional<MapEditor::SelectionProperties> properties) {
+        [propertiesControl, propertyDelegate, editor, wallTexturePreview, sectorTexturePreviews,
+         ceilingTexturePreview, floorTexturePreview, updateTexturePreview](std::optional<MapEditor::SelectionProperties> properties) {
             const QSignalBlocker blocker(propertiesControl);
             // Clearing the rows can finish an edit while its widget is being retired.
             const QSignalBlocker delegateBlocker(propertyDelegate);
             propertiesControl->clear();
             wallTexturePreview->clear();
             wallTexturePreview->hide();
+            sectorTexturePreviews->hide();
             if (!properties) {
                 return;
             }
@@ -388,14 +424,7 @@ MainWindow::MainWindow(QWidget *parent)
                             if (sideIndex.isValid()) editor->setSelectedWallSide(sideChooser->itemData(index).toBool());
                         }, Qt::QueuedConnection);
                 const auto &values = wall.values;
-                const QImage textureImage = textureBrowserWindow->textureImage(values.texture);
-                wallTexturePreview->setToolTip(QString("Wall texture %1").arg(values.texture));
-                if (textureImage.isNull()) {
-                    wallTexturePreview->setText(QString("Texture %1\nUnavailable").arg(values.texture));
-                } else {
-                    wallTexturePreview->setPixmap(QPixmap::fromImage(textureImage).scaled(
-                        156, 156, Qt::KeepAspectRatio, Qt::FastTransformation));
-                }
+                updateTexturePreview(wallTexturePreview, values.texture, "Wall");
                 wallTexturePreview->show();
                 addTextureProperty("Texture", values.texture, MapEditor::Property::Texture);
                 addTextureProperty("Overlay texture", values.overlayTexture, MapEditor::Property::OverlayTexture);
@@ -414,6 +443,9 @@ MainWindow::MainWindow(QWidget *parent)
             }
             if (properties->sector) {
                 const auto &sector = *properties->sector;
+                updateTexturePreview(ceilingTexturePreview, sector.ceilingTexture, "Ceiling");
+                updateTexturePreview(floorTexturePreview, sector.floorTexture, "Floor");
+                sectorTexturePreviews->show();
                 addProperty("Floor Z", number(sector.floorz), MapEditor::Property::FloorZ);
                 addProperty("Ceiling Z", number(sector.ceilingz), MapEditor::Property::CeilingZ);
                 addTextureProperty("Floor texture", sector.floorTexture,
