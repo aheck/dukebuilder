@@ -32,6 +32,8 @@ public:
         qreal z = 0.0;
         qreal angle = 0.0;
         int texture = -1;
+        int hitag = 0;
+        int lotag = 0;
     };
 
     struct PlayerStart {
@@ -49,6 +51,8 @@ public:
     void setSpriteZ(SpriteId spriteId, qreal z);
     void setSpriteAngle(SpriteId spriteId, qreal angle);
     void setSpriteTexture(SpriteId spriteId, int texture);
+    void setSpriteHitag(SpriteId spriteId, int hitag);
+    void setSpriteLotag(SpriteId spriteId, int lotag);
     void setPlayerStartPosition(const QPointF &position);
     void setPlayerStartZ(qreal z);
     void setPlayerStartAngle(qreal angle);

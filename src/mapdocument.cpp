@@ -127,6 +127,20 @@ void MapDocument::setSpriteTexture(SpriteId spriteId, int texture)
     }
 }
 
+void MapDocument::setSpriteHitag(SpriteId spriteId, int hitag)
+{
+    if (spriteId < m_sprites.size()) {
+        m_sprites[spriteId].hitag = hitag;
+    }
+}
+
+void MapDocument::setSpriteLotag(SpriteId spriteId, int lotag)
+{
+    if (spriteId < m_sprites.size()) {
+        m_sprites[spriteId].lotag = lotag;
+    }
+}
+
 void MapDocument::setSpriteZ(SpriteId spriteId, qreal z)
 {
     if (spriteId < m_sprites.size()) {

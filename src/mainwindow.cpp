@@ -203,6 +203,14 @@ MainWindow::MainWindow(QWidget *parent)
                         propertiesControl->topLevelItemCount() - 1),
                     1);
             }
+            if (properties->hitag) {
+                addProperty("Hitag", QString::number(*properties->hitag),
+                            MapEditor::SpriteProperty::Hitag);
+            }
+            if (properties->lotag) {
+                addProperty("Lotag", QString::number(*properties->lotag),
+                            MapEditor::SpriteProperty::Lotag);
+            }
         });
 
     auto *editorToolBar = addToolBar("Editor");

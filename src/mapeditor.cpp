@@ -547,6 +547,8 @@ void MapEditor::setSelectedSpriteProperty(SpriteProperty property, qreal value)
             m_document.setPlayerStartAngle(std::clamp(value, 0.0, 360.0));
             break;
         case SpriteProperty::Texture:
+        case SpriteProperty::Hitag:
+        case SpriteProperty::Lotag:
             return;
         }
     } else {
@@ -566,6 +568,17 @@ void MapEditor::setSelectedSpriteProperty(SpriteProperty property, qreal value)
         case SpriteProperty::Angle:
             m_document.setSpriteAngle(spriteId, std::clamp(value, 0.0, 360.0));
             break;
+        case SpriteProperty::Hitag:
+        case SpriteProperty::Lotag: {
+            const int tag = static_cast<int>(std::round(std::clamp(
+                value, -32768.0, 32767.0)));
+            if (property == SpriteProperty::Hitag) {
+                m_document.setSpriteHitag(spriteId, tag);
+            } else {
+                m_document.setSpriteLotag(spriteId, tag);
+            }
+            break;
+        }
         case SpriteProperty::Texture: {
             const int texture = static_cast<int>(std::clamp(
                 std::llround(value), 0LL,
@@ -1402,7 +1415,7 @@ void MapEditor::updateSpriteProperties() const
         const MapDocument::PlayerStart &playerStart = m_document.playerStart();
         m_spritePropertiesCallback(SpriteProperties{
             playerStart.position.x(), playerStart.position.y(), playerStart.z,
-            playerStart.angle, std::nullopt});
+            playerStart.angle, std::nullopt, std::nullopt, std::nullopt});
         return;
     }
 
@@ -1414,7 +1427,7 @@ void MapEditor::updateSpriteProperties() const
             const MapDocument::Sprite &sprite = m_document.sprites()[spriteId];
             m_spritePropertiesCallback(SpriteProperties{
                 sprite.position.x(), sprite.position.y(), sprite.z, sprite.angle,
-                sprite.texture});
+                sprite.texture, sprite.hitag, sprite.lotag});
             return;
         }
     }

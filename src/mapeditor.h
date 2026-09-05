@@ -58,6 +58,8 @@ public:
         qreal z;
         qreal angle;
         std::optional<int> texture;
+        std::optional<int> hitag;
+        std::optional<int> lotag;
     };
 
     enum class SpriteProperty {
@@ -66,6 +68,8 @@ public:
         Z,
         Angle,
         Texture,
+        Hitag,
+        Lotag,
     };
 
     void newMap();
