@@ -26,6 +26,7 @@
 #include <QStyledItemDelegate>
 #include <QToolBar>
 #include <QTreeWidget>
+#include <QVBoxLayout>
 
 #include <algorithm>
 #include <cmath>
@@ -285,6 +286,8 @@ MainWindow::MainWindow(QWidget *parent)
     });
     setCentralWidget(editor);
 
+    auto *textureBrowserWindow = new TextureBrowserWindow(this);
+
     auto *propertiesDock = new QDockWidget("Properties", this);
     propertiesDock->setObjectName("PropertiesDock");
     propertiesDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
@@ -300,7 +303,19 @@ MainWindow::MainWindow(QWidget *parent)
     propertiesControl->setItemDelegate(propertyDelegate);
     propertiesControl->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     propertiesControl->header()->setSectionResizeMode(1, QHeaderView::Stretch);
-    propertiesDock->setWidget(propertiesControl);
+    auto *propertiesPanel = new QWidget(propertiesDock);
+    auto *propertiesLayout = new QVBoxLayout(propertiesPanel);
+    propertiesLayout->setContentsMargins(0, 0, 0, 0);
+    propertiesLayout->addWidget(propertiesControl, 1);
+    auto *wallTexturePreview = new QLabel(propertiesPanel);
+    wallTexturePreview->setObjectName("WallTexturePreview");
+    wallTexturePreview->setFixedSize(160, 160);
+    wallTexturePreview->setAlignment(Qt::AlignCenter);
+    wallTexturePreview->setFrameShape(QFrame::StyledPanel);
+    wallTexturePreview->setStyleSheet("background-color: #181a1f; color: #e2e7f0;");
+    wallTexturePreview->hide();
+    propertiesLayout->addWidget(wallTexturePreview, 0, Qt::AlignHCenter);
+    propertiesDock->setWidget(propertiesPanel);
     addDockWidget(Qt::LeftDockWidgetArea, propertiesDock);
 
     connect(propertiesControl, &QTreeWidget::itemChanged, editor,
@@ -324,11 +339,13 @@ MainWindow::MainWindow(QWidget *parent)
             });
 
     editor->setPropertiesCallback(
-        [propertiesControl, propertyDelegate, editor](std::optional<MapEditor::SelectionProperties> properties) {
+        [propertiesControl, propertyDelegate, editor, wallTexturePreview, textureBrowserWindow](std::optional<MapEditor::SelectionProperties> properties) {
             const QSignalBlocker blocker(propertiesControl);
             // Clearing the rows can finish an edit while its widget is being retired.
             const QSignalBlocker delegateBlocker(propertyDelegate);
             propertiesControl->clear();
+            wallTexturePreview->clear();
+            wallTexturePreview->hide();
             if (!properties) {
                 return;
             }
@@ -371,6 +388,15 @@ MainWindow::MainWindow(QWidget *parent)
                             if (sideIndex.isValid()) editor->setSelectedWallSide(sideChooser->itemData(index).toBool());
                         }, Qt::QueuedConnection);
                 const auto &values = wall.values;
+                const QImage textureImage = textureBrowserWindow->textureImage(values.texture);
+                wallTexturePreview->setToolTip(QString("Wall texture %1").arg(values.texture));
+                if (textureImage.isNull()) {
+                    wallTexturePreview->setText(QString("Texture %1\nUnavailable").arg(values.texture));
+                } else {
+                    wallTexturePreview->setPixmap(QPixmap::fromImage(textureImage).scaled(
+                        156, 156, Qt::KeepAspectRatio, Qt::FastTransformation));
+                }
+                wallTexturePreview->show();
                 addTextureProperty("Texture", values.texture, MapEditor::Property::Texture);
                 addTextureProperty("Overlay texture", values.overlayTexture, MapEditor::Property::OverlayTexture);
                 addProperty("Shade", QString::number(values.shade), MapEditor::Property::Shade);
@@ -559,7 +585,6 @@ MainWindow::MainWindow(QWidget *parent)
 
     auto *toolsMenu = menuBar()->addMenu("&Tools");
     auto *textureBrowserAction = toolsMenu->addAction("&Texture Browser");
-    auto *textureBrowserWindow = new TextureBrowserWindow(this);
     propertyDelegate->setTextureChooser(
         [textureBrowserWindow](std::optional<int> currentTexture) -> std::optional<int> {
             const auto selection = textureBrowserWindow->chooseTexture(currentTexture);
