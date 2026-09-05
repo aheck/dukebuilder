@@ -10,6 +10,13 @@ namespace {
 constexpr qreal coordinateEpsilon = 0.001;
 }
 
+void MapDocument::setWallSide(WallId wallId, bool reversed, const WallSide &side)
+{
+    if (wallId < m_walls.size()) {
+        (reversed ? m_walls[wallId].reverseSide : m_walls[wallId].forwardSide) = side;
+    }
+}
+
 void MapDocument::clear()
 {
     m_vertices.clear();

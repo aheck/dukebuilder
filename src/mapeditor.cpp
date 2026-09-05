@@ -71,6 +71,41 @@ public:
     }
 };
 
+class WallSideMarker final : public QGraphicsItem
+{
+public:
+    explicit WallSideMarker(QGraphicsItem *parent) : QGraphicsItem(parent)
+    {
+        setFlag(ItemIgnoresTransformations);
+        setAcceptedMouseButtons(Qt::NoButton);
+        setZValue(2.0);
+    }
+
+    QRectF boundingRect() const override { return {-14.0, -14.0, 28.0, 28.0}; }
+
+    void setDirection(const QPointF &direction)
+    {
+        m_direction = direction;
+        update();
+    }
+
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
+    {
+        if (!scene() || scene()->views().isEmpty()) return;
+        // The marker stays pixel-sized, but its direction must follow the view's
+        // reflected Y axis (and any rotation) just like the wall does.
+        const QTransform transform = parentItem()->deviceTransform(scene()->views().front()->viewportTransform());
+        const QPointF direction = transform.map(m_direction) - transform.map(QPointF());
+        const qreal length = std::hypot(direction.x(), direction.y());
+        if (length == 0.0) return;
+        painter->setPen(cosmeticPen(selectedColor, 2.0));
+        painter->drawLine(QPointF(), direction / length * 12.0);
+    }
+
+private:
+    QPointF m_direction;
+};
+
 class WallItem final : public QGraphicsLineItem
 {
 public:
@@ -78,6 +113,9 @@ public:
         : QGraphicsLineItem(line)
         , m_twoSided(twoSided)
     {
+        m_sideMarker = new WallSideMarker(this);
+        m_sideMarker->setPos(line.center());
+        m_sideMarker->hide();
         setPen(cosmeticPen(m_twoSided ? twoSidedWallColor : wallColor, 1.6));
         setToolTip(m_twoSided ? "Two-sided wall between neighboring sectors" : "One-sided wall");
         setInteractive(false);
@@ -95,6 +133,16 @@ public:
         }
     }
 
+    void setEditingSide(bool reversed)
+    {
+        const QPointF normal(-line().dy(), line().dx());
+        const QPointF tick = line().length() > 0.0
+            ? normal / line().length() * (reversed ? -12.0 : 12.0) : QPointF();
+        m_sideMarker->setDirection(tick);
+        m_sideMarker->setVisible(isSelected());
+        update();
+    }
+
     QPainterPath shape() const override
     {
         QPainterPath path;
@@ -107,6 +155,12 @@ public:
     }
 
 protected:
+    QVariant itemChange(GraphicsItemChange change, const QVariant &value) override
+    {
+        if (change == ItemSelectedHasChanged) m_sideMarker->setVisible(value.toBool());
+        return QGraphicsLineItem::itemChange(change, value);
+    }
+
     void hoverEnterEvent(QGraphicsSceneHoverEvent *event) override
     {
         m_hovered = true;
@@ -127,10 +181,12 @@ protected:
         const QColor color = isSelected() ? selectedColor : (m_hovered ? hoverColor : baseColor);
         painter->setPen(cosmeticPen(color, (m_hovered || isSelected()) ? 3.0 : 1.6));
         painter->drawLine(line());
+
     }
 
 private:
     bool m_twoSided = false;
+    WallSideMarker *m_sideMarker = nullptr;
     bool m_hovered = false;
 };
 
@@ -498,6 +554,13 @@ void MapEditor::setSpriteTextureResolver(std::function<QImage(int)> resolver)
     m_spriteTextureResolver = std::move(resolver);
 }
 
+MapEditor::~MapEditor()
+{
+    // Scene teardown changes selection after the properties dock may be gone.
+    disconnect(m_scene, nullptr, this, nullptr);
+    m_propertiesCallback = {};
+}
+
 void MapEditor::setPropertiesCallback(
     std::function<void(std::optional<SelectionProperties>)> callback)
 {
@@ -505,9 +568,18 @@ void MapEditor::setPropertiesCallback(
     updateProperties();
 }
 
+void MapEditor::setSelectedWallSide(bool reversed)
+{
+    if (m_mode != Mode::Lines || m_scene->selectedItems().size() != 1) {
+        return;
+    }
+    m_wallSideReversed = reversed;
+    updateProperties();
+}
+
 void MapEditor::setSelectedProperty(Property property, qreal value)
 {
-    if ((m_mode != Mode::Sprites && m_mode != Mode::Sectors)
+    if ((m_mode != Mode::Sprites && m_mode != Mode::Sectors && m_mode != Mode::Lines)
         || m_scene->selectedItems().size() != 1) {
         return;
     }
@@ -517,6 +589,35 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
     }
 
     QGraphicsItem *selectedItem = m_scene->selectedItems().front();
+    if (m_mode == Mode::Lines) {
+        if (!dynamic_cast<WallItem *>(selectedItem)) return;
+        const auto wallId = static_cast<MapDocument::WallId>(
+            selectedItem->data(wallIdRole).toULongLong());
+        if (wallId >= m_document.walls().size()) return;
+        const auto &wall = m_document.walls()[wallId];
+        const bool reversed = wall.isTwoSided() ? m_wallSideReversed : wall.reverseSector.has_value();
+        auto side = reversed ? wall.reverseSide : wall.forwardSide;
+        const auto integer = [value](int low, int high) {
+            return static_cast<int>(std::round(std::clamp(value, qreal(low), qreal(high))));
+        };
+        switch (property) {
+        case Property::Texture: side.texture = integer(0, 32767); break;
+        case Property::OverlayTexture: side.overlayTexture = integer(0, 32767); break;
+        case Property::Shade: side.shade = integer(-128, 127); break;
+        case Property::Palette: side.palette = integer(0, 255); break;
+        case Property::XRepeat: side.xrepeat = integer(0, 255); break;
+        case Property::YRepeat: side.yrepeat = integer(0, 255); break;
+        case Property::XPanning: side.xpanning = integer(0, 255); break;
+        case Property::YPanning: side.ypanning = integer(0, 255); break;
+        case Property::Cstat: side.cstat = integer(0, 65535); break;
+        case Property::Hitag: side.hitag = integer(-32768, 32767); break;
+        case Property::WallLotag: side.lotag = integer(-32768, 32767); break;
+        default: return;
+        }
+        m_document.setWallSide(wallId, reversed, side);
+        updateProperties();
+        return;
+    }
     if (m_mode == Mode::Sectors) {
         if (!dynamic_cast<SectorItem *>(selectedItem)) {
             return;
@@ -579,6 +680,7 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
     if (isPlayerStart) {
         const MapDocument::PlayerStart &playerStart = m_document.playerStart();
         switch (property) {
+        default: return;
         case Property::X:
             m_document.setPlayerStartPosition(
                 {boundedCoordinate(value), playerStart.position.y()});
@@ -606,6 +708,7 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
     } else {
         const MapDocument::Sprite &sprite = m_document.sprites()[spriteId];
         switch (property) {
+        default: return;
         case Property::SectorLotag:
         case Property::FloorZ:
         case Property::CeilingZ:
@@ -1463,13 +1566,30 @@ void MapEditor::updateProperties() const
     if (!m_propertiesCallback) {
         return;
     }
-    if ((m_mode != Mode::Sprites && m_mode != Mode::Sectors)
+    if ((m_mode != Mode::Sprites && m_mode != Mode::Sectors && m_mode != Mode::Lines)
         || m_scene->selectedItems().size() != 1) {
         m_propertiesCallback(std::nullopt);
         return;
     }
 
     QGraphicsItem *item = m_scene->selectedItems().front();
+    if (m_mode == Mode::Lines) {
+        if (auto *wallItem = dynamic_cast<WallItem *>(item)) {
+            const auto wallId = static_cast<MapDocument::WallId>(item->data(wallIdRole).toULongLong());
+            if (wallId < m_document.walls().size()) {
+                const auto &wall = m_document.walls()[wallId];
+                const bool reversed = wall.isTwoSided() ? m_wallSideReversed : wall.reverseSector.has_value();
+                wallItem->setEditingSide(reversed);
+                SelectionProperties properties{};
+                properties.wall = WallProperties{reversed ? wall.reverseSide : wall.forwardSide,
+                                                wall.forwardSector, wall.reverseSector, reversed};
+                m_propertiesCallback(properties);
+                return;
+            }
+        }
+        m_propertiesCallback(std::nullopt);
+        return;
+    }
     if (m_mode == Mode::Sectors) {
         if (dynamic_cast<SectorItem *>(item)) {
             const auto sectorId = static_cast<std::size_t>(

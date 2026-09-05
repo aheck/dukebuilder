@@ -19,9 +19,25 @@ public:
         QPointF position;
     };
 
+    struct WallSide {
+        int texture = 0;
+        int overlayTexture = 0;
+        int shade = 0;
+        int palette = 0;
+        int xrepeat = 8;
+        int yrepeat = 8;
+        int xpanning = 0;
+        int ypanning = 0;
+        int cstat = 0;
+        int hitag = 0;
+        int lotag = 0;
+    };
+
     struct Wall {
         VertexId start;
         VertexId end;
+        WallSide forwardSide{};
+        WallSide reverseSide{};
         // Each side belongs to the sector traversing this edge in that direction.
         std::optional<SectorId> forwardSector = std::nullopt;
         std::optional<SectorId> reverseSector = std::nullopt;
@@ -58,6 +74,7 @@ public:
         qreal angle = 0.0;
     };
 
+    void setWallSide(WallId wallId, bool reversed, const WallSide &side);
     void clear();
     [[nodiscard]] bool addPolyline(const std::vector<QPointF> &points, bool closed);
     void setVertexPositions(const std::vector<std::pair<VertexId, QPointF>> &positions);

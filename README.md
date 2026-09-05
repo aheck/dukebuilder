@@ -68,5 +68,12 @@ sides together. Hover and selection highlighting still apply to either kind of
 wall. Joining partway along an existing edge requires splitting that edge, which
 is not yet supported.
 
+In Lines mode, select one wall to edit its texture, overlay texture, shade,
+palette, texture repeat and panning, flags (`cstat`), hitag, and lotag. For a
+two-sided wall, use the Properties panel's Side dropdown to choose Front or
+Back, labeled with its sector number. The tick on the selected line points
+toward the active side. Each side retains its own values; a one-sided wall
+shows only its available side.
+
 For a release build, use `Release` for Conan's `build_type`, use `release` for
 Meson's `--buildtype`, and configure a separate build directory.

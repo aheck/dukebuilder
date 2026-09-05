@@ -182,7 +182,8 @@ public:
         }
         if (property != MapEditor::Property::Texture
             && property != MapEditor::Property::FloorTexture
-            && property != MapEditor::Property::CeilingTexture) {
+            && property != MapEditor::Property::CeilingTexture
+            && property != MapEditor::Property::OverlayTexture) {
             return QStyledItemDelegate::createEditor(parent, option, index);
         }
 
@@ -311,7 +312,7 @@ MainWindow::MainWindow(QWidget *parent)
             });
 
     editor->setPropertiesCallback(
-        [propertiesControl, propertyDelegate](std::optional<MapEditor::SelectionProperties> properties) {
+        [propertiesControl, propertyDelegate, editor](std::optional<MapEditor::SelectionProperties> properties) {
             const QSignalBlocker blocker(propertiesControl);
             // Clearing the rows can finish an edit while its widget is being retired.
             const QSignalBlocker delegateBlocker(propertyDelegate);
@@ -338,6 +339,39 @@ MainWindow::MainWindow(QWidget *parent)
                     propertiesControl->topLevelItem(
                         propertiesControl->topLevelItemCount() - 1), 1);
             };
+            if (properties->wall) {
+                const auto &wall = *properties->wall;
+                auto *sideRow = new QTreeWidgetItem(propertiesControl, {"Side", ""});
+                auto *sideChooser = new QComboBox(propertiesControl);
+                const auto addSide = [&](const QString &name,
+                                         std::optional<MapDocument::SectorId> sector, bool reversed) {
+                    if (sector) sideChooser->addItem(name + " - Sector " + QString::number(*sector), reversed);
+                };
+                addSide("Front", wall.forwardSector, false);
+                addSide("Back", wall.reverseSector, true);
+                if (sideChooser->count() == 0) sideChooser->addItem("Front", false);
+                sideChooser->setCurrentIndex(sideChooser->findData(wall.reversed));
+                sideChooser->setEnabled(sideChooser->count() > 1);
+                propertiesControl->setItemWidget(sideRow, 1, sideChooser);
+                const QPersistentModelIndex sideIndex = propertiesControl->model()->index(0, 1);
+                connect(sideChooser, &QComboBox::activated, sideChooser,
+                        [editor, sideChooser, sideIndex](int index) {
+                            if (sideIndex.isValid()) editor->setSelectedWallSide(sideChooser->itemData(index).toBool());
+                        }, Qt::QueuedConnection);
+                const auto &values = wall.values;
+                addTextureProperty("Texture", values.texture, MapEditor::Property::Texture);
+                addTextureProperty("Overlay texture", values.overlayTexture, MapEditor::Property::OverlayTexture);
+                addProperty("Shade", QString::number(values.shade), MapEditor::Property::Shade);
+                addProperty("Palette", QString::number(values.palette), MapEditor::Property::Palette);
+                addProperty("X repeat", QString::number(values.xrepeat), MapEditor::Property::XRepeat);
+                addProperty("Y repeat", QString::number(values.yrepeat), MapEditor::Property::YRepeat);
+                addProperty("X panning", QString::number(values.xpanning), MapEditor::Property::XPanning);
+                addProperty("Y panning", QString::number(values.ypanning), MapEditor::Property::YPanning);
+                addProperty("Flags (cstat)", QString::number(values.cstat), MapEditor::Property::Cstat);
+                addProperty("Hitag", QString::number(values.hitag), MapEditor::Property::Hitag);
+                addProperty("Lotag", QString::number(values.lotag), MapEditor::Property::WallLotag);
+                return;
+            }
             if (properties->sector) {
                 const auto &sector = *properties->sector;
                 addProperty("Floor Z", number(sector.floorz), MapEditor::Property::FloorZ);

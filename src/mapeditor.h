@@ -46,6 +46,7 @@ public:
     };
 
     explicit MapEditor(QWidget *parent = nullptr);
+    ~MapEditor() override;
 
     struct SpriteTexture {
         int tile;
@@ -61,6 +62,13 @@ public:
         int lotag;
     };
 
+    struct WallProperties {
+        MapDocument::WallSide values;
+        std::optional<MapDocument::SectorId> forwardSector;
+        std::optional<MapDocument::SectorId> reverseSector;
+        bool reversed;
+    };
+
     struct SelectionProperties {
         qreal x;
         qreal y;
@@ -70,6 +78,7 @@ public:
         std::optional<int> hitag;
         std::optional<int> lotag;
         std::optional<SectorProperties> sector = std::nullopt;
+        std::optional<WallProperties> wall = std::nullopt;
     };
 
     enum class Property {
@@ -85,6 +94,15 @@ public:
         FloorTexture,
         CeilingTexture,
         SectorLotag,
+        OverlayTexture,
+        WallLotag,
+        Shade,
+        Palette,
+        XRepeat,
+        YRepeat,
+        XPanning,
+        YPanning,
+        Cstat,
     };
 
     void newMap();
@@ -100,6 +118,7 @@ public:
     void setPropertiesCallback(
         std::function<void(std::optional<SelectionProperties>)> callback);
     void setSelectedProperty(Property property, qreal value);
+    void setSelectedWallSide(bool reversed);
     void setStatusCallback(std::function<void(const QString &)> callback);
 
 protected:
@@ -141,6 +160,7 @@ private:
     bool m_draggingPlayerStart = false;
     bool m_clickedPlayerStart = false;
     Mode m_mode = Mode::Draw;
+    bool m_wallSideReversed = false;
     std::function<void(const QString &)> m_statusCallback;
     std::function<void(qreal)> m_zoomCallback;
     std::function<std::optional<SpriteTexture>(std::optional<int>)> m_textureSelector;
