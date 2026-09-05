@@ -29,6 +29,8 @@ public:
         qreal ceilingz = -8192.0;
         int floorTexture = 0;
         int ceilingTexture = 0;
+        int hitag = 0;
+        int lotag = 0;
     };
 
     struct Sprite {
@@ -53,6 +55,8 @@ public:
     void setSectorCeilingZ(std::size_t sectorId, qreal z);
     void setSectorFloorTexture(std::size_t sectorId, int texture);
     void setSectorCeilingTexture(std::size_t sectorId, int texture);
+    void setSectorHitag(std::size_t sectorId, int hitag);
+    void setSectorLotag(std::size_t sectorId, int lotag);
     SpriteId addSprite(const QPointF &position);
     void removeSprites(const std::vector<SpriteId> &spriteIds);
     void setSpritePositions(const std::vector<std::pair<SpriteId, QPointF>> &positions);

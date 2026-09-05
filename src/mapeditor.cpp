@@ -519,6 +519,18 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
         const auto sectorId = static_cast<std::size_t>(
             selectedItem->data(sectorIdRole).toULongLong());
         switch (property) {
+        case Property::Hitag:
+            m_document.setSectorHitag(sectorId,
+                static_cast<int>(std::round(std::clamp(value, -32768.0, 32767.0))));
+            break;
+        case Property::SectorLotag: {
+            int tag = static_cast<int>(std::round(std::clamp(value, -32768.0, 65535.0)));
+            if (tag < 0) {
+                tag += 65536;
+            }
+            m_document.setSectorLotag(sectorId, tag);
+            break;
+        }
         case Property::FloorZ:
             m_document.setSectorFloorZ(sectorId, value);
             break;
@@ -579,6 +591,7 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
         case Property::Texture:
         case Property::Hitag:
         case Property::Lotag:
+        case Property::SectorLotag:
         case Property::FloorZ:
         case Property::CeilingZ:
         case Property::FloorTexture:
@@ -588,6 +601,7 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
     } else {
         const MapDocument::Sprite &sprite = m_document.sprites()[spriteId];
         switch (property) {
+        case Property::SectorLotag:
         case Property::FloorZ:
         case Property::CeilingZ:
         case Property::FloorTexture:
@@ -1459,7 +1473,8 @@ void MapEditor::updateProperties() const
                 const auto &sector = m_document.sectors()[sectorId];
                 SelectionProperties properties{};
                 properties.sector = SectorProperties{
-                    sector.floorz, sector.ceilingz, sector.floorTexture, sector.ceilingTexture};
+                    sector.floorz, sector.ceilingz, sector.floorTexture, sector.ceilingTexture,
+                    sector.hitag, sector.lotag};
                 m_propertiesCallback(properties);
                 return;
             }

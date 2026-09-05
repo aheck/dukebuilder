@@ -57,6 +57,8 @@ public:
         qreal ceilingz;
         int floorTexture;
         int ceilingTexture;
+        int hitag;
+        int lotag;
     };
 
     struct SelectionProperties {
@@ -82,6 +84,7 @@ public:
         CeilingZ,
         FloorTexture,
         CeilingTexture,
+        SectorLotag,
     };
 
     void newMap();

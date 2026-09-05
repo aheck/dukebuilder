@@ -74,6 +74,39 @@ constexpr const char *sectorEffectorLotags[] = {
     "Projectile emitter",
 };
 
+// Sector tags are distinct from Sector Effector sprite tags.
+// https://wiki.eduke32.com/wiki/Sector_Tag_Reference_Guide
+constexpr struct {
+    int tag;
+    const char *meaning;
+} sectorLotags[] = {
+    {0, "Normal sector"},
+    {1, "Water surface"},
+    {2, "Submerged area"},
+    {3, "Cycloid Emperor movement area"},
+    {9, "Star Trek sliding doors"},
+    {15, "Transport elevator"},
+    {16, "Descending platform"},
+    {17, "Ascending platform"},
+    {18, "Descending elevator"},
+    {19, "Ascending elevator"},
+    {20, "Door in ceiling"},
+    {21, "Door in floor"},
+    {22, "Vertically splitting door"},
+    {23, "Hinged door"},
+    {25, "Door sliding sideways"},
+    {26, "Star Trek split door"},
+    {27, "Stretching bridge"},
+    {28, "Dropping floor / ceiling"},
+    {29, "Teeth-door component"},
+    {30, "Bridge rotation and elevation"},
+    {31, "Shuttle train"},
+    {10000, "Play sound 0 once (10000 + sound ID)"},
+    {32767, "Secret area"},
+    {65534, "Level exit with message"},
+    {65535, "Immediate level exit"},
+};
+
 class TexturePropertyEditor final : public QWidget
 {
 public:
@@ -114,18 +147,28 @@ public:
         }
         const auto property = static_cast<MapEditor::Property>(
             index.siblingAtColumn(0).data(Qt::UserRole).toInt());
-        if (property == MapEditor::Property::Lotag) {
+        if (property == MapEditor::Property::Lotag
+            || property == MapEditor::Property::SectorLotag) {
             auto *editor = new QComboBox(parent);
             editor->setEditable(true);
             editor->setInsertPolicy(QComboBox::NoInsert);
             editor->setMinimumContentsLength(12);
             editor->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-            editor->setToolTip("Sector Effector (tile 1) meanings. Other sprites use "
+            if (property == MapEditor::Property::SectorLotag) {
+                editor->setToolTip("Duke 3D sector lotags. Enter an integer from 0 to 65535. "
+                                   "For a one-time sound, enter 10000 + sound ID (10xxx).");
+                for (const auto &entry : sectorLotags) {
+                    editor->addItem(QString::number(entry.tag) + " - " + entry.meaning,
+                                    entry.tag);
+                }
+            } else {
+                editor->setToolTip("Sector Effector (tile 1) meanings. Other sprites use "
                                "lotags differently. Enter any integer from -32768 to 32767.");
-            int tag = 0;
-            for (const char *meaning : sectorEffectorLotags) {
-                editor->addItem(QString::number(tag) + " - " + meaning, tag);
-                ++tag;
+                int tag = 0;
+                for (const char *meaning : sectorEffectorLotags) {
+                    editor->addItem(QString::number(tag) + " - " + meaning, tag);
+                    ++tag;
+                }
             }
             const auto commit = [this, editor, index = QPersistentModelIndex(index)] {
                 if (index.isValid()) {
@@ -195,7 +238,10 @@ public:
             bool valid = false;
             const int tag = entry >= 0 ? lotagEditor->itemData(entry).toInt(&valid)
                                        : text.toInt(&valid);
-            if (valid && tag >= -32768 && tag <= 32767) {
+            const auto property = static_cast<MapEditor::Property>(
+                index.siblingAtColumn(0).data(Qt::UserRole).toInt());
+            const int maximum = property == MapEditor::Property::SectorLotag ? 65535 : 32767;
+            if (valid && tag >= -32768 && tag <= maximum) {
                 model->setData(index, QString::number(tag), Qt::EditRole);
             } else {
                 setEditorData(editor, index);
@@ -300,6 +346,11 @@ MainWindow::MainWindow(QWidget *parent)
                                    MapEditor::Property::FloorTexture);
                 addTextureProperty("Ceiling texture", sector.ceilingTexture,
                                    MapEditor::Property::CeilingTexture);
+                addProperty("Hitag", QString::number(sector.hitag), MapEditor::Property::Hitag);
+                addProperty("Lotag", QString::number(sector.lotag), MapEditor::Property::SectorLotag);
+                propertiesControl->openPersistentEditor(
+                    propertiesControl->topLevelItem(
+                        propertiesControl->topLevelItemCount() - 1), 1);
                 return;
             }
             addProperty("X", number(properties->x), MapEditor::Property::X);

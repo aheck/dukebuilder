@@ -120,6 +120,20 @@ void MapDocument::setSectorCeilingTexture(std::size_t sectorId, int texture)
     }
 }
 
+void MapDocument::setSectorHitag(std::size_t sectorId, int hitag)
+{
+    if (sectorId < m_sectors.size()) {
+        m_sectors[sectorId].hitag = hitag;
+    }
+}
+
+void MapDocument::setSectorLotag(std::size_t sectorId, int lotag)
+{
+    if (sectorId < m_sectors.size()) {
+        m_sectors[sectorId].lotag = lotag;
+    }
+}
+
 MapDocument::SpriteId MapDocument::addSprite(const QPointF &position)
 {
     m_sprites.push_back({position, 0.0, 0.0, -1});
@@ -287,6 +301,8 @@ void MapDocument::rebuildSectors()
                             sector.ceilingz = previous->ceilingz;
                             sector.floorTexture = previous->floorTexture;
                             sector.ceilingTexture = previous->ceilingTexture;
+                            sector.hitag = previous->hitag;
+                            sector.lotag = previous->lotag;
                         }
                         m_sectors.push_back(std::move(sector));
                     }
