@@ -60,5 +60,13 @@ Run it:
 Drawing snaps to existing vertices before snapping to the grid. Sector fills are
 shown when a chain is closed with three or more walls.
 
+To add a neighboring sector, draw from existing boundary vertices and reuse a
+complete boundary edge, or finish an open chain between existing vertices with
+Enter. Boundaries shared by two sectors automatically become two-sided walls
+and appear red; outer boundaries remain light gray. Shared vertices move both
+sides together. Hover and selection highlighting still apply to either kind of
+wall. Joining partway along an existing edge requires splitting that edge, which
+is not yet supported.
+
 For a release build, use `Release` for Conan's `build_type`, use `release` for
 Meson's `--buildtype`, and configure a separate build directory.

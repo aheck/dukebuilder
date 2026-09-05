@@ -3,6 +3,7 @@
 #include <QPointF>
 
 #include <cstddef>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -12,6 +13,7 @@ public:
     using VertexId = std::size_t;
     using WallId = std::size_t;
     using SpriteId = std::size_t;
+    using SectorId = std::size_t;
 
     struct Vertex {
         QPointF position;
@@ -20,6 +22,14 @@ public:
     struct Wall {
         VertexId start;
         VertexId end;
+        // Each side belongs to the sector traversing this edge in that direction.
+        std::optional<SectorId> forwardSector = std::nullopt;
+        std::optional<SectorId> reverseSector = std::nullopt;
+
+        [[nodiscard]] bool isTwoSided() const
+        {
+            return forwardSector && reverseSector && forwardSector != reverseSector;
+        }
     };
 
     struct Sector {

@@ -32,6 +32,7 @@ constexpr int sectorIdRole = Qt::UserRole + 2;
 constexpr int spriteIdRole = Qt::UserRole + 3;
 
 const QColor wallColor(226, 231, 240);
+const QColor twoSidedWallColor(235, 55, 65);
 const QColor vertexColor(255, 190, 72);
 const QColor hoverColor(80, 210, 255);
 const QColor selectedColor(255, 110, 92);
@@ -73,10 +74,12 @@ public:
 class WallItem final : public QGraphicsLineItem
 {
 public:
-    explicit WallItem(const QLineF &line)
+    WallItem(const QLineF &line, bool twoSided)
         : QGraphicsLineItem(line)
+        , m_twoSided(twoSided)
     {
-        setPen(cosmeticPen(wallColor, 1.6));
+        setPen(cosmeticPen(m_twoSided ? twoSidedWallColor : wallColor, 1.6));
+        setToolTip(m_twoSided ? "Two-sided wall between neighboring sectors" : "One-sided wall");
         setInteractive(false);
     }
 
@@ -120,12 +123,14 @@ protected:
 
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
     {
-        const QColor color = isSelected() ? selectedColor : (m_hovered ? hoverColor : wallColor);
+        const QColor baseColor = m_twoSided ? twoSidedWallColor : wallColor;
+        const QColor color = isSelected() ? selectedColor : (m_hovered ? hoverColor : baseColor);
         painter->setPen(cosmeticPen(color, (m_hovered || isSelected()) ? 3.0 : 1.6));
         painter->drawLine(line());
     }
 
 private:
+    bool m_twoSided = false;
     bool m_hovered = false;
 };
 
@@ -1417,7 +1422,7 @@ void MapEditor::rebuildScene()
         const MapDocument::Wall &wall = m_document.walls()[wallId];
         const QPointF start = m_document.vertices()[wall.start].position;
         const QPointF end = m_document.vertices()[wall.end].position;
-        auto *item = new WallItem(QLineF(start, end));
+        auto *item = new WallItem(QLineF(start, end), wall.isTwoSided());
         item->setInteractive(m_mode == Mode::Lines);
         item->setData(wallIdRole, static_cast<qulonglong>(wallId));
         m_scene->addItem(item);

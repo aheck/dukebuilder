@@ -223,6 +223,10 @@ void MapDocument::rebuildSectors()
 
     const auto previousSectors = std::move(m_sectors);
     m_sectors.clear();
+    for (Wall &wall : m_walls) {
+        wall.forwardSector.reset();
+        wall.reverseSector.reset();
+    }
     std::vector<std::vector<OutgoingEdge>> outgoing(m_vertices.size());
     for (WallId wallId = 0; wallId < m_walls.size(); ++wallId) {
         const Wall &wall = m_walls[wallId];
@@ -303,6 +307,13 @@ void MapDocument::rebuildSectors()
                             sector.ceilingTexture = previous->ceilingTexture;
                             sector.hitag = previous->hitag;
                             sector.lotag = previous->lotag;
+                        }
+                        const SectorId sectorId = m_sectors.size();
+                        for (std::size_t index = 0; index < sector.walls.size(); ++index) {
+                            Wall &boundary = m_walls[sector.walls[index]];
+                            auto &side = boundary.start == sector.vertices[index]
+                                ? boundary.forwardSector : boundary.reverseSector;
+                            side = sectorId;
                         }
                         m_sectors.push_back(std::move(sector));
                     }
