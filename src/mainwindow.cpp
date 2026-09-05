@@ -492,6 +492,22 @@ MainWindow::MainWindow(QWidget *parent)
     gridAction->setToolTip("Show or hide the grid (G)");
     connect(gridAction, &QAction::toggled, editor, &MapEditor::setGridVisible);
 
+    editorToolBar->addSeparator();
+    auto *sectorFillGroup = new QActionGroup(this);
+    sectorFillGroup->setExclusive(true);
+    const auto addSectorFillAction = [&](const QString &label, const QString &tooltip,
+                                         MapEditor::SectorFill fill) {
+        auto *action = editorToolBar->addAction(label);
+        action->setCheckable(true);
+        action->setToolTip(tooltip);
+        sectorFillGroup->addAction(action);
+        action->setChecked(editor->sectorFill() == fill);
+        connect(action, &QAction::triggered, editor, [editor, fill] { editor->setSectorFill(fill); });
+    };
+    addSectorFillAction("Plain fill", "Disable sector textures", MapEditor::SectorFill::Plain);
+    addSectorFillAction("Floor textures", "Fill sectors with their floor textures", MapEditor::SectorFill::Floor);
+    addSectorFillAction("Ceiling textures", "Fill sectors with their ceiling textures", MapEditor::SectorFill::Ceiling);
+
     auto *fileMenu = menuBar()->addMenu("&File");
 
     auto *newMapAction = fileMenu->addAction("&New Map");
@@ -631,7 +647,7 @@ MainWindow::MainWindow(QWidget *parent)
         }
         return MapEditor::SpriteTexture{selection->tile, selection->image};
     });
-    editor->setSpriteTextureResolver([textureBrowserWindow](int tile) {
+    editor->setTextureResolver([textureBrowserWindow](int tile) {
         return textureBrowserWindow->textureImage(tile);
     });
     connect(textureBrowserAction, &QAction::triggered, this,

@@ -253,6 +253,14 @@ public:
         setInteractive(false);
     }
 
+    void setTexture(const QImage &image)
+    {
+        m_texture = image.isNull() ? QBrush(Qt::NoBrush) : QBrush(image);
+        // Anchor the repeating preview in map coordinates; compensate for the view's Y flip.
+        m_texture.setTransform(QTransform::fromScale(8.0, -8.0));
+        update();
+    }
+
     void setInteractive(bool interactive)
     {
         setFlag(QGraphicsItem::ItemIsSelectable, interactive);
@@ -282,6 +290,12 @@ protected:
 
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
     {
+        painter->setPen(Qt::NoPen);
+        if (m_texture.style() != Qt::NoBrush) {
+            painter->setBrush(m_texture);
+            painter->drawPolygon(polygon());
+            if (!isSelected() && !m_hovered) return;
+        }
         QColor color = sectorColor;
         if (isSelected()) {
             color = selectedColor;
@@ -296,6 +310,7 @@ protected:
     }
 
 private:
+    QBrush m_texture = Qt::NoBrush;
     bool m_hovered = false;
 };
 
@@ -549,9 +564,10 @@ void MapEditor::setTextureSelector(
     m_textureSelector = std::move(selector);
 }
 
-void MapEditor::setSpriteTextureResolver(std::function<QImage(int)> resolver)
+void MapEditor::setTextureResolver(std::function<QImage(int)> resolver)
 {
-    m_spriteTextureResolver = std::move(resolver);
+    m_textureResolver = std::move(resolver);
+    updateSectorTextures();
 }
 
 MapEditor::~MapEditor()
@@ -656,6 +672,9 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
         default:
             return;
         }
+        if (property == Property::FloorTexture || property == Property::CeilingTexture) {
+            updateSectorTextures();
+        }
         updateProperties();
         return;
     }
@@ -745,8 +764,8 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
                 std::llround(value), 0LL,
                 static_cast<long long>(std::numeric_limits<short>::max())));
             m_document.setSpriteTexture(spriteId, texture);
-            if (m_spriteTextureResolver) {
-                const QImage image = m_spriteTextureResolver(texture);
+            if (m_textureResolver) {
+                const QImage image = m_textureResolver(texture);
                 if (!image.isNull()) {
                     m_spriteTextures.insert(texture, image);
                 }
@@ -1503,6 +1522,31 @@ void MapEditor::updatePreview(const QPointF &cursorPosition)
     }
 }
 
+void MapEditor::setSectorFill(SectorFill fill)
+{
+    if (m_sectorFill == fill) return;
+    m_sectorFill = fill;
+    updateSectorTextures();
+}
+
+void MapEditor::updateSectorTextures()
+{
+    QMap<int, QImage> textures;
+    for (QGraphicsItem *item : m_scene->items()) {
+        auto *sectorItem = dynamic_cast<SectorItem *>(item);
+        if (!sectorItem) continue;
+        const auto sectorId = static_cast<std::size_t>(item->data(sectorIdRole).toULongLong());
+        QImage image;
+        if (m_sectorFill != SectorFill::Plain && m_textureResolver && sectorId < m_document.sectors().size()) {
+            const auto &sector = m_document.sectors()[sectorId];
+            const int tile = m_sectorFill == SectorFill::Floor ? sector.floorTexture : sector.ceilingTexture;
+            if (!textures.contains(tile)) textures.insert(tile, m_textureResolver(tile));
+            image = textures.value(tile);
+        }
+        sectorItem->setTexture(image);
+    }
+}
+
 void MapEditor::rebuildScene()
 {
     m_scene->clear();
@@ -1559,6 +1603,7 @@ void MapEditor::rebuildScene()
     m_scene->addItem(playerStart);
     playerStart->setPos(m_document.playerStart().position);
     playerStart->setZValue(13.0);
+    updateSectorTextures();
 }
 
 void MapEditor::updateProperties() const

@@ -60,6 +60,11 @@ Run it:
 Drawing snaps to existing vertices before snapping to the grid. Sector fills are
 shown when a chain is closed with three or more walls.
 
+The Editor toolbar's **Floor textures** and **Ceiling textures** buttons tile
+the corresponding images inside sectors. **Plain fill** restores the original
+untextured appearance (the default). Missing textures use the plain fill.
+These are 2D previews; selection and hover highlighting remain visible.
+
 To add a neighboring sector, draw from existing boundary vertices and reuse a
 complete boundary edge, or finish an open chain between existing vertices with
 Enter. Boundaries shared by two sectors automatically become two-sided walls

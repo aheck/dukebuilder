@@ -45,6 +45,10 @@ public:
         Sprites,
     };
 
+    enum class SectorFill { Plain, Floor, Ceiling };
+    void setSectorFill(SectorFill fill);
+    [[nodiscard]] SectorFill sectorFill() const { return m_sectorFill; }
+
     explicit MapEditor(QWidget *parent = nullptr);
     ~MapEditor() override;
 
@@ -114,7 +118,7 @@ public:
     void setZoomCallback(std::function<void(qreal)> callback);
     void setTextureSelector(std::function<std::optional<SpriteTexture>(
                                 std::optional<int>)> selector);
-    void setSpriteTextureResolver(std::function<QImage(int)> resolver);
+    void setTextureResolver(std::function<QImage(int)> resolver);
     void setPropertiesCallback(
         std::function<void(std::optional<SelectionProperties>)> callback);
     void setSelectedProperty(Property property, qreal value);
@@ -136,6 +140,7 @@ private:
     void cancelDrawing();
     void updatePreview(const QPointF &cursorPosition);
     void rebuildScene();
+    void updateSectorTextures();
     void updateProperties() const;
     void reportStatus(const QString &message) const;
 
@@ -161,9 +166,10 @@ private:
     bool m_clickedPlayerStart = false;
     Mode m_mode = Mode::Draw;
     bool m_wallSideReversed = false;
+    SectorFill m_sectorFill = SectorFill::Plain;
     std::function<void(const QString &)> m_statusCallback;
     std::function<void(qreal)> m_zoomCallback;
     std::function<std::optional<SpriteTexture>(std::optional<int>)> m_textureSelector;
-    std::function<QImage(int)> m_spriteTextureResolver;
+    std::function<QImage(int)> m_textureResolver;
     std::function<void(std::optional<SelectionProperties>)> m_propertiesCallback;
 };
