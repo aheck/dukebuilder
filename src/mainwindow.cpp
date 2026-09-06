@@ -310,17 +310,24 @@ MainWindow::MainWindow(QWidget *parent)
     propertiesLayout->setContentsMargins(0, 0, 0, 0);
     propertiesLayout->addWidget(propertiesControl, 1);
     const auto createPreview = [](QWidget *parent, const QString &name) {
-        auto *preview = new QLabel(parent);
+        auto *preview = new QPushButton(parent);
         preview->setObjectName(name);
         preview->setFixedSize(160, 160);
-        preview->setAlignment(Qt::AlignCenter);
-        preview->setFrameShape(QFrame::StyledPanel);
+        preview->setIconSize(QSize(156, 156));
+        preview->setCursor(Qt::PointingHandCursor);
         preview->setStyleSheet("background-color: #181a1f; color: #e2e7f0;");
         return preview;
     };
     auto *wallTexturePreview = createPreview(propertiesPanel, "WallTexturePreview");
-    wallTexturePreview->hide();
-    propertiesLayout->addWidget(wallTexturePreview, 0, Qt::AlignHCenter);
+    auto *wallTexturePreviews = new QWidget(propertiesPanel);
+    auto *wallPreviewLayout = new QVBoxLayout(wallTexturePreviews);
+    wallPreviewLayout->setContentsMargins(4, 0, 4, 4);
+    auto *wallTextureLabel = new QLabel("Wall texture", wallTexturePreviews);
+    wallTextureLabel->setAlignment(Qt::AlignCenter);
+    wallPreviewLayout->addWidget(wallTextureLabel);
+    wallPreviewLayout->addWidget(wallTexturePreview, 0, Qt::AlignHCenter);
+    wallTexturePreviews->hide();
+    propertiesLayout->addWidget(wallTexturePreviews);
     auto *sectorTexturePreviews = new QWidget(propertiesPanel);
     sectorTexturePreviews->setObjectName("SectorTexturePreviews");
     auto *sectorPreviewLayout = new QHBoxLayout(sectorTexturePreviews);
@@ -335,22 +342,35 @@ MainWindow::MainWindow(QWidget *parent)
         sectorPreviewLayout->addLayout(column);
         return preview;
     };
-    auto *ceilingTexturePreview = addSectorPreview("Ceiling texture", "CeilingTexturePreview");
     auto *floorTexturePreview = addSectorPreview("Floor texture", "FloorTexturePreview");
+    auto *ceilingTexturePreview = addSectorPreview("Ceiling texture", "CeilingTexturePreview");
     sectorTexturePreviews->hide();
     propertiesLayout->addWidget(sectorTexturePreviews);
-    const auto updateTexturePreview = [textureBrowserWindow](QLabel *preview, int tile,
+    const auto updateTexturePreview = [textureBrowserWindow](QPushButton *preview, int tile,
                                                             const QString &surface) {
-        preview->clear();
-        preview->setToolTip(QString("%1 texture %2").arg(surface).arg(tile));
+        preview->setText({});
+        preview->setIcon({});
+        preview->setProperty("tile", tile);
+        preview->setAccessibleName(surface + " texture");
+        preview->setToolTip(QString("%1 texture %2 — Click to change").arg(surface).arg(tile));
         const QImage image = textureBrowserWindow->textureImage(tile);
         if (image.isNull()) {
             preview->setText(QString("Texture %1\nUnavailable").arg(tile));
         } else {
-            preview->setPixmap(QPixmap::fromImage(image).scaled(
-                156, 156, Qt::KeepAspectRatio, Qt::FastTransformation));
+            preview->setIcon(QIcon(QPixmap::fromImage(image).scaled(
+                156, 156, Qt::KeepAspectRatio, Qt::FastTransformation)));
         }
     };
+    const auto connectPreview = [editor, textureBrowserWindow](QPushButton *preview,
+                                                               MapEditor::Property property) {
+        connect(preview, &QPushButton::clicked, editor, [editor, textureBrowserWindow, preview, property] {
+            const auto selection = textureBrowserWindow->chooseTexture(preview->property("tile").toInt());
+            if (selection) editor->setSelectedProperty(property, selection->tile);
+        });
+    };
+    connectPreview(wallTexturePreview, MapEditor::Property::Texture);
+    connectPreview(floorTexturePreview, MapEditor::Property::FloorTexture);
+    connectPreview(ceilingTexturePreview, MapEditor::Property::CeilingTexture);
     propertiesDock->setWidget(propertiesPanel);
     addDockWidget(Qt::LeftDockWidgetArea, propertiesDock);
 
@@ -383,14 +403,13 @@ MainWindow::MainWindow(QWidget *parent)
             });
 
     editor->setPropertiesCallback(
-        [propertiesControl, propertyDelegate, editor, wallTexturePreview, sectorTexturePreviews,
+        [propertiesControl, propertyDelegate, editor, wallTexturePreview, wallTexturePreviews, sectorTexturePreviews,
          ceilingTexturePreview, floorTexturePreview, updateTexturePreview](std::optional<MapEditor::SelectionProperties> properties) {
             const QSignalBlocker blocker(propertiesControl);
             // Clearing the rows can finish an edit while its widget is being retired.
             const QSignalBlocker delegateBlocker(propertyDelegate);
             propertiesControl->clear();
-            wallTexturePreview->clear();
-            wallTexturePreview->hide();
+            wallTexturePreviews->hide();
             sectorTexturePreviews->hide();
             if (!properties) {
                 return;
@@ -469,7 +488,7 @@ MainWindow::MainWindow(QWidget *parent)
                         }, Qt::QueuedConnection);
                 const auto &values = wall.values;
                 updateTexturePreview(wallTexturePreview, values.texture, "Wall");
-                wallTexturePreview->show();
+                wallTexturePreviews->show();
                 addTextureProperty("Texture", values.texture, MapEditor::Property::Texture);
                 addTextureProperty("Overlay texture", values.overlayTexture, MapEditor::Property::OverlayTexture);
                 addProperty("Shade", QString::number(values.shade), MapEditor::Property::Shade);
