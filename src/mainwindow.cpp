@@ -489,6 +489,9 @@ MainWindow::MainWindow(QWidget *parent)
             }
             if (properties->sector) {
                 const auto &sector = *properties->sector;
+                auto *sectorNumber = new QTreeWidgetItem(propertiesControl,
+                    {"Sector number", QString::number(*properties->sectorId)});
+                sectorNumber->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
                 updateTexturePreview(ceilingTexturePreview, sector.ceilingTexture, "Ceiling");
                 updateTexturePreview(floorTexturePreview, sector.floorTexture, "Floor");
                 sectorTexturePreviews->show();

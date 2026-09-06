@@ -240,6 +240,8 @@ void MapDocument::rebuildSectors()
 
     const auto previousSectors = std::move(m_sectors);
     m_sectors.clear();
+    std::vector<std::optional<Sector>> survivingSectors(previousSectors.size());
+    std::vector<Sector> newSectors;
     for (Wall &wall : m_walls) {
         wall.forwardSector.reset();
         wall.reverseSector.reset();
@@ -327,19 +329,32 @@ void MapDocument::rebuildSectors()
                             sector = *previous;
                             sector.walls = std::move(walls);
                             sector.vertices = std::move(vertices);
+                            survivingSectors[previous - previousSectors.begin()] = std::move(sector);
+                        } else {
+                            newSectors.push_back(std::move(sector));
                         }
-                        const SectorId sectorId = m_sectors.size();
-                        for (std::size_t index = 0; index < sector.walls.size(); ++index) {
-                            Wall &boundary = m_walls[sector.walls[index]];
-                            auto &side = boundary.start == sector.vertices[index]
-                                ? boundary.forwardSector : boundary.reverseSector;
-                            side = sectorId;
-                        }
-                        m_sectors.push_back(std::move(sector));
                     }
                     break;
                 }
             }
+        }
+    }
+
+    // Keep surviving sectors in their previous order, then append new faces.
+    // Removed faces leave no gaps in the Build sector indices.
+    for (auto &sector : survivingSectors) {
+        if (sector) m_sectors.push_back(std::move(*sector));
+    }
+    for (auto &sector : newSectors) m_sectors.push_back(std::move(sector));
+
+    // Side references must use the final ordering, not face discovery order.
+    for (SectorId sectorId = 0; sectorId < m_sectors.size(); ++sectorId) {
+        const Sector &sector = m_sectors[sectorId];
+        for (std::size_t index = 0; index < sector.walls.size(); ++index) {
+            Wall &boundary = m_walls[sector.walls[index]];
+            auto &side = boundary.start == sector.vertices[index]
+                ? boundary.forwardSector : boundary.reverseSector;
+            side = sectorId;
         }
     }
 }

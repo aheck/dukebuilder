@@ -1708,6 +1708,7 @@ void MapEditor::updateProperties() const
                 const auto &sector = m_document.sectors()[sectorId];
                 SelectionProperties properties{};
                 properties.sector = sector;
+                properties.sectorId = sectorId;
                 m_propertiesCallback(properties);
                 return;
             }

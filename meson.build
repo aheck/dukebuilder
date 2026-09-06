@@ -28,6 +28,14 @@ libb2 = cpp.find_library('b2', required: true)
 app_dependencies = [qt6, libb2, libduke]
 app_cpp_args = []
 
+mapdocument_test = executable(
+  'mapdocument-test',
+  ['tests/mapdocument_test.cpp', 'src/mapdocument.cpp'],
+  include_directories: include_directories('src'),
+  dependencies: [qt6, libb2],
+)
+test('mapdocument', mapdocument_test)
+
 if host_machine.system() == 'linux'
   xcb_plugin = dependency('qt6-qtQXcbIntegrationPlugin')
   app_dependencies += xcb_plugin

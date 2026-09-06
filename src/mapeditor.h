@@ -77,6 +77,7 @@ public:
         std::optional<SectorProperties> sector = std::nullopt;
         std::optional<WallProperties> wall = std::nullopt;
         std::optional<MapDocument::Sprite> sprite = std::nullopt;
+        std::optional<MapDocument::SectorId> sectorId = std::nullopt;
     };
 
     enum class Property {
