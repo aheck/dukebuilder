@@ -14,6 +14,7 @@
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QIconEngine>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
@@ -38,6 +39,94 @@
 #include <limits>
 
 namespace {
+enum class ToolbarSymbol { New, Open, Save, Grid, Plain, Floor, Ceiling };
+
+// Draw at the requested size so toolbar icons remain crisp on high-DPI screens.
+class ToolbarIconEngine final : public QIconEngine
+{
+public:
+    explicit ToolbarIconEngine(ToolbarSymbol symbol) : m_symbol(symbol) {}
+    QIconEngine *clone() const override { return new ToolbarIconEngine(m_symbol); }
+
+    void paint(QPainter *painter, const QRect &rect, QIcon::Mode mode, QIcon::State) override
+    {
+        painter->save();
+        painter->translate(rect.center().x() - rect.width() / 2.0,
+                           rect.center().y() - rect.height() / 2.0);
+        painter->scale(rect.width() / 24.0, rect.height() / 24.0);
+        painter->setRenderHint(QPainter::Antialiasing);
+        const auto palette = QApplication::palette();
+        const auto group = mode == QIcon::Disabled ? QPalette::Disabled : QPalette::Active;
+        const QColor ink = palette.color(group, QPalette::ButtonText);
+        const QColor accent = palette.color(group, QPalette::Highlight);
+        painter->setPen(QPen(ink, 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        if (m_symbol == ToolbarSymbol::New) {
+            // Folded document with a plus sign.
+            painter->drawPolygon(QPolygonF{QPointF(5, 3), QPointF(14, 3), QPointF(19, 8),
+                                          QPointF(19, 21), QPointF(5, 21)});
+            painter->drawPolyline(QPolygonF{QPointF(14, 3), QPointF(14, 8), QPointF(19, 8)});
+            painter->setPen(QPen(accent, 2, Qt::SolidLine, Qt::RoundCap));
+            painter->drawLine(QPointF(8, 14), QPointF(16, 14));
+            painter->drawLine(QPointF(12, 10), QPointF(12, 18));
+        } else if (m_symbol == ToolbarSymbol::Open) {
+            // Open folder with a raised front flap.
+            painter->drawPolygon(QPolygonF{QPointF(3, 19), QPointF(3, 5), QPointF(9, 5),
+                                          QPointF(11, 8), QPointF(20, 8), QPointF(20, 19)});
+            painter->setBrush(accent);
+            painter->drawPolygon(QPolygonF{QPointF(3, 19), QPointF(6, 11),
+                                          QPointF(22, 11), QPointF(19, 19)});
+        } else if (m_symbol == ToolbarSymbol::Save) {
+            // Floppy disk with a shutter and label.
+            painter->setBrush(accent);
+            painter->drawPolygon(QPolygonF{QPointF(4, 3), QPointF(17, 3), QPointF(21, 7),
+                                          QPointF(21, 21), QPointF(3, 21), QPointF(3, 4)});
+            painter->setBrush(palette.color(group, QPalette::Button));
+            painter->drawRect(QRectF(7, 3, 9, 6));
+            painter->drawRect(QRectF(7, 13, 10, 8));
+            painter->drawLine(QPointF(10, 17), QPointF(14, 17));
+        } else if (m_symbol == ToolbarSymbol::Grid) {
+            for (int coordinate : {4, 12, 20}) {
+                painter->drawLine(QPointF(coordinate, 4), QPointF(coordinate, 20));
+                painter->drawLine(QPointF(4, coordinate), QPointF(20, coordinate));
+            }
+        } else if (m_symbol == ToolbarSymbol::Plain) {
+            painter->setBrush(accent);
+            painter->drawRoundedRect(QRectF(4, 4, 16, 16), 2, 2);
+        } else {
+            // Mirror the textured plane to distinguish the ceiling from the floor.
+            if (m_symbol == ToolbarSymbol::Ceiling) {
+                painter->translate(0, 24);
+                painter->scale(1, -1);
+            }
+            painter->drawLine(QPointF(4, 5), QPointF(4, 20));
+            painter->drawLine(QPointF(20, 5), QPointF(20, 20));
+            painter->setBrush(accent);
+            painter->drawPolygon(QPolygonF{QPointF(4, 20), QPointF(20, 20),
+                                          QPointF(17, 12), QPointF(7, 12)});
+            painter->drawLine(QPointF(12, 12), QPointF(12, 20));
+            painter->drawLine(QPointF(5.5, 16), QPointF(18.5, 16));
+        }
+        painter->restore();
+    }
+
+    QPixmap pixmap(const QSize &size, QIcon::Mode mode, QIcon::State state) override
+    {
+        QPixmap result(size);
+        result.fill(Qt::transparent);
+        QPainter painter(&result);
+        paint(&painter, QRect(QPoint(), size), mode, state);
+        return result;
+    }
+
+private:
+    ToolbarSymbol m_symbol;
+};
+
+QIcon toolbarIcon(ToolbarSymbol symbol)
+{
+    return QIcon(new ToolbarIconEngine(symbol));
+}
+
 // Classic Duke Nukem 3D / Atomic Edition Sector Effector lotags (tile 1).
 // https://wiki.eduke32.com/wiki/Sector_Effector_Reference_Guide
 constexpr const char *sectorEffectorLotags[] = {
@@ -606,8 +695,10 @@ MainWindow::MainWindow(QWidget *parent)
     auto *editorToolBar = addToolBar("Editor");
     editorToolBar->setObjectName("EditorToolBar");
     editorToolBar->setMovable(true);
+    editorToolBar->setIconSize(QSize(24, 24));
+    editorToolBar->setToolButtonStyle(Qt::ToolButtonIconOnly);
 
-    auto *gridAction = editorToolBar->addAction("Grid");
+    auto *gridAction = editorToolBar->addAction(toolbarIcon(ToolbarSymbol::Grid), "Grid");
     gridAction->setCheckable(true);
     gridAction->setChecked(editor->isGridVisible());
     gridAction->setShortcut(QKeySequence(Qt::Key_G));
@@ -619,7 +710,9 @@ MainWindow::MainWindow(QWidget *parent)
     sectorFillGroup->setExclusive(true);
     const auto addSectorFillAction = [&](const QString &label, const QString &tooltip,
                                          MapEditor::SectorFill fill) {
-        auto *action = editorToolBar->addAction(label);
+        const auto symbol = fill == MapEditor::SectorFill::Floor ? ToolbarSymbol::Floor
+            : fill == MapEditor::SectorFill::Ceiling ? ToolbarSymbol::Ceiling : ToolbarSymbol::Plain;
+        auto *action = editorToolBar->addAction(toolbarIcon(symbol), label);
         action->setCheckable(true);
         action->setToolTip(tooltip);
         sectorFillGroup->addAction(action);
@@ -701,6 +794,17 @@ MainWindow::MainWindow(QWidget *parent)
     auto *saveAction = fileMenu->addAction("&Save");
     saveAction->setShortcut(QKeySequence::Save);
     connect(saveAction, &QAction::triggered, this, [saveMap] { saveMap(false); });
+
+    newMapAction->setIcon(toolbarIcon(ToolbarSymbol::New));
+    newMapAction->setToolTip("New map (Ctrl+N)");
+    openMapAction->setIcon(toolbarIcon(ToolbarSymbol::Open));
+    openMapAction->setToolTip("Open map (Ctrl+O)");
+    saveAction->setIcon(toolbarIcon(ToolbarSymbol::Save));
+    saveAction->setToolTip("Save map (Ctrl+S)");
+    editorToolBar->insertAction(gridAction, newMapAction);
+    editorToolBar->insertAction(gridAction, openMapAction);
+    editorToolBar->insertAction(gridAction, saveAction);
+    editorToolBar->insertSeparator(gridAction);
 
     auto *saveAsAction = fileMenu->addAction("Save &As...");
     saveAsAction->setShortcut(QKeySequence::SaveAs);
