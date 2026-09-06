@@ -69,6 +69,22 @@ the corresponding images inside sectors. **Plain fill** restores the original
 untextured appearance (the default). Missing textures use the plain fill.
 These are 2D previews; selection and hover highlighting remain visible.
 
+The Texture Browser has a category sidebar, including **All**, **Used in this
+map**, and **Others** for unmapped tiles. Search accepts tile numbers, original
+tile names, and aliases such as "pistol" or "pig cop"; multiple words narrow
+the results together with the selected category. Double-click a tile to select it.
+Used textures refresh whenever the browser opens and include both wall sides,
+active overlays, floors, ceilings, and sprites.
+
+The catalog uses the original Atomic Edition
+[tile definitions](https://github.com/videogamepreservation/dukenukem3d/blob/master/source/NAMES.H),
+with categories and animation-family names added by the editor. Surface categories
+also include tile IDs used on walls, floors, and ceilings in the 41 shipped
+Atomic Edition maps, covering unnamed building materials. This metadata is
+bundled; no game archive is needed to build the catalog. Original tiles
+without a known name or family remain searchable by number in Others. Custom
+GRPs may replace the artwork at those IDs, so names describe the original game.
+
 To add a neighboring sector, draw from existing boundary vertices and reuse a
 complete boundary edge, or finish an open chain between existing vertices with
 Enter. Boundaries shared by two sectors automatically become two-sided walls

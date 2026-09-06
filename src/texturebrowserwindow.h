@@ -4,6 +4,9 @@
 #include <QImage>
 
 #include <optional>
+#include <functional>
+#include <set>
+#include <utility>
 
 class QDialogButtonBox;
 class TextureBrowserWidget;
@@ -19,11 +22,14 @@ public:
     explicit TextureBrowserWindow(QWidget *parent = nullptr);
 
     void browse();
+    void setUsedTexturesProvider(std::function<std::set<int>()> provider)
+    { m_usedTexturesProvider = std::move(provider); }
     [[nodiscard]] std::optional<Selection> chooseTexture(
         std::optional<int> currentTexture = std::nullopt);
     [[nodiscard]] QImage textureImage(int tile);
 
 private:
+    std::function<std::set<int>()> m_usedTexturesProvider;
     TextureBrowserWidget *m_browser = nullptr;
     QDialogButtonBox *m_buttons = nullptr;
 };

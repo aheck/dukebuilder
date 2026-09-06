@@ -44,6 +44,14 @@ mapsave_test = executable(
 )
 test('mapsave', mapsave_test)
 
+texturecatalog_test = executable(
+  'texturecatalog-test',
+  ['tests/texturecatalog_test.cpp', 'src/texturecatalog.cpp', 'src/mapdocument.cpp'],
+  include_directories: include_directories('src'),
+  dependencies: [qt6, libb2],
+)
+test('texturecatalog', texturecatalog_test)
+
 if host_machine.system() == 'linux'
   xcb_plugin = dependency('qt6-qtQXcbIntegrationPlugin')
   app_dependencies += xcb_plugin
@@ -67,6 +75,8 @@ executable(
     'src/settingsdialog.h',
     'src/texturebrowserwidget.cpp',
     'src/texturebrowserwidget.h',
+    'src/texturecatalog.cpp',
+    'src/texturecatalog.h',
     'src/texturebrowserwindow.cpp',
     'src/texturebrowserwindow.h',
   ],

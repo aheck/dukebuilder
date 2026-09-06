@@ -556,3 +556,24 @@ bool MapDocument::operator==(const MapDocument &other) const
         == std::tie(other.m_vertices, other.m_walls, other.m_sectors, other.m_sprites,
                     other.m_playerStart, other.m_complexTopology);
 }
+
+std::set<int> MapDocument::usedTextureTiles() const
+{
+    std::set<int> tiles;
+    const auto addSide = [&](const WallSide &side) {
+        tiles.insert(side.texture);
+        // Build uses the overlay only for masked or one-way walls.
+        if (side.cstat & (16 | 32)) tiles.insert(side.overlayTexture);
+    };
+    for (const auto &wall : m_walls) {
+        if (wall.forwardSector) addSide(wall.forwardSide);
+        if (wall.reverseSector) addSide(wall.reverseSide);
+    }
+    for (const auto &sector : m_sectors) {
+        tiles.insert(sector.floorTexture);
+        tiles.insert(sector.ceilingTexture);
+    }
+    for (const auto &sprite : m_sprites) tiles.insert(sprite.texture);
+    tiles.erase(-1);
+    return tiles;
+}

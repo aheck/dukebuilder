@@ -26,6 +26,7 @@ TextureBrowserWindow::TextureBrowserWindow(QWidget *parent)
 
 void TextureBrowserWindow::browse()
 {
+    m_browser->setUsedTiles(m_usedTexturesProvider ? m_usedTexturesProvider() : std::set<int>{});
     m_browser->reload();
     m_buttons->setStandardButtons(QDialogButtonBox::Close);
     exec();
@@ -34,6 +35,7 @@ void TextureBrowserWindow::browse()
 std::optional<TextureBrowserWindow::Selection> TextureBrowserWindow::chooseTexture(
     std::optional<int> currentTexture)
 {
+    m_browser->setUsedTiles(m_usedTexturesProvider ? m_usedTexturesProvider() : std::set<int>{});
     m_browser->reload();
     m_browser->selectTile(currentTexture.value_or(-1));
     m_buttons->setStandardButtons(

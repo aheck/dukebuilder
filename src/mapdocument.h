@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -121,6 +122,7 @@ public:
     void setSector(SectorId sectorId, const Sector &sector);
     void setSprite(SpriteId spriteId, const Sprite &sprite);
     void clear();
+    [[nodiscard]] std::set<int> usedTextureTiles() const;
     bool operator==(const MapDocument &other) const;
     // Read a classic Build map transactionally, retaining imported topology.
     bool openMap(const QString &filename, QString &error);

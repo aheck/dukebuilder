@@ -129,6 +129,7 @@ public:
     };
 
     void newMap();
+    [[nodiscard]] std::set<int> usedTextureTiles() const { return m_document.usedTextureTiles(); }
     bool saveMap(const QString &filename, QString &error);
     [[nodiscard]] bool hasUnsavedChanges() const;
     bool openMap(const QString &filename, QString &error);

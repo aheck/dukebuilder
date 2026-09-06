@@ -1,4 +1,5 @@
 #include "texturebrowserwidget.h"
+#include "texturecatalog.h"
 
 #include <libduke/art.h>
 #include <libduke/grp.h>
@@ -78,7 +79,8 @@ TextureBrowserWidget::TextureBrowserWidget(QWidget *parent)
     : QWidget(parent)
 {
     m_filter = new QLineEdit(this);
-    m_filter->setPlaceholderText("Filter by tile number...");
+    m_filter->setPlaceholderText("Search by tile number or name...");
+    m_filter->setClearButtonEnabled(true);
     auto *reloadButton = new QPushButton("Reload", this);
 
     auto *controls = new QHBoxLayout();
@@ -96,13 +98,25 @@ TextureBrowserWidget::TextureBrowserWidget(QWidget *parent)
 
     m_statusLabel = new QLabel(this);
 
+    m_categories = new QListWidget(this);
+    m_categories->setObjectName("TextureCategories");
+    m_categories->setFixedWidth(210);
+    m_categories->addItems(QStringList{"All", "Used in this map"} + textureCategories());
+    m_categories->setCurrentRow(0);
+    m_categories->setToolTip("Categories describe original Duke3D artwork; custom artwork may differ.");
+    auto *content = new QHBoxLayout;
+    content->addWidget(m_categories);
+    content->addWidget(m_textureList, 1);
+
     auto *layout = new QVBoxLayout(this);
     layout->addLayout(controls);
-    layout->addWidget(m_textureList, 1);
+    layout->addLayout(content, 1);
     layout->addWidget(m_statusLabel);
 
     connect(m_filter, &QLineEdit::textChanged,
             this, &TextureBrowserWidget::updateFilter);
+    connect(m_categories, &QListWidget::currentRowChanged, this,
+            [this] { updateFilter(m_filter->text()); });
     connect(reloadButton, &QPushButton::clicked,
             this, &TextureBrowserWidget::reload);
     connect(m_textureList, &QListWidget::itemDoubleClicked, this,
@@ -118,6 +132,7 @@ void TextureBrowserWidget::reload()
 {
     m_textureList->clear();
     m_images.clear();
+    m_loadStatus.clear();
     const QStringList grpPaths = QSettings().value(grpFilesSettingsKey).toStringList();
     if (grpPaths.isEmpty()) {
         m_statusLabel->setText("No GRP files configured in Settings → Game Data.");
@@ -212,17 +227,20 @@ void TextureBrowserWidget::reload()
         const QPixmap thumbnail = QPixmap::fromImage(texture.image).scaled(
             thumbnailSize, thumbnailSize, Qt::KeepAspectRatio,
             Qt::FastTransformation);
-        auto *item = new QListWidgetItem(QIcon(thumbnail), QString::number(iterator.key()));
+        const auto metadata = textureMetadata(iterator.key());
+        auto *item = new QListWidgetItem(QIcon(thumbnail),
+                                        QString::number(iterator.key()) + "\n" + metadata.name);
         item->setData(Qt::UserRole, iterator.key());
-        item->setToolTip(QString("Tile %1\n%2 × %3")
+        item->setToolTip(QString("Tile %1\n%4\n%2 × %3\n%5")
                              .arg(iterator.key())
                              .arg(texture.width)
-                             .arg(texture.height));
+                             .arg(texture.height)
+                             .arg(metadata.name)
+                             .arg(metadata.categories.join(", ")));
         m_textureList->addItem(item);
         m_images.insert(iterator.key(), texture.image);
     }
 
-    updateFilter(m_filter->text());
     QString status = QString("%1 textures from %2 GRP file(s)")
                          .arg(textures.size())
                          .arg(archives.size());
@@ -231,13 +249,14 @@ void TextureBrowserWidget::reload()
                       .arg(failedArchives)
                       .arg(failedArtFiles);
     }
-    m_statusLabel->setText(status);
+    m_loadStatus = status;
+    updateFilter(m_filter->text());
 }
 
 std::optional<int> TextureBrowserWidget::selectedTile() const
 {
     const QListWidgetItem *item = m_textureList->currentItem();
-    if (!item) {
+    if (!item || item->isHidden()) {
         return std::nullopt;
     }
     return item->data(Qt::UserRole).toInt();
@@ -250,6 +269,9 @@ QImage TextureBrowserWidget::textureImage(int tile) const
 
 void TextureBrowserWidget::selectTile(int tile)
 {
+    // The currently assigned tile must remain visible when opening a chooser.
+    m_filter->clear();
+    m_categories->setCurrentRow(0);
     for (int index = 0; index < m_textureList->count(); ++index) {
         QListWidgetItem *item = m_textureList->item(index);
         if (item->data(Qt::UserRole).toInt() == tile) {
@@ -263,9 +285,21 @@ void TextureBrowserWidget::selectTile(int tile)
 
 void TextureBrowserWidget::updateFilter(const QString &text)
 {
-    const QString filter = text.trimmed();
+    const QString category = m_categories->currentItem()->text();
+    int visible = 0;
     for (int index = 0; index < m_textureList->count(); ++index) {
         QListWidgetItem *item = m_textureList->item(index);
-        item->setHidden(!filter.isEmpty() && !item->text().contains(filter));
+        const int tile = item->data(Qt::UserRole).toInt();
+        const auto metadata = textureMetadata(tile);
+        const bool matchesCategory = category == "All"
+            || (category == "Used in this map" ? m_usedTiles.count(tile) != 0
+                                               : metadata.categories.contains(category));
+        const bool matches = matchesCategory && textureMatchesSearch(tile, metadata, text);
+        item->setHidden(!matches);
+        if (matches) ++visible;
     }
+    if (m_textureList->currentItem() && m_textureList->currentItem()->isHidden())
+        m_textureList->setCurrentItem(nullptr);
+    if (!m_loadStatus.isEmpty())
+        m_statusLabel->setText(QString("%1 shown — %2").arg(visible).arg(m_loadStatus));
 }

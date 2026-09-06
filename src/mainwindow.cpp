@@ -382,6 +382,7 @@ MainWindow::MainWindow(QWidget *parent)
     setCentralWidget(editor);
 
     auto *textureBrowserWindow = new TextureBrowserWindow(this);
+    textureBrowserWindow->setUsedTexturesProvider([editor] { return editor->usedTextureTiles(); });
 
     auto *propertiesDock = new QDockWidget("Properties", this);
     propertiesDock->setObjectName("PropertiesDock");
