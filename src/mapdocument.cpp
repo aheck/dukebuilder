@@ -29,6 +29,7 @@ void MapDocument::setSprite(SpriteId spriteId, const Sprite &sprite)
 
 void MapDocument::clear()
 {
+    m_complexTopology = false;
     m_vertices.clear();
     m_walls.clear();
     m_sectors.clear();
@@ -52,6 +53,7 @@ MapDocument::VertexId MapDocument::findOrAddVertex(const QPointF &position)
 
 bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed)
 {
+    if (m_complexTopology) return false;
     if (points.size() < 2) {
         return false;
     }
@@ -100,6 +102,7 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed)
 
 void MapDocument::removeWalls(const std::vector<WallId> &wallIds)
 {
+    if (m_complexTopology) return;
     const WallId removed = m_walls.size();
     std::vector<bool> selected(m_walls.size(), false);
     bool changed = false;
@@ -219,7 +222,7 @@ void MapDocument::setVertexPositions(
             m_vertices[vertexId].position = position;
         }
     }
-    rebuildSectors();
+    if (!m_complexTopology) rebuildSectors();
 }
 
 void MapDocument::setSectorFloorZ(std::size_t sectorId, qreal z)
@@ -344,6 +347,9 @@ void MapDocument::setPlayerStartAngle(qreal angle)
 
 void MapDocument::rebuildSectors()
 {
+    // Rebuilt faces can change indices. Imported memberships are hints only.
+    m_playerStart.sectorId.reset();
+    for (auto &sprite : m_sprites) sprite.sectorId.reset();
     struct OutgoingEdge {
         WallId wall;
         VertexId destination;
@@ -470,4 +476,14 @@ void MapDocument::rebuildSectors()
             side = sectorId;
         }
     }
+}
+
+std::size_t MapDocument::Sector::nextWallIndex(std::size_t index) const
+{
+    std::size_t start = 0;
+    for (const auto next : loopStarts) {
+        if (next > index) return index + 1 < next ? index + 1 : start;
+        start = next;
+    }
+    return index + 1 < walls.size() ? index + 1 : start;
 }

@@ -38,7 +38,7 @@ test('mapdocument', mapdocument_test)
 
 mapsave_test = executable(
   'mapsave-test',
-  ['tests/mapsave_test.cpp', 'src/mapsave.cpp', 'src/mapdocument.cpp'],
+  ['tests/mapsave_test.cpp', 'src/mapsave.cpp', 'src/mapload.cpp', 'src/mapdocument.cpp'],
   include_directories: [include_directories('src'), libduke_inc],
   dependencies: app_dependencies,
 )
@@ -60,6 +60,7 @@ executable(
     'src/mapdocument.h',
     'src/mapsave.cpp',
     'src/mapsave.h',
+    'src/mapload.cpp',
     'src/mapeditor.cpp',
     'src/mapeditor.h',
     'src/settingsdialog.cpp',

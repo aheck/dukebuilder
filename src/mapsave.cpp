@@ -50,9 +50,10 @@ int16_t angle(qreal degrees, const QString &label)
 // Use the rounded, exported geometry, including boundary points. An ambiguous
 // interior requires explicit geometry repair; a shared boundary uses its first
 // adjoining sector deterministically.
-int16_t containingSector(const DukeMapFile &map, int32_t x, int32_t y, const QString &label)
+int16_t containingSector(const DukeMapFile &map, int32_t x, int32_t y, const QString &label,
+                         std::optional<MapDocument::SectorId> preferred)
 {
-    int interior = -1, boundary = -1;
+    int interior = -1, boundary = -1, interiorCount = 0;
     for (int s = 0; s < map.numsectors; ++s) {
         bool inside = false, onBoundary = false;
         const auto &sector = *map.sectors[s];
@@ -67,13 +68,16 @@ int16_t containingSector(const DukeMapFile &map, int32_t x, int32_t y, const QSt
                 && y >= std::min(a.y, b.y) && y <= std::max(a.y, b.y)) onBoundary = true;
             if ((a.y > y) != (b.y > y) && a.x + py * dx / dy > x) inside = !inside;
         }
+        if ((onBoundary || inside) && preferred && *preferred == static_cast<std::size_t>(s))
+            return static_cast<int16_t>(s);
         if (onBoundary) {
             if (boundary < 0) boundary = s;
         } else if (inside) {
-            require(interior < 0, label + ": lies in overlapping sectors; sector membership is ambiguous.");
+            ++interiorCount;
             interior = s;
         }
     }
+    require(interiorCount <= 1, label + ": lies in overlapping sectors; sector membership is ambiguous.");
     const int result = interior >= 0 ? interior : boundary;
     require(result >= 0, label + ": place it inside a closed sector.");
     return static_cast<int16_t>(result);
@@ -138,6 +142,7 @@ bool saveBuildMap(const MapDocument &document, const QString &filename, QString 
             out.floorypanning = number<decltype(out.floorypanning)>(source.floorypanning, label + " floorypanning");
             out.visibility = number<decltype(out.visibility)>(source.visibility, label + " visibility");
             out.extra = number<decltype(out.extra)>(source.extra, label + " extra");
+            out.filler = number<uint8_t>(source.filler, label + " filler");
             out.ceilingstat = bits(source.ceilingstat, label + " ceilingstat");
             out.floorstat = bits(source.floorstat, label + " floorstat");
             out.lotag = bits(source.lotag, label + " lotag");
@@ -147,7 +152,7 @@ bool saveBuildMap(const MapDocument &document, const QString &filename, QString 
             for (std::size_t j = 0; j < source.walls.size(); ++j, ++nextWall) {
                 const auto wallId = source.walls[j];
                 const auto vertexId = source.vertices[j];
-                const auto endId = source.vertices[(j + 1) % source.vertices.size()];
+                const auto endId = source.vertices[source.nextWallIndex(j)];
                 require(wallId < document.walls().size() && vertexId < document.vertices().size()
                         && endId < document.vertices().size(), label + ": invalid boundary reference.");
                 const auto &wall = document.walls()[wallId];
@@ -163,7 +168,7 @@ bool saveBuildMap(const MapDocument &document, const QString &filename, QString 
                 const auto &position = document.vertices()[vertexId].position;
                 record.x = number<int32_t>(position.x(), wallLabel + " X");
                 record.y = number<int32_t>(position.y(), wallLabel + " Y");
-                record.point2 = static_cast<int16_t>(out.wallptr + (j + 1) % source.walls.size());
+                record.point2 = static_cast<int16_t>(out.wallptr + source.nextWallIndex(j));
                 record.nextwall = record.nextsector = -1;
                 record.picnum = tile(side.texture, wallLabel + " texture");
                 record.overpicnum = tile(side.overlayTexture, wallLabel + " overlay texture");
@@ -202,7 +207,7 @@ bool saveBuildMap(const MapDocument &document, const QString &filename, QString 
             out.z = number<int32_t>(source.z, label + " Z");
             out.ang = angle(source.angle, label);
             out.picnum = tile(source.texture, label + " texture");
-            out.sectnum = containingSector(map, out.x, out.y, label);
+            out.sectnum = containingSector(map, out.x, out.y, label, source.sectorId);
             out.shade = number<decltype(out.shade)>(source.shade, label + " shade");
             out.pal = number<decltype(out.pal)>(source.palette, label + " palette");
             out.clipdist = number<decltype(out.clipdist)>(source.clipdist, label + " clipdist");
@@ -216,6 +221,7 @@ bool saveBuildMap(const MapDocument &document, const QString &filename, QString 
             out.yvel = number<decltype(out.yvel)>(source.yvel, label + " yvel");
             out.zvel = number<decltype(out.zvel)>(source.zvel, label + " zvel");
             out.extra = number<decltype(out.extra)>(source.extra, label + " extra");
+            out.filler = number<uint8_t>(source.filler, label + " filler");
             out.cstat = bits(source.cstat, label + " cstat");
             out.lotag = bits(source.lotag, label + " lotag");
             out.hitag = bits(source.hitag, label + " hitag");
@@ -226,7 +232,7 @@ bool saveBuildMap(const MapDocument &document, const QString &filename, QString 
         map.posy = number<int32_t>(start.position.y(), "Player start Y");
         map.posz = number<int32_t>(start.z, "Player start Z");
         map.ang = angle(start.angle, "Player start");
-        map.cursectnum = containingSector(map, map.posx, map.posy, "Player start");
+        map.cursectnum = containingSector(map, map.posx, map.posy, "Player start", start.sectorId);
         if (!duke_map_file_validate(&map)) throw std::runtime_error(map.last_error);
 
         // libduke writes a filename, so stage its output before atomically

@@ -130,6 +130,7 @@ public:
 
     void newMap();
     bool saveMap(const QString &filename, QString &error) const;
+    bool openMap(const QString &filename, QString &error);
     void setMode(Mode mode);
     void setGridSize(qreal size);
     void setGridVisible(bool visible);

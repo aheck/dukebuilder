@@ -145,4 +145,85 @@ int main(int argc, char **argv)
     require(duke_map_file_read_from_filename(map.get(), QFile::encodeName(reversedPath).constData()), "Read reversed room");
     require(duke_map_file_validate(map.get()) && map->ang == 0 && map->numsprites == 0,
             "Opposite drawing direction produces valid winding and 360 degrees wraps to zero");
+
+    MapDocument opened;
+    require(opened.openMap(path, error), error);
+    require(opened.sectors().size() == 2 && opened.walls().size() == 7 && opened.vertices().size() == 6,
+            "Import must weld portal endpoints and combine both wall sides");
+    require(opened.playerStart().sectorId == 0 && opened.sprites()[0].sectorId == 1,
+            "Import preserves explicit sector membership");
+    const QString copiedPath = directory.filePath("opened.map");
+    require(saveBuildMap(opened, copiedPath, error), error);
+    require(read(copiedPath) == bytes, "Open/save preserves every v7 record field");
+    const QString brokenPath = directory.filePath("broken.map");
+    QFile broken(brokenPath);
+    require(broken.open(QIODevice::WriteOnly) && broken.write(bytes.left(25)) == 25, "Create truncated fixture");
+    broken.close();
+    require(!opened.openMap(brokenPath, error) && !error.isEmpty(), "Reject truncated map");
+    require(saveBuildMap(opened, copiedPath, error) && read(copiedPath) == bytes,
+            "Failed open leaves the current document intact");
+    require(!opened.openMap(directory.filePath("missing.map"), error), "Report missing map");
+    const auto rejectModifiedMap = [&](QByteArray modified, const QString &message) {
+        require(broken.open(QIODevice::WriteOnly | QIODevice::Truncate)
+                && broken.write(modified) == modified.size(), "Write invalid fixture");
+        broken.close();
+        require(!opened.openMap(brokenPath, error) && !error.isEmpty(), message);
+        require(saveBuildMap(opened, copiedPath, error) && read(copiedPath) == bytes,
+                "Invalid map must not replace the current document");
+    };
+    auto modified = bytes;
+    modified[0] = 6;
+    rejectModifiedMap(modified, "Reject unsupported map version");
+    // The v7 header is 22 bytes, followed by 40-byte sectors and a wall count.
+    const int firstWall = 22 + 40 * 2 + 2;
+    modified = bytes;
+    modified[firstWall + 8] = char(0xff);
+    modified[firstWall + 9] = char(0x7f);
+    rejectModifiedMap(modified, "Reject out-of-range next-point link");
+    modified = bytes;
+    modified[firstWall + 10] = 0;
+    modified[firstWall + 11] = 0;
+    rejectModifiedMap(modified, "Reject inconsistent portal reference");
+
+    // A sector with an inner loop must remain a single sector with a hole.
+    DukeMapSector ring{};
+    ring.wallnum = 8; ring.ceilingz = -8192; ring.extra = -1; ring.filler = 17;
+    std::vector<DukeMapWall> ringWalls(8);
+    const QPoint points[] = {{-1024,-1024},{1024,-1024},{1024,1024},{-1024,1024},
+                             {-256,-256},{-256,256},{256,256},{256,-256}};
+    std::vector<DukeMapWall *> ringPointers;
+    for (int i = 0; i < 8; ++i) {
+        auto &wall = ringWalls[i];
+        wall.x = points[i].x(); wall.y = points[i].y();
+        wall.point2 = i < 4 ? (i + 1) % 4 : 4 + (i - 3) % 4;
+        wall.nextwall = wall.nextsector = wall.extra = -1;
+        wall.xrepeat = wall.yrepeat = 8;
+        ringPointers.push_back(&wall);
+    }
+    DukeMapSector *ringPointer = &ring;
+    DukeMapFile ringMap{};
+    ringMap.mapversion = 7; ringMap.numsectors = 1; ringMap.numwalls = 8;
+    ringMap.sectors = &ringPointer; ringMap.walls = ringPointers.data();
+    ringMap.posx = 512; ringMap.posz = -4096;
+    const QString ringPath = directory.filePath("ring.map");
+    require(duke_map_file_validate(&ringMap), "Valid ring fixture");
+    require(duke_map_file_write_to_filename(&ringMap, QFile::encodeName(ringPath).constData()), "Write ring fixture");
+    require(opened.openMap(ringPath, error), error);
+    require(opened.sectors().size() == 1 && opened.sectors()[0].loopStarts == std::vector<std::size_t>({0, 4}),
+            "Keep outer and inner loops");
+    require(!opened.supportsTopologyEditing(), "Complex imported topology must be protected from face rebuilding");
+    require(saveBuildMap(opened, copiedPath, error) && read(copiedPath) == read(ringPath),
+            "Hole and reserved bytes survive open/save unchanged");
+    opened.setVertexPositions({{0, {-1100, -1024}}});
+    opened.setSectorFloorTexture(0, 80);
+    require(opened.sectors()[0].loopStarts.size() == 2 && saveBuildMap(opened, copiedPath, error),
+            "Vertex and property edits preserve imported holes");
+
+    // Optional local fixtures permit checking original maps without bundling
+    // copyrighted game data in the repository.
+    for (int i = 1; i < argc; ++i) {
+        require(opened.openMap(QString::fromLocal8Bit(argv[i]), error), error);
+        std::cout << "Opened " << argv[i] << ": " << opened.sectors().size()
+                  << " sectors, " << opened.sprites().size() << " sprites\n";
+    }
 }

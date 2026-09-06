@@ -525,7 +525,9 @@ MainWindow::MainWindow(QWidget *parent)
                 addProperty("Floor X panning", QString::number(sector.floorxpanning), MapEditor::Property::FloorXPanning);
                 addProperty("Floor Y panning", QString::number(sector.floorypanning), MapEditor::Property::FloorYPanning);
                 std::vector<std::pair<int, QString>> wallChoices;
-                for (const auto wallId : sector.walls) {
+                const auto outerEnd = sector.loopStarts.size() > 1 ? sector.loopStarts[1] : sector.walls.size();
+                for (std::size_t i = 0; i < outerEnd; ++i) {
+                    const auto wallId = sector.walls[i];
                     wallChoices.emplace_back(static_cast<int>(wallId), QString("Wall %1").arg(wallId));
                 }
                 if (!sector.walls.empty()) addChoice("First wall (slope reference)", static_cast<int>(sector.walls.front()),
@@ -619,8 +621,19 @@ MainWindow::MainWindow(QWidget *parent)
 
     auto *openMapAction = fileMenu->addAction("&Open Map");
     openMapAction->setShortcut(QKeySequence::Open);
-    connect(openMapAction, &QAction::triggered, this, [this] {
-        statusBar()->showMessage("Open Map is not implemented yet", 3000);
+    connect(openMapAction, &QAction::triggered, this, [this, editor] {
+        const QString filename = QFileDialog::getOpenFileName(this, "Open Build Map", m_mapFilename,
+                                                             "Build maps (*.map *.MAP);;All files (*)");
+        if (filename.isEmpty()) return;
+        QString error;
+        if (!editor->openMap(filename, error)) {
+            QMessageBox::warning(this, "Unable to open map", error);
+            return;
+        }
+        m_mapFilename = filename;
+        setWindowFilePath(filename);
+        setWindowTitle(QFileInfo(filename).fileName() + " - Duke Builder");
+        statusBar()->showMessage("Opened " + QFileInfo(filename).fileName(), 5000);
     });
 
     fileMenu->addSeparator();

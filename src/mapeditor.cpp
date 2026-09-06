@@ -244,11 +244,11 @@ private:
     bool m_hovered = false;
 };
 
-class SectorItem final : public QGraphicsPolygonItem
+class SectorItem final : public QGraphicsPathItem
 {
 public:
-    explicit SectorItem(const QPolygonF &polygon)
-        : QGraphicsPolygonItem(polygon)
+    explicit SectorItem(const QPainterPath &path)
+        : QGraphicsPathItem(path)
     {
         setPen(Qt::NoPen);
         setInteractive(false);
@@ -279,14 +279,14 @@ protected:
     {
         m_hovered = true;
         update();
-        QGraphicsPolygonItem::hoverEnterEvent(event);
+        QGraphicsPathItem::hoverEnterEvent(event);
     }
 
     void hoverLeaveEvent(QGraphicsSceneHoverEvent *event) override
     {
         m_hovered = false;
         update();
-        QGraphicsPolygonItem::hoverLeaveEvent(event);
+        QGraphicsPathItem::hoverLeaveEvent(event);
     }
 
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
@@ -294,7 +294,7 @@ protected:
         painter->setPen(Qt::NoPen);
         if (m_texture.style() != Qt::NoBrush) {
             painter->setBrush(m_texture);
-            painter->drawPolygon(polygon());
+            painter->drawPath(path());
             if (!isSelected() && !m_hovered) return;
         }
         QColor color = sectorColor;
@@ -307,7 +307,7 @@ protected:
         }
         painter->setPen(Qt::NoPen);
         painter->setBrush(color);
-        painter->drawPolygon(polygon());
+        painter->drawPath(path());
     }
 
 private:
@@ -668,8 +668,12 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
                                          static_cast<MapDocument::WallId>(integer(0, 2147483647)));
             if (first == updatedSector.walls.end()) return;
             const auto offset = first - updatedSector.walls.begin();
-            std::rotate(updatedSector.walls.begin(), first, updatedSector.walls.end());
-            std::rotate(updatedSector.vertices.begin(), updatedSector.vertices.begin() + offset, updatedSector.vertices.end());
+            const auto outerEnd = updatedSector.loopStarts.size() > 1
+                ? updatedSector.loopStarts[1] : updatedSector.walls.size();
+            if (static_cast<std::size_t>(offset) >= outerEnd) return;
+            std::rotate(updatedSector.walls.begin(), first, updatedSector.walls.begin() + outerEnd);
+            std::rotate(updatedSector.vertices.begin(), updatedSector.vertices.begin() + offset,
+                        updatedSector.vertices.begin() + outerEnd);
             break;
         }
         default: changedAdditional = false; break;
@@ -859,6 +863,35 @@ bool MapEditor::saveMap(const QString &filename, QString &error) const
         return false;
     }
     return saveBuildMap(m_document, filename, error);
+}
+
+bool MapEditor::openMap(const QString &filename, QString &error)
+{
+    MapDocument loaded;
+    if (!loaded.openMap(filename, error)) return false;
+    cancelDrawing();
+    m_draggingVertices = m_draggingSprites = m_draggingPlayerStart = false;
+    m_spriteDragMoved = m_clickedPlayerStart = m_panning = false;
+    m_draggedVertices.clear();
+    m_draggedWalls.clear();
+    m_draggedSectors.clear();
+    m_draggedSprites.clear();
+    m_wallSideReversed = false;
+    m_document = std::move(loaded);
+    m_spriteTextures.clear();
+    for (const auto &sprite : m_document.sprites()) {
+        if (m_textureResolver && sprite.texture >= 0 && !m_spriteTextures.contains(sprite.texture))
+            m_spriteTextures.insert(sprite.texture, m_textureResolver(sprite.texture));
+    }
+    rebuildScene();
+    QRectF bounds(-sceneExtent, -sceneExtent, sceneExtent * 2, sceneExtent * 2);
+    bounds = bounds.united(m_scene->itemsBoundingRect().adjusted(-1024, -1024, 1024, 1024));
+    m_scene->setSceneRect(bounds);
+    centerOn(m_document.playerStart().position);
+    setCursor(Qt::CrossCursor);
+    updateProperties();
+    reportStatus("Map opened");
+    return true;
 }
 
 void MapEditor::newMap()
@@ -1504,6 +1537,11 @@ void MapEditor::drawBackground(QPainter *painter, const QRectF &rect)
 void MapEditor::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Delete && m_mode == Mode::Lines) {
+        if (!m_document.supportsTopologyEditing()) {
+            reportStatus("Line deletion is not yet supported for imported maps with holes or overlapping geometry.");
+            event->accept();
+            return;
+        }
         std::vector<MapDocument::WallId> wallIds;
         for (QGraphicsItem *item : m_scene->selectedItems()) {
             if (auto *wall = dynamic_cast<WallItem *>(item)) {
@@ -1567,6 +1605,10 @@ void MapEditor::keyPressEvent(QKeyEvent *event)
 
 void MapEditor::addDrawingPoint(const QPointF &position)
 {
+    if (!m_document.supportsTopologyEditing()) {
+        reportStatus("Adding lines is not yet supported for imported maps with holes or overlapping geometry.");
+        return;
+    }
     if (!m_drawingPoints.empty() && position == m_drawingPoints.back()) {
         return;
     }
@@ -1651,11 +1693,17 @@ void MapEditor::rebuildScene()
 
     for (std::size_t sectorId = 0; sectorId < m_document.sectors().size(); ++sectorId) {
         const MapDocument::Sector &sector = m_document.sectors()[sectorId];
-        QPolygonF polygon;
-        for (const MapDocument::VertexId vertexId : sector.vertices) {
-            polygon.append(m_document.vertices()[vertexId].position);
+        QPainterPath path;
+        path.setFillRule(Qt::OddEvenFill);
+        for (std::size_t i = 0; i < sector.vertices.size(); ++i) {
+            const auto position = m_document.vertices()[sector.vertices[i]].position;
+            if (i == 0 || std::find(sector.loopStarts.begin(), sector.loopStarts.end(), i) != sector.loopStarts.end())
+                path.moveTo(position);
+            else
+                path.lineTo(position);
+            if (sector.nextWallIndex(i) <= i) path.closeSubpath();
         }
-        auto *item = new SectorItem(polygon);
+        auto *item = new SectorItem(path);
         item->setInteractive(m_mode == Mode::Sectors);
         item->setData(sectorIdRole, static_cast<qulonglong>(sectorId));
         m_scene->addItem(item);

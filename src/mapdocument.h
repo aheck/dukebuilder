@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QPointF>
+#include <QString>
 
 #include <cstddef>
 #include <optional>
@@ -52,6 +53,9 @@ public:
     struct Sector {
         std::vector<WallId> walls;
         std::vector<VertexId> vertices;
+        // Empty means a single loop. Imported sectors may include holes.
+        std::vector<std::size_t> loopStarts;
+        [[nodiscard]] std::size_t nextWallIndex(std::size_t index) const;
         qreal floorz = 0.0;
         qreal ceilingz = -8192.0;
         int floorTexture = 0;
@@ -72,6 +76,7 @@ public:
         int ceilingypanning = 0;
         int visibility = 0;
         int extra = -1;
+        int filler = 0;
     };
 
     struct Sprite {
@@ -95,18 +100,24 @@ public:
         int yvel = 0;
         int zvel = 0;
         int extra = -1;
+        int filler = 0;
+        std::optional<SectorId> sectorId = std::nullopt;
     };
 
     struct PlayerStart {
         QPointF position;
         qreal z = 0.0;
         qreal angle = 0.0;
+        std::optional<SectorId> sectorId = std::nullopt;
     };
 
     void setWallSide(WallId wallId, bool reversed, const WallSide &side);
     void setSector(SectorId sectorId, const Sector &sector);
     void setSprite(SpriteId spriteId, const Sprite &sprite);
     void clear();
+    // Read a classic Build map transactionally, retaining imported topology.
+    bool openMap(const QString &filename, QString &error);
+    [[nodiscard]] bool supportsTopologyEditing() const { return !m_complexTopology; }
     [[nodiscard]] bool addPolyline(const std::vector<QPointF> &points, bool closed);
     void removeWalls(const std::vector<WallId> &wallIds);
     void setVertexPositions(const std::vector<std::pair<VertexId, QPointF>> &positions);
@@ -143,4 +154,5 @@ private:
     std::vector<Sector> m_sectors;
     std::vector<Sprite> m_sprites;
     PlayerStart m_playerStart{{0.0, 0.0}, 0.0, 0.0};
+    bool m_complexTopology = false;
 };

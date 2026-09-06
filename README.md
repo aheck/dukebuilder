@@ -87,7 +87,17 @@ shows only its available side.
 For a release build, use `Release` for Conan's `build_type`, use `release` for
 Meson's `--buildtype`, and configure a separate build directory.
 
-## Saving maps
+## Opening and saving maps
+
+Use **File → Open Map** (Ctrl+O) to open a classic version-7 Build `.map`
+file. The view centers on the player start, and Save uses the opened filename.
+An unsuccessful open leaves the current map intact.
+
+Imported maps retain sector loops, independent portal-side properties, sprites,
+and player start information. Maps with holes, overlapping geometry, or effect
+sectors support vertex and property edits, but adding and deleting lines is
+disabled to preserve their topology. Saving still applies the validation rules
+below; some original effect geometry may be opened but cannot yet be saved.
 
 Use **File → Save** (Ctrl+S) or **Save As** (Ctrl+Shift+S) to write a classic
 version-7 Build `.map` file. Save remembers the filename until you start a new
@@ -102,14 +112,13 @@ Export preserves numeric X/Y/Z coordinates, rounds fractional coordinates to
 integers, and converts degree angles to Build's 0–2047 angle range. Sector
 numbers and first-wall selections are preserved; shared lines produce two
 linked wall records with independent properties. Sprite and player sector
-numbers are determined from the exported geometry. Ambiguous placement inside
-overlapping sectors is rejected because the editor has no explicit sector
-membership selector yet.
+numbers are determined from the exported geometry, retaining imported sector
+membership when it still matches the position. Ambiguous placement inside
+overlapping sectors without a matching imported membership is rejected.
 
 The classic limits are 1,024 sectors, 8,192 wall sides, 4,096 sprites, and texture
 numbers 0–6,143, matching the original
 [Duke 3D definitions](https://github.com/videogamepreservation/dukenukem3d/blob/master/source/BUILD.H).
 Textures are referenced by tile number; their artwork is supplied by the game.
-Opening maps in Duke Builder is not implemented yet.
 
-Run geometry and map-export regression tests with `meson test -C build`.
+Run geometry and map open/save regression tests with `meson test -C build`.
