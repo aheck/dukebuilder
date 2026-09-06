@@ -8,6 +8,8 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QDockWidget>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QIcon>
@@ -608,8 +610,11 @@ MainWindow::MainWindow(QWidget *parent)
 
     auto *newMapAction = fileMenu->addAction("&New Map");
     newMapAction->setShortcut(QKeySequence::New);
-    connect(newMapAction, &QAction::triggered, this, [editor] {
+    connect(newMapAction, &QAction::triggered, this, [this, editor] {
         editor->newMap();
+        m_mapFilename.clear();
+        setWindowFilePath({});
+        setWindowTitle("Duke Builder");
     });
 
     auto *openMapAction = fileMenu->addAction("&Open Map");
@@ -622,15 +627,34 @@ MainWindow::MainWindow(QWidget *parent)
 
     auto *saveAction = fileMenu->addAction("&Save");
     saveAction->setShortcut(QKeySequence::Save);
-    connect(saveAction, &QAction::triggered, this, [this] {
-        statusBar()->showMessage("Save is not implemented yet", 3000);
-    });
+    const auto saveMap = [this, editor](bool saveAs) {
+        // Commit any active property edit before taking the export snapshot.
+        editor->setFocus();
+        QString filename = m_mapFilename;
+        if (saveAs || filename.isEmpty()) {
+            QFileDialog dialog(this, "Save Build Map", filename, "Build maps (*.map *.MAP)");
+            dialog.setAcceptMode(QFileDialog::AcceptSave);
+            dialog.setFileMode(QFileDialog::AnyFile);
+            dialog.setDefaultSuffix("map");
+            if (dialog.exec() != QDialog::Accepted) return;
+            filename = dialog.selectedFiles().value(0);
+            if (filename.isEmpty()) return;
+        }
+        QString error;
+        if (!editor->saveMap(filename, error)) {
+            QMessageBox::warning(this, "Unable to save map", error);
+            return;
+        }
+        m_mapFilename = filename;
+        setWindowFilePath(filename);
+        setWindowTitle(QFileInfo(filename).fileName() + " - Duke Builder");
+        statusBar()->showMessage("Saved " + QFileInfo(filename).fileName(), 5000);
+    };
+    connect(saveAction, &QAction::triggered, this, [saveMap] { saveMap(false); });
 
     auto *saveAsAction = fileMenu->addAction("Save &As...");
     saveAsAction->setShortcut(QKeySequence::SaveAs);
-    connect(saveAsAction, &QAction::triggered, this, [this] {
-        statusBar()->showMessage("Save As is not implemented yet", 3000);
-    });
+    connect(saveAsAction, &QAction::triggered, this, [saveMap] { saveMap(true); });
 
     fileMenu->addSeparator();
 

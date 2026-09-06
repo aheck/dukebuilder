@@ -36,6 +36,14 @@ mapdocument_test = executable(
 )
 test('mapdocument', mapdocument_test)
 
+mapsave_test = executable(
+  'mapsave-test',
+  ['tests/mapsave_test.cpp', 'src/mapsave.cpp', 'src/mapdocument.cpp'],
+  include_directories: [include_directories('src'), libduke_inc],
+  dependencies: app_dependencies,
+)
+test('mapsave', mapsave_test)
+
 if host_machine.system() == 'linux'
   xcb_plugin = dependency('qt6-qtQXcbIntegrationPlugin')
   app_dependencies += xcb_plugin
@@ -50,6 +58,8 @@ executable(
     'src/mainwindow.h',
     'src/mapdocument.cpp',
     'src/mapdocument.h',
+    'src/mapsave.cpp',
+    'src/mapsave.h',
     'src/mapeditor.cpp',
     'src/mapeditor.h',
     'src/settingsdialog.cpp',

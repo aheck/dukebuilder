@@ -1,4 +1,5 @@
 #include "mapeditor.h"
+#include "mapsave.h"
 
 #include <QApplication>
 #include <QGraphicsEllipseItem>
@@ -849,6 +850,15 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
             break;
         }
     }
+}
+
+bool MapEditor::saveMap(const QString &filename, QString &error) const
+{
+    if (!m_drawingPoints.empty()) {
+        error = "Finish or cancel the current drawing before saving.";
+        return false;
+    }
+    return saveBuildMap(m_document, filename, error);
 }
 
 void MapEditor::newMap()

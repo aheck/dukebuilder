@@ -86,3 +86,30 @@ shows only its available side.
 
 For a release build, use `Release` for Conan's `build_type`, use `release` for
 Meson's `--buildtype`, and configure a separate build directory.
+
+## Saving maps
+
+Use **File → Save** (Ctrl+S) or **Save As** (Ctrl+Shift+S) to write a classic
+version-7 Build `.map` file. Save remembers the filename until you start a new
+map. Existing files are replaced only after validation and writing succeed.
+
+Finish or cancel any active drawing before saving. The player start must lie
+inside a closed sector, between its ceiling and floor. Sprites must have a
+texture and lie inside a sector. Errors identify invalid placement, geometry,
+field values, or format limits so they can be corrected in the editor.
+
+Export preserves numeric X/Y/Z coordinates, rounds fractional coordinates to
+integers, and converts degree angles to Build's 0–2047 angle range. Sector
+numbers and first-wall selections are preserved; shared lines produce two
+linked wall records with independent properties. Sprite and player sector
+numbers are determined from the exported geometry. Ambiguous placement inside
+overlapping sectors is rejected because the editor has no explicit sector
+membership selector yet.
+
+The classic limits are 1,024 sectors, 8,192 wall sides, 4,096 sprites, and texture
+numbers 0–6,143, matching the original
+[Duke 3D definitions](https://github.com/videogamepreservation/dukenukem3d/blob/master/source/BUILD.H).
+Textures are referenced by tile number; their artwork is supplied by the game.
+Opening maps in Duke Builder is not implemented yet.
+
+Run geometry and map-export regression tests with `meson test -C build`.

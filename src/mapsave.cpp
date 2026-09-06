@@ -1,0 +1,253 @@
+#include "mapsave.h"
+#include "mapdocument.h"
+#include <libduke/map.h>
+
+#include <QFile>
+#include <QSaveFile>
+#include <QTemporaryFile>
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <limits>
+#include <stdexcept>
+#include <vector>
+
+namespace {
+void require(bool condition, const QString &message)
+{
+    if (!condition) throw std::runtime_error(message.toStdString());
+}
+
+template<typename T> T number(qreal value, const QString &label)
+{
+    const double rounded = std::round(value);
+    require(std::isfinite(rounded) && rounded >= std::numeric_limits<T>::lowest()
+            && rounded <= std::numeric_limits<T>::max(), label + ": value is outside the Build field range.");
+    return static_cast<T>(rounded);
+}
+
+int16_t bits(int value, const QString &label)
+{
+    require(value >= -32768 && value <= 65535, label + ": expected a 16-bit value.");
+    return static_cast<int16_t>(value > 32767 ? value - 65536 : value);
+}
+
+int16_t tile(int value, const QString &label)
+{
+    // Original Duke 3D BUILD.H defines MAXTILES as 6144.
+    require(value >= 0 && value < 6144, label + ": choose a Duke 3D texture (0–6143).");
+    return static_cast<int16_t>(value);
+}
+
+int16_t angle(qreal degrees, const QString &label)
+{
+    require(std::isfinite(degrees), label + ": angle must be finite.");
+    double wrapped = std::fmod(degrees, 360.0);
+    if (wrapped < 0) wrapped += 360;
+    return static_cast<int16_t>(std::lround(wrapped * 2048.0 / 360.0) % 2048);
+}
+
+// Use the rounded, exported geometry, including boundary points. An ambiguous
+// interior requires explicit geometry repair; a shared boundary uses its first
+// adjoining sector deterministically.
+int16_t containingSector(const DukeMapFile &map, int32_t x, int32_t y, const QString &label)
+{
+    int interior = -1, boundary = -1;
+    for (int s = 0; s < map.numsectors; ++s) {
+        bool inside = false, onBoundary = false;
+        const auto &sector = *map.sectors[s];
+        for (int i = sector.wallptr; i < sector.wallptr + sector.wallnum; ++i) {
+            const auto &a = *map.walls[i];
+            const auto &b = *map.walls[a.point2];
+            const long double dx = static_cast<long double>(b.x) - a.x;
+            const long double dy = static_cast<long double>(b.y) - a.y;
+            const long double px = static_cast<long double>(x) - a.x;
+            const long double py = static_cast<long double>(y) - a.y;
+            if (dx * py == dy * px && x >= std::min(a.x, b.x) && x <= std::max(a.x, b.x)
+                && y >= std::min(a.y, b.y) && y <= std::max(a.y, b.y)) onBoundary = true;
+            if ((a.y > y) != (b.y > y) && a.x + py * dx / dy > x) inside = !inside;
+        }
+        if (onBoundary) {
+            if (boundary < 0) boundary = s;
+        } else if (inside) {
+            require(interior < 0, label + ": lies in overlapping sectors; sector membership is ambiguous.");
+            interior = s;
+        }
+    }
+    const int result = interior >= 0 ? interior : boundary;
+    require(result >= 0, label + ": place it inside a closed sector.");
+    return static_cast<int16_t>(result);
+}
+}
+
+bool saveBuildMap(const MapDocument &document, const QString &filename, QString &error)
+{
+    error.clear();
+    try {
+        const auto &sectors = document.sectors();
+        require(!sectors.empty(), "The map has no closed sectors.");
+        require(sectors.size() <= MAPV7_MAXSECTORS, "Version 7 supports at most 1024 sectors.");
+        require(document.sprites().size() <= MAPV7_MAXSPRITES, "Version 7 supports at most 4096 sprites.");
+        std::size_t wallCount = 0;
+        for (const auto &sector : sectors) {
+            require(sector.walls.size() >= 3 && sector.walls.size() == sector.vertices.size(),
+                    "A sector has an incomplete boundary.");
+            wallCount += sector.walls.size();
+        }
+        require(wallCount <= MAPV7_MAXWALLS, "Version 7 supports at most 8192 wall sides (shared lines count twice).");
+
+        // Storage owns the records; libduke borrows the pointer arrays below.
+        std::vector<DukeMapSector> sectorRecords(sectors.size());
+        std::vector<DukeMapWall> wallRecords(wallCount);
+        std::vector<DukeMapSprite> spriteRecords(document.sprites().size());
+        std::vector<DukeMapSector *> sectorPointers;
+        std::vector<DukeMapWall *> wallPointers;
+        std::vector<DukeMapSprite *> spritePointers;
+        for (auto &record : sectorRecords) sectorPointers.push_back(&record);
+        for (auto &record : wallRecords) wallPointers.push_back(&record);
+        for (auto &record : spriteRecords) spritePointers.push_back(&record);
+        DukeMapFile map{};
+        map.mapversion = 7;
+        map.numsectors = static_cast<int16_t>(sectors.size());
+        map.numwalls = static_cast<uint16_t>(wallCount);
+        map.numsprites = static_cast<uint16_t>(spriteRecords.size());
+        map.sectors = sectorPointers.data();
+        map.walls = wallPointers.data();
+        map.sprites = spritePointers.data();
+
+        std::vector<std::array<int, 2>> sideIndices(document.walls().size(), {-1, -1});
+        std::vector<int> wallOwners(wallCount, -1);
+        int nextWall = 0;
+        for (std::size_t id = 0; id < sectors.size(); ++id) {
+            const auto &source = sectors[id];
+            auto &out = sectorRecords[id];
+            const QString label = QString("Sector %1").arg(id);
+            out.wallptr = static_cast<int16_t>(nextWall);
+            out.wallnum = static_cast<int16_t>(source.walls.size());
+            out.ceilingz = number<decltype(out.ceilingz)>(source.ceilingz, label + " ceilingz");
+            out.floorz = number<decltype(out.floorz)>(source.floorz, label + " floorz");
+            out.ceilingheinum = number<decltype(out.ceilingheinum)>(source.ceilingheinum, label + " ceilingheinum");
+            out.floorheinum = number<decltype(out.floorheinum)>(source.floorheinum, label + " floorheinum");
+            out.ceilingshade = number<decltype(out.ceilingshade)>(source.ceilingshade, label + " ceilingshade");
+            out.floorshade = number<decltype(out.floorshade)>(source.floorshade, label + " floorshade");
+            out.ceilingpal = number<decltype(out.ceilingpal)>(source.ceilingpal, label + " ceilingpal");
+            out.floorpal = number<decltype(out.floorpal)>(source.floorpal, label + " floorpal");
+            out.ceilingxpanning = number<decltype(out.ceilingxpanning)>(source.ceilingxpanning, label + " ceilingxpanning");
+            out.ceilingypanning = number<decltype(out.ceilingypanning)>(source.ceilingypanning, label + " ceilingypanning");
+            out.floorxpanning = number<decltype(out.floorxpanning)>(source.floorxpanning, label + " floorxpanning");
+            out.floorypanning = number<decltype(out.floorypanning)>(source.floorypanning, label + " floorypanning");
+            out.visibility = number<decltype(out.visibility)>(source.visibility, label + " visibility");
+            out.extra = number<decltype(out.extra)>(source.extra, label + " extra");
+            out.ceilingstat = bits(source.ceilingstat, label + " ceilingstat");
+            out.floorstat = bits(source.floorstat, label + " floorstat");
+            out.lotag = bits(source.lotag, label + " lotag");
+            out.hitag = bits(source.hitag, label + " hitag");
+            out.ceilingpicnum = tile(source.ceilingTexture, label + " ceiling texture");
+            out.floorpicnum = tile(source.floorTexture, label + " floor texture");
+            for (std::size_t j = 0; j < source.walls.size(); ++j, ++nextWall) {
+                const auto wallId = source.walls[j];
+                const auto vertexId = source.vertices[j];
+                const auto endId = source.vertices[(j + 1) % source.vertices.size()];
+                require(wallId < document.walls().size() && vertexId < document.vertices().size()
+                        && endId < document.vertices().size(), label + ": invalid boundary reference.");
+                const auto &wall = document.walls()[wallId];
+                const bool reversed = wall.end == vertexId && wall.start == endId;
+                require(reversed || (wall.start == vertexId && wall.end == endId), label + ": disconnected boundary.");
+                auto &index = sideIndices[wallId][reversed ? 1 : 0];
+                require(index < 0, label + ": a wall side belongs to multiple sectors.");
+                index = nextWall;
+                wallOwners[nextWall] = static_cast<int>(id);
+                const auto &side = reversed ? wall.reverseSide : wall.forwardSide;
+                auto &record = wallRecords[nextWall];
+                const QString wallLabel = QString("Line %1, sector %2").arg(wallId).arg(id);
+                const auto &position = document.vertices()[vertexId].position;
+                record.x = number<int32_t>(position.x(), wallLabel + " X");
+                record.y = number<int32_t>(position.y(), wallLabel + " Y");
+                record.point2 = static_cast<int16_t>(out.wallptr + (j + 1) % source.walls.size());
+                record.nextwall = record.nextsector = -1;
+                record.picnum = tile(side.texture, wallLabel + " texture");
+                record.overpicnum = tile(side.overlayTexture, wallLabel + " overlay texture");
+                record.shade = number<decltype(record.shade)>(side.shade, wallLabel + " shade");
+                record.pal = number<decltype(record.pal)>(side.palette, wallLabel + " palette");
+                record.xrepeat = number<decltype(record.xrepeat)>(side.xrepeat, wallLabel + " xrepeat");
+                record.yrepeat = number<decltype(record.yrepeat)>(side.yrepeat, wallLabel + " yrepeat");
+                record.xpanning = number<decltype(record.xpanning)>(side.xpanning, wallLabel + " xpanning");
+                record.ypanning = number<decltype(record.ypanning)>(side.ypanning, wallLabel + " ypanning");
+                record.extra = number<decltype(record.extra)>(side.extra, wallLabel + " extra");
+                record.cstat = bits(side.cstat, wallLabel + " cstat");
+                record.lotag = bits(side.lotag, wallLabel + " lotag");
+                record.hitag = bits(side.hitag, wallLabel + " hitag");
+            }
+        }
+        for (std::size_t id = 0; id < sideIndices.size(); ++id) {
+            const auto &indices = sideIndices[id];
+            require(indices[0] >= 0 || indices[1] >= 0,
+                    QString("Line %1 is not part of a closed sector.").arg(id));
+            if (indices[0] < 0 || indices[1] < 0) continue;
+            for (int side = 0; side < 2; ++side) {
+                auto &wall = wallRecords[indices[side]];
+                wall.nextwall = static_cast<int16_t>(indices[1 - side]);
+                wall.nextsector = static_cast<int16_t>(wallOwners[indices[1 - side]]);
+            }
+        }
+        if (!duke_map_file_validate_vertical_sectors(&map)) throw std::runtime_error(map.last_error);
+        if (!duke_map_file_validate_portals(&map)) throw std::runtime_error(map.last_error);
+
+        for (std::size_t id = 0; id < spriteRecords.size(); ++id) {
+            const auto &source = document.sprites()[id];
+            auto &out = spriteRecords[id];
+            const QString label = QString("Sprite %1").arg(id);
+            out.x = number<int32_t>(source.position.x(), label + " X");
+            out.y = number<int32_t>(source.position.y(), label + " Y");
+            out.z = number<int32_t>(source.z, label + " Z");
+            out.ang = angle(source.angle, label);
+            out.picnum = tile(source.texture, label + " texture");
+            out.sectnum = containingSector(map, out.x, out.y, label);
+            out.shade = number<decltype(out.shade)>(source.shade, label + " shade");
+            out.pal = number<decltype(out.pal)>(source.palette, label + " palette");
+            out.clipdist = number<decltype(out.clipdist)>(source.clipdist, label + " clipdist");
+            out.xrepeat = number<decltype(out.xrepeat)>(source.xrepeat, label + " xrepeat");
+            out.yrepeat = number<decltype(out.yrepeat)>(source.yrepeat, label + " yrepeat");
+            out.xoffset = number<decltype(out.xoffset)>(source.xoffset, label + " xoffset");
+            out.yoffset = number<decltype(out.yoffset)>(source.yoffset, label + " yoffset");
+            out.statnum = number<decltype(out.statnum)>(source.statnum, label + " statnum");
+            out.owner = number<decltype(out.owner)>(source.owner, label + " owner");
+            out.xvel = number<decltype(out.xvel)>(source.xvel, label + " xvel");
+            out.yvel = number<decltype(out.yvel)>(source.yvel, label + " yvel");
+            out.zvel = number<decltype(out.zvel)>(source.zvel, label + " zvel");
+            out.extra = number<decltype(out.extra)>(source.extra, label + " extra");
+            out.cstat = bits(source.cstat, label + " cstat");
+            out.lotag = bits(source.lotag, label + " lotag");
+            out.hitag = bits(source.hitag, label + " hitag");
+            require((source.cstat & 48) != 48, label + ": invalid sprite alignment.");
+        }
+        const auto &start = document.playerStart();
+        map.posx = number<int32_t>(start.position.x(), "Player start X");
+        map.posy = number<int32_t>(start.position.y(), "Player start Y");
+        map.posz = number<int32_t>(start.z, "Player start Z");
+        map.ang = angle(start.angle, "Player start");
+        map.cursectnum = containingSector(map, map.posx, map.posy, "Player start");
+        if (!duke_map_file_validate(&map)) throw std::runtime_error(map.last_error);
+
+        // libduke writes a filename, so stage its output before atomically
+        // replacing the user's destination through QSaveFile.
+        QTemporaryFile temporary;
+        if (!temporary.open()) throw std::runtime_error(temporary.errorString().toStdString());
+        const QString temporaryName = temporary.fileName();
+        temporary.close();
+        const QByteArray nativeName = QFile::encodeName(temporaryName);
+        if (!duke_map_file_write_to_filename(&map, nativeName.constData())) throw std::runtime_error(map.last_error);
+        QFile input(temporaryName);
+        if (!input.open(QIODevice::ReadOnly)) throw std::runtime_error(input.errorString().toStdString());
+        const QByteArray bytes = input.readAll();
+        require(input.error() == QFileDevice::NoError, input.errorString());
+        QSaveFile output(filename);
+        if (!output.open(QIODevice::WriteOnly)) throw std::runtime_error(output.errorString().toStdString());
+        if (output.write(bytes) != bytes.size()) throw std::runtime_error(output.errorString().toStdString());
+        if (!output.commit()) throw std::runtime_error(output.errorString().toStdString());
+        return true;
+    } catch (const std::exception &exception) {
+        error = QString::fromUtf8(exception.what());
+        return false;
+    }
+}
