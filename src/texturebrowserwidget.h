@@ -5,6 +5,8 @@
 #include <QWidget>
 
 #include <optional>
+#include <functional>
+#include <utility>
 
 class QLabel;
 class QLineEdit;
@@ -19,6 +21,10 @@ public:
     [[nodiscard]] std::optional<int> selectedTile() const;
     [[nodiscard]] QImage textureImage(int tile) const;
     void selectTile(int tile);
+    void setTextureActivationCallback(std::function<void()> callback)
+    {
+        m_textureActivationCallback = std::move(callback);
+    }
 
 private:
     void updateFilter(const QString &text);
@@ -27,4 +33,5 @@ private:
     QListWidget *m_textureList = nullptr;
     QLabel *m_statusLabel = nullptr;
     QMap<int, QImage> m_images;
+    std::function<void()> m_textureActivationCallback;
 };

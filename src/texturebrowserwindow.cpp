@@ -19,6 +19,9 @@ TextureBrowserWindow::TextureBrowserWindow(QWidget *parent)
     layout->addWidget(m_buttons);
     connect(m_buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(m_buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    m_browser->setTextureActivationCallback([this] {
+        if (m_browser->selectedTile()) accept();
+    });
 }
 
 void TextureBrowserWindow::browse()

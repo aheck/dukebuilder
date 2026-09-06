@@ -105,6 +105,11 @@ TextureBrowserWidget::TextureBrowserWidget(QWidget *parent)
             this, &TextureBrowserWidget::updateFilter);
     connect(reloadButton, &QPushButton::clicked,
             this, &TextureBrowserWidget::reload);
+    connect(m_textureList, &QListWidget::itemDoubleClicked, this,
+            [this](QListWidgetItem *item) {
+                m_textureList->setCurrentItem(item);
+                if (m_textureActivationCallback) m_textureActivationCallback();
+            });
 
     reload();
 }
