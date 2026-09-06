@@ -33,6 +33,34 @@ void checkSideReferences(const MapDocument &document)
 
 int main()
 {
+    MapDocument edited;
+    require(edited == MapDocument{}, "New documents have no changes");
+    require(edited.addPolyline({{0, 0}, {100, 0}, {100, 100}, {0, 100}}, true),
+            "Create document for saved-state comparison");
+    const auto saved = edited;
+    require(edited == saved, "Saved snapshot matches document");
+    edited.setSectorFloorTexture(0, 42);
+    require(!(edited == saved), "Texture changes differ from saved snapshot");
+    edited.setSectorFloorTexture(0, saved.sectors()[0].floorTexture);
+    require(edited == saved, "Restoring a property removes unsaved changes");
+    auto changedSide = edited.walls()[0].reverseSide;
+    changedSide.shade = 12;
+    edited.setWallSide(0, true, changedSide);
+    require(!(edited == saved), "Wall back-side changes are tracked");
+    edited = saved;
+    edited.setVertexPositions({{0, {-10, 0}}});
+    require(!(edited == saved), "Vertex movement is tracked");
+    edited = saved;
+    const auto sprite = edited.addSprite({50, 50});
+    require(!(edited == saved), "Sprite insertion is tracked");
+    const auto withSprite = edited;
+    edited.setSpriteAngle(sprite, 90);
+    require(!(edited == withSprite), "Sprite properties are tracked");
+    edited.removeSprites({sprite});
+    require(edited == saved, "Removing an added sprite restores saved state");
+    edited.setPlayerStartAngle(90);
+    require(!(edited == saved), "Player start changes are tracked");
+
     // Every edge (including the closing edge) must remove only its own wall.
     for (MapDocument::WallId deleted = 0; deleted < 4; ++deleted) {
         MapDocument rectangle;

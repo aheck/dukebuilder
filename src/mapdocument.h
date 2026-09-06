@@ -17,10 +17,12 @@ public:
     using SectorId = std::size_t;
 
     struct Vertex {
+        bool operator==(const Vertex &other) const;
         QPointF position;
     };
 
     struct WallSide {
+        bool operator==(const WallSide &other) const;
         int texture = 0;
         int overlayTexture = 0;
         int shade = 0;
@@ -36,6 +38,7 @@ public:
     };
 
     struct Wall {
+        bool operator==(const Wall &other) const;
         VertexId start;
         VertexId end;
         WallSide forwardSide{};
@@ -51,6 +54,7 @@ public:
     };
 
     struct Sector {
+        bool operator==(const Sector &other) const;
         std::vector<WallId> walls;
         std::vector<VertexId> vertices;
         // Empty means a single loop. Imported sectors may include holes.
@@ -80,6 +84,7 @@ public:
     };
 
     struct Sprite {
+        bool operator==(const Sprite &other) const;
         QPointF position;
         qreal z = 0.0;
         qreal angle = 0.0;
@@ -105,6 +110,7 @@ public:
     };
 
     struct PlayerStart {
+        bool operator==(const PlayerStart &other) const;
         QPointF position;
         qreal z = 0.0;
         qreal angle = 0.0;
@@ -115,6 +121,7 @@ public:
     void setSector(SectorId sectorId, const Sector &sector);
     void setSprite(SpriteId spriteId, const Sprite &sprite);
     void clear();
+    bool operator==(const MapDocument &other) const;
     // Read a classic Build map transactionally, retaining imported topology.
     bool openMap(const QString &filename, QString &error);
     [[nodiscard]] bool supportsTopologyEditing() const { return !m_complexTopology; }

@@ -629,9 +629,46 @@ MainWindow::MainWindow(QWidget *parent)
 
     auto *fileMenu = menuBar()->addMenu("&File");
 
+    const auto saveMap = [this, editor](bool saveAs) -> bool {
+        // Commit any active property edit before taking the export snapshot.
+        editor->setFocus();
+        QString filename = m_mapFilename;
+        if (saveAs || filename.isEmpty()) {
+            QFileDialog dialog(this, "Save Build Map", filename, "Build maps (*.map *.MAP)");
+            dialog.setAcceptMode(QFileDialog::AcceptSave);
+            dialog.setFileMode(QFileDialog::AnyFile);
+            dialog.setDefaultSuffix("map");
+            if (dialog.exec() != QDialog::Accepted) return false;
+            filename = dialog.selectedFiles().value(0);
+            if (filename.isEmpty()) return false;
+        }
+        QString error;
+        if (!editor->saveMap(filename, error)) {
+            QMessageBox::warning(this, "Unable to save map", error);
+            return false;
+        }
+        m_mapFilename = filename;
+        setWindowFilePath(filename);
+        setWindowTitle(QFileInfo(filename).fileName() + " - Duke Builder");
+        statusBar()->showMessage("Saved " + QFileInfo(filename).fileName(), 5000);
+        return true;
+    };
+
+    const auto confirmMapReplacement = [this, editor, saveMap] {
+        // Finish editing the property cell before checking for changes.
+        editor->setFocus();
+        if (!editor->hasUnsavedChanges()) return true;
+        const auto answer = QMessageBox::warning(
+            this, "Unsaved changes", "Do you want to save your changes before replacing this map?",
+            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+        if (answer == QMessageBox::Save) return saveMap(false);
+        return answer == QMessageBox::Discard;
+    };
+
     auto *newMapAction = fileMenu->addAction("&New Map");
     newMapAction->setShortcut(QKeySequence::New);
-    connect(newMapAction, &QAction::triggered, this, [this, editor] {
+    connect(newMapAction, &QAction::triggered, this, [this, editor, confirmMapReplacement] {
+        if (!confirmMapReplacement()) return;
         editor->newMap();
         m_mapFilename.clear();
         setWindowFilePath({});
@@ -640,7 +677,8 @@ MainWindow::MainWindow(QWidget *parent)
 
     auto *openMapAction = fileMenu->addAction("&Open Map");
     openMapAction->setShortcut(QKeySequence::Open);
-    connect(openMapAction, &QAction::triggered, this, [this, editor] {
+    connect(openMapAction, &QAction::triggered, this, [this, editor, confirmMapReplacement] {
+        if (!confirmMapReplacement()) return;
         const QString filename = QFileDialog::getOpenFileName(this, "Open Build Map", m_mapFilename,
                                                              "Build maps (*.map *.MAP);;All files (*)");
         if (filename.isEmpty()) return;
@@ -659,29 +697,6 @@ MainWindow::MainWindow(QWidget *parent)
 
     auto *saveAction = fileMenu->addAction("&Save");
     saveAction->setShortcut(QKeySequence::Save);
-    const auto saveMap = [this, editor](bool saveAs) {
-        // Commit any active property edit before taking the export snapshot.
-        editor->setFocus();
-        QString filename = m_mapFilename;
-        if (saveAs || filename.isEmpty()) {
-            QFileDialog dialog(this, "Save Build Map", filename, "Build maps (*.map *.MAP)");
-            dialog.setAcceptMode(QFileDialog::AcceptSave);
-            dialog.setFileMode(QFileDialog::AnyFile);
-            dialog.setDefaultSuffix("map");
-            if (dialog.exec() != QDialog::Accepted) return;
-            filename = dialog.selectedFiles().value(0);
-            if (filename.isEmpty()) return;
-        }
-        QString error;
-        if (!editor->saveMap(filename, error)) {
-            QMessageBox::warning(this, "Unable to save map", error);
-            return;
-        }
-        m_mapFilename = filename;
-        setWindowFilePath(filename);
-        setWindowTitle(QFileInfo(filename).fileName() + " - Duke Builder");
-        statusBar()->showMessage("Saved " + QFileInfo(filename).fileName(), 5000);
-    };
     connect(saveAction, &QAction::triggered, this, [saveMap] { saveMap(false); });
 
     auto *saveAsAction = fileMenu->addAction("Save &As...");

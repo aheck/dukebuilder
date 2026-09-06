@@ -856,13 +856,20 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
     }
 }
 
-bool MapEditor::saveMap(const QString &filename, QString &error) const
+bool MapEditor::hasUnsavedChanges() const
+{
+    return !m_drawingPoints.empty() || !(m_document == m_savedDocument);
+}
+
+bool MapEditor::saveMap(const QString &filename, QString &error)
 {
     if (!m_drawingPoints.empty()) {
         error = "Finish or cancel the current drawing before saving.";
         return false;
     }
-    return saveBuildMap(m_document, filename, error);
+    if (!saveBuildMap(m_document, filename, error)) return false;
+    m_savedDocument = m_document;
+    return true;
 }
 
 bool MapEditor::openMap(const QString &filename, QString &error)
@@ -878,6 +885,7 @@ bool MapEditor::openMap(const QString &filename, QString &error)
     m_draggedSprites.clear();
     m_wallSideReversed = false;
     m_document = std::move(loaded);
+    m_savedDocument = m_document;
     m_spriteTextures.clear();
     for (const auto &sprite : m_document.sprites()) {
         if (m_textureResolver && sprite.texture >= 0 && !m_spriteTextures.contains(sprite.texture))
@@ -898,6 +906,7 @@ void MapEditor::newMap()
 {
     cancelDrawing();
     m_document.clear();
+    m_savedDocument = m_document;
     rebuildScene();
     reportStatus("New map");
 }

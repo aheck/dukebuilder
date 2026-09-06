@@ -91,7 +91,9 @@ Meson's `--buildtype`, and configure a separate build directory.
 
 Use **File → Open Map** (Ctrl+O) to open a classic version-7 Build `.map`
 file. The view centers on the player start, and Save uses the opened filename.
-An unsuccessful open leaves the current map intact.
+An unsuccessful open leaves the current map intact. New and Open prompt to
+save unsaved changes first; choose Discard to proceed without saving or Cancel
+to keep editing. A canceled or failed save stops the New/Open operation.
 
 Imported maps retain sector loops, independent portal-side properties, sprites,
 and player start information. Maps with holes, overlapping geometry, or effect

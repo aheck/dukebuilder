@@ -5,6 +5,7 @@
 #include <cmath>
 #include <algorithm>
 #include <functional>
+#include <tuple>
 
 namespace {
 constexpr qreal coordinateEpsilon = 0.001;
@@ -486,4 +487,72 @@ std::size_t MapDocument::Sector::nextWallIndex(std::size_t index) const
         start = next;
     }
     return index + 1 < walls.size() ? index + 1 : start;
+}
+
+bool MapDocument::Vertex::operator==(const Vertex &other) const
+{
+    return position == other.position;
+}
+
+bool MapDocument::WallSide::operator==(const WallSide &other) const
+{
+    return std::tie(
+        texture, overlayTexture, shade, palette, xrepeat, yrepeat, xpanning, ypanning, cstat,
+        hitag, lotag, extra)
+        == std::tie(
+        other.texture, other.overlayTexture, other.shade, other.palette, other.xrepeat,
+        other.yrepeat, other.xpanning, other.ypanning, other.cstat, other.hitag, other.lotag,
+        other.extra);
+}
+
+bool MapDocument::Wall::operator==(const Wall &other) const
+{
+    return std::tie(
+        start, end, forwardSide, reverseSide, forwardSector, reverseSector)
+        == std::tie(
+        other.start, other.end, other.forwardSide, other.reverseSide, other.forwardSector,
+        other.reverseSector);
+}
+
+bool MapDocument::Sector::operator==(const Sector &other) const
+{
+    return std::tie(
+        walls, vertices, loopStarts, floorz, ceilingz, floorTexture, ceilingTexture, hitag,
+        lotag, floorstat, ceilingstat, floorheinum, ceilingheinum, floorshade, ceilingshade,
+        floorpal, ceilingpal, floorxpanning, floorypanning, ceilingxpanning, ceilingypanning,
+        visibility, extra, filler)
+        == std::tie(
+        other.walls, other.vertices, other.loopStarts, other.floorz, other.ceilingz,
+        other.floorTexture, other.ceilingTexture, other.hitag, other.lotag, other.floorstat,
+        other.ceilingstat, other.floorheinum, other.ceilingheinum, other.floorshade,
+        other.ceilingshade, other.floorpal, other.ceilingpal, other.floorxpanning,
+        other.floorypanning, other.ceilingxpanning, other.ceilingypanning, other.visibility,
+        other.extra, other.filler);
+}
+
+bool MapDocument::Sprite::operator==(const Sprite &other) const
+{
+    return std::tie(
+        position, z, angle, texture, hitag, lotag, cstat, shade, palette, clipdist, xrepeat,
+        yrepeat, xoffset, yoffset, statnum, owner, xvel, yvel, zvel, extra, filler, sectorId)
+        == std::tie(
+        other.position, other.z, other.angle, other.texture, other.hitag, other.lotag,
+        other.cstat, other.shade, other.palette, other.clipdist, other.xrepeat, other.yrepeat,
+        other.xoffset, other.yoffset, other.statnum, other.owner, other.xvel, other.yvel,
+        other.zvel, other.extra, other.filler, other.sectorId);
+}
+
+bool MapDocument::PlayerStart::operator==(const PlayerStart &other) const
+{
+    return std::tie(
+        position, z, angle, sectorId)
+        == std::tie(
+        other.position, other.z, other.angle, other.sectorId);
+}
+
+bool MapDocument::operator==(const MapDocument &other) const
+{
+    return std::tie(m_vertices, m_walls, m_sectors, m_sprites, m_playerStart, m_complexTopology)
+        == std::tie(other.m_vertices, other.m_walls, other.m_sectors, other.m_sprites,
+                    other.m_playerStart, other.m_complexTopology);
 }

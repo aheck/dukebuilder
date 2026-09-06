@@ -129,7 +129,8 @@ public:
     };
 
     void newMap();
-    bool saveMap(const QString &filename, QString &error) const;
+    bool saveMap(const QString &filename, QString &error);
+    [[nodiscard]] bool hasUnsavedChanges() const;
     bool openMap(const QString &filename, QString &error);
     void setMode(Mode mode);
     void setGridSize(qreal size);
@@ -166,6 +167,7 @@ private:
     void reportStatus(const QString &message) const;
 
     MapDocument m_document;
+    MapDocument m_savedDocument;
     MapScene *m_scene = nullptr;
     QGraphicsPathItem *m_previewItem = nullptr;
     std::vector<QPointF> m_drawingPoints;
