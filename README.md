@@ -93,6 +93,12 @@ sides together. Hover and selection highlighting still apply to either kind of
 wall. Joining partway along an existing edge requires splitting that edge, which
 is not yet supported.
 
+Drawing a closed sector entirely inside another sector creates an inner loop
+in the surrounding room and two-sided walls connecting the sectors. Raise the
+inner floor (use a smaller Z value) to make a box or platform. Maps saved by
+older versions with disconnected overlapping sectors need their topology
+repaired; opening them does not automatically join intentional overlaps.
+
 In Lines mode, select one wall to edit its texture, overlay texture, shade,
 palette, texture repeat and panning, flags (`cstat`), hitag, and lotag. For a
 two-sided wall, use the Properties panel's Side dropdown to choose Front or
@@ -117,9 +123,10 @@ or use **Clear Recent Files** to clear the list. Reopening a recent map uses
 the same unsaved-changes prompt as Open.
 
 Imported maps retain sector loops, independent portal-side properties, sprites,
-and player start information. Maps with holes, overlapping geometry, or effect
-sectors support vertex and property edits, but adding and deleting lines is
-disabled to preserve their topology. Saving still applies the validation rules
+and player start information. Connected inner sectors remain editable after
+reopening. Overlapping single-loop sectors support line deletion without
+rebuilding their faces; adding lines remains restricted. Imported void loops
+and effect sectors still restrict structural edits. Saving applies the validation rules
 below; some original effect geometry may be opened but cannot yet be saved.
 
 Use **File → Save** (Ctrl+S) or **Save As** (Ctrl+Shift+S) to write a classic

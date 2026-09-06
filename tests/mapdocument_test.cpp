@@ -19,7 +19,7 @@ void checkSideReferences(const MapDocument &document)
         const auto &sector = document.sectors()[id];
         for (std::size_t i = 0; i < sector.walls.size(); ++i) {
             const auto &wall = document.walls()[sector.walls[i]];
-            const auto next = sector.vertices[(i + 1) % sector.vertices.size()];
+            const auto next = sector.vertices[sector.nextWallIndex(i)];
             require((wall.start == sector.vertices[i] && wall.end == next)
                     || (wall.end == sector.vertices[i] && wall.start == next),
                     "Sector boundary must remain connected and closed");
@@ -33,6 +33,28 @@ void checkSideReferences(const MapDocument &document)
 
 int main()
 {
+    MapDocument islands;
+    require(islands.addPolyline({{0,0}, {1000,0}, {1000,1000}, {0,1000}}, true), "Outer room");
+    islands.setSectorLotag(0, 17);
+    require(islands.addPolyline({{100,100}, {400,100}, {400,400}, {100,400}}, true), "Inner box");
+    islands.setSectorFloorZ(1, -1024);
+    require(islands.sectors()[0].loopStarts == std::vector<std::size_t>({0,4}), "Room gets a hole");
+    for (auto wall : islands.sectors()[1].walls)
+        require(islands.walls()[wall].isTwoSided(), "Box connects to surrounding room");
+    require(islands.addPolyline({{600,600}, {800,600}, {800,800}, {600,800}}, true), "Second box");
+    require(islands.sectors()[0].loopStarts.size() == 3, "Multiple boxes produce separate holes");
+    require(islands.sectors()[0].lotag == 17 && islands.sectors()[1].floorz == -1024,
+            "Rebuilding holes retains sector properties");
+    require(islands.addPolyline({{150,150}, {250,150}, {250,250}, {150,250}}, true), "Box on box");
+    require(islands.sectors()[1].loopStarts.size() == 2 && islands.sectors()[0].loopStarts.size() == 3,
+            "Nested box attaches only to its immediate parent");
+    islands.setVertexPositions({{4, {90,100}}});
+    checkSideReferences(islands);
+    islands.removeWalls({12});
+    checkSideReferences(islands);
+    require(islands.sectors()[0].lotag == 17 && islands.sectors()[1].floorz == -1024,
+            "Deleting an island edge retains properties");
+
     MapDocument edited;
     require(edited == MapDocument{}, "New documents have no changes");
     require(edited.addPolyline({{0, 0}, {100, 0}, {100, 100}, {0, 100}}, true),

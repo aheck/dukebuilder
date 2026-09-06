@@ -1546,8 +1546,8 @@ void MapEditor::drawBackground(QPainter *painter, const QRectF &rect)
 void MapEditor::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Delete && m_mode == Mode::Lines) {
-        if (!m_document.supportsTopologyEditing()) {
-            reportStatus("Line deletion is not yet supported for imported maps with holes or overlapping geometry.");
+        if (!m_document.supportsLineDeletion()) {
+            reportStatus("Line deletion is not yet supported for this imported map's void loops or effect sectors.");
             event->accept();
             return;
         }

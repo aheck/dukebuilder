@@ -127,6 +127,7 @@ public:
     // Read a classic Build map transactionally, retaining imported topology.
     bool openMap(const QString &filename, QString &error);
     [[nodiscard]] bool supportsTopologyEditing() const { return !m_complexTopology; }
+    [[nodiscard]] bool supportsLineDeletion() const;
     [[nodiscard]] bool addPolyline(const std::vector<QPointF> &points, bool closed);
     void removeWalls(const std::vector<WallId> &wallIds);
     void setVertexPositions(const std::vector<std::pair<VertexId, QPointF>> &positions);

@@ -42,6 +42,65 @@ int main(int argc, char **argv)
     require(directory.isValid(), "Temporary directory");
     const QString path = directory.filePath("roundtrip.map");
     QString error;
+    MapDocument box = room();
+    box.setPlayerStartPosition({700,700});
+    require(box.addPolyline({{-256,-256}, {256,-256}, {256,256}, {-256,256}}, true), "Draw raised box");
+    box.setSectorFloorZ(1, -2048);
+    box.setSectorFloorTexture(1, 899);
+    const QString boxPath = directory.filePath("box.map");
+    require(saveBuildMap(box, boxPath, error), error);
+    std::unique_ptr<DukeMapFile, decltype(&duke_map_file_free)> exportedBox(duke_map_file_new(), duke_map_file_free);
+    require(duke_map_file_read_from_filename(exportedBox.get(), QFile::encodeName(boxPath).constData()),
+            "Read box export");
+    require(exportedBox->numwalls == 12 && exportedBox->sectors[0]->wallnum == 8,
+            "Export surrounding room with inner loop");
+    for (int w = 8; w < 12; ++w) {
+        const auto &wall = *exportedBox->walls[w];
+        require(wall.nextsector == 0 && wall.nextwall >= 4 && wall.nextwall < 8
+                && exportedBox->walls[wall.nextwall]->nextwall == w,
+                "Box has reciprocal portals visible from surrounding room");
+    }
+    MapDocument reopenedBox;
+    require(reopenedBox.openMap(boxPath, error), error);
+    require(reopenedBox.sectors()[1].floorz == -2048 && reopenedBox.sectors()[1].floorTexture == 899,
+            "Raised box height and texture survive reopening");
+    require(saveBuildMap(reopenedBox, directory.filePath("box-copy.map"), error), error);
+    require(read(boxPath) == read(directory.filePath("box-copy.map")), "Box portals survive round trip");
+    require(reopenedBox.supportsTopologyEditing(), "Reopened connected box supports line editing");
+    const auto boxWall = reopenedBox.sectors()[1].walls.front();
+    reopenedBox.removeWalls({boxWall});
+    require(reopenedBox.walls().size() == 7 && reopenedBox.sectors()[1].walls.size() == 3,
+            "Delete a box edge after reopening");
+    require(reopenedBox.sectors()[1].floorz == -2048 && reopenedBox.sectors()[1].floorTexture == 899,
+            "Deletion preserves raised box properties");
+    require(saveBuildMap(reopenedBox, directory.filePath("box-deleted.map"), error), error);
+    require(reopenedBox.openMap(directory.filePath("box-deleted.map"), error), error);
+    require(reopenedBox.supportsTopologyEditing(), "Edited box remains editable after another reload");
+    // Reproduce the disconnected overlapping square saved by older versions.
+    exportedBox->sectors[0]->wallnum = 4;
+    exportedBox->sectors[1]->wallptr = 4;
+    for (int i = 0; i < 4; ++i) {
+        *exportedBox->walls[4 + i] = *exportedBox->walls[8 + i];
+        exportedBox->walls[4 + i]->point2 = 4 + (i + 1) % 4;
+        exportedBox->walls[4 + i]->nextwall = -1;
+        exportedBox->walls[4 + i]->nextsector = -1;
+    }
+    const auto originalWallCount = exportedBox->numwalls;
+    exportedBox->numwalls = 8;
+    const QString overlapPath = directory.filePath("legacy-overlap.map");
+    require(duke_map_file_write_to_filename(exportedBox.get(), QFile::encodeName(overlapPath).constData()),
+            "Write disconnected legacy box fixture");
+    exportedBox->numwalls = originalWallCount; // Free every allocated record.
+    MapDocument legacy;
+    require(legacy.openMap(overlapPath, error), error);
+    require(!legacy.supportsTopologyEditing() && legacy.supportsLineDeletion(),
+            "Overlapping single-loop sectors support local deletion without rebuilding faces");
+    legacy.removeWalls({legacy.sectors()[1].walls.front()});
+    require(legacy.sectors().size() == 2 && legacy.sectors()[1].walls.size() == 3,
+            "Delete a line from a disconnected legacy box");
+    require(legacy.sectors()[0].walls.size() == 4 && legacy.sectors()[1].floorz == -2048,
+            "Local deletion preserves independent outer room and box height");
+    require(saveBuildMap(legacy, directory.filePath("legacy-deleted.map"), error), error);
     MapDocument document = room();
     require(document.addPolyline({{1024, -1024}, {3072, -1024}, {3072, 1024}, {1024, 1024}}, true), "Neighbor");
     auto sector = document.sectors()[0];

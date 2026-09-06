@@ -1,6 +1,7 @@
 #include "mapdocument.h"
 
 #include <QtGlobal>
+#include <QPainterPath>
 
 #include <cmath>
 #include <algorithm>
@@ -103,7 +104,7 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed)
 
 void MapDocument::removeWalls(const std::vector<WallId> &wallIds)
 {
-    if (m_complexTopology) return;
+    if (!supportsLineDeletion()) return;
     const WallId removed = m_walls.size();
     std::vector<bool> selected(m_walls.size(), false);
     bool changed = false;
@@ -114,6 +115,16 @@ void MapDocument::removeWalls(const std::vector<WallId> &wallIds)
         }
     }
     if (!changed) return;
+
+    // Hole loops are derived from the surrounding wall graph during rebuilding.
+    // Match surviving properties against each sector's outer boundary only.
+    for (auto &sector : m_sectors) {
+        if (sector.loopStarts.size() > 1) {
+            sector.walls.resize(sector.loopStarts[1]);
+            sector.vertices.resize(sector.loopStarts[1]);
+        }
+        sector.loopStarts.clear();
+    }
 
     // Collapse connected selections onto their lowest-numbered endpoint.
     // Choosing an existing endpoint keeps the result on the original grid and
@@ -168,12 +179,16 @@ void MapDocument::removeWalls(const std::vector<WallId> &wallIds)
     }
     std::vector<bool> collapsedBoundary(remainingWalls.size(), false);
     std::vector<bool> survivingBoundary(remainingWalls.size(), false);
+    std::vector<std::optional<SectorId>> sectorMapping(m_sectors.size());
+    SectorId oldSector = 0, nextSector = 0;
     m_sectors.erase(std::remove_if(m_sectors.begin(), m_sectors.end(),
         [&](const Sector &sector) {
             auto walls = sector.walls;
             std::sort(walls.begin(), walls.end());
             const bool collapsed = walls.size() < 3
                 || std::adjacent_find(walls.begin(), walls.end()) != walls.end();
+            if (!collapsed) sectorMapping[oldSector] = nextSector++;
+            ++oldSector;
             for (WallId id : walls) {
                 (collapsed ? collapsedBoundary : survivingBoundary)[id] = true;
             }
@@ -212,7 +227,36 @@ void MapDocument::removeWalls(const std::vector<WallId> &wallIds)
         for (VertexId &id : sector.vertices) id = vertexMapping[id];
     }
     m_vertices = std::move(remainingVertices);
-    rebuildSectors();
+    if (!m_complexTopology) {
+        rebuildSectors();
+    } else {
+        // Imported overlapping rooms retain their existing sector boundaries.
+        // Collapsing edges does not require planar face reconstruction.
+        for (auto &wall : m_walls) {
+            wall.forwardSector.reset();
+            wall.reverseSector.reset();
+        }
+        for (SectorId id = 0; id < m_sectors.size(); ++id) {
+            const auto &sector = m_sectors[id];
+            for (std::size_t i = 0; i < sector.walls.size(); ++i) {
+                auto &wall = m_walls[sector.walls[i]];
+                (wall.start == sector.vertices[i] ? wall.forwardSector : wall.reverseSector) = id;
+            }
+        }
+        const auto remap = [&](std::optional<SectorId> &id) {
+            id = id && *id < sectorMapping.size() ? sectorMapping[*id] : std::nullopt;
+        };
+        remap(m_playerStart.sectorId);
+        for (auto &sprite : m_sprites) remap(sprite.sectorId);
+    }
+}
+
+bool MapDocument::supportsLineDeletion() const
+{
+    if (!m_complexTopology) return true;
+    return std::all_of(m_sectors.begin(), m_sectors.end(), [](const Sector &sector) {
+        return sector.loopStarts.size() <= 1 && sector.walls.size() >= 3;
+    });
 }
 
 void MapDocument::setVertexPositions(
@@ -358,10 +402,18 @@ void MapDocument::rebuildSectors()
         bool reversed;
     };
 
-    const auto previousSectors = std::move(m_sectors);
+    auto previousSectors = std::move(m_sectors);
+    for (auto &sector : previousSectors) {
+        if (sector.loopStarts.size() > 1) {
+            sector.walls.resize(sector.loopStarts[1]);
+            sector.vertices.resize(sector.loopStarts[1]);
+        }
+        sector.loopStarts.clear();
+    }
     m_sectors.clear();
     std::vector<std::optional<Sector>> survivingSectors(previousSectors.size());
     std::vector<Sector> newSectors;
+    std::vector<Sector> exteriorLoops;
     for (Wall &wall : m_walls) {
         wall.forwardSector.reset();
         wall.reverseSector.reset();
@@ -453,6 +505,8 @@ void MapDocument::rebuildSectors()
                         } else {
                             newSectors.push_back(std::move(sector));
                         }
+                    } else if (sector.vertices.size() >= 3 && twiceArea < -coordinateEpsilon) {
+                        exteriorLoops.push_back(std::move(sector));
                     }
                     break;
                 }
@@ -466,6 +520,48 @@ void MapDocument::rebuildSectors()
         if (sector) m_sectors.push_back(std::move(*sector));
     }
     for (auto &sector : newSectors) m_sectors.push_back(std::move(sector));
+
+    // A disconnected component inside a face contributes a clockwise hole to
+    // that face. Its opposite wall sides already bound the inner sector(s).
+    // Attach it to the smallest enclosing face, supporting nested islands.
+    const auto outline = [this](const Sector &sector) {
+        QPainterPath path;
+        path.moveTo(m_vertices[sector.vertices.front()].position);
+        for (std::size_t i = 1; i < sector.vertices.size(); ++i)
+            path.lineTo(m_vertices[sector.vertices[i]].position);
+        path.closeSubpath();
+        return path;
+    };
+    std::vector<QPainterPath> outlines;
+    std::vector<qreal> areas;
+    for (const auto &sector : m_sectors) {
+        outlines.push_back(outline(sector));
+        qreal area = 0;
+        for (std::size_t i = 0; i < sector.vertices.size(); ++i) {
+            const auto a = m_vertices[sector.vertices[i]].position;
+            const auto b = m_vertices[sector.vertices[(i + 1) % sector.vertices.size()]].position;
+            area += a.x() * b.y() - b.x() * a.y();
+        }
+        areas.push_back(area);
+    }
+    for (const auto &hole : exteriorLoops) {
+        const auto holePath = outline(hole);
+        std::optional<SectorId> parent;
+        for (SectorId id = 0; id < m_sectors.size(); ++id) {
+            const auto &sector = m_sectors[id];
+            const bool sharesWall = std::any_of(hole.walls.begin(), hole.walls.end(), [&](WallId wall) {
+                return std::find(sector.walls.begin(), sector.walls.end(), wall) != sector.walls.end();
+            });
+            if (!sharesWall && outlines[id].contains(holePath)
+                && (!parent || areas[id] < areas[*parent])) parent = id;
+        }
+        if (!parent) continue;
+        auto &sector = m_sectors[*parent];
+        if (sector.loopStarts.empty()) sector.loopStarts.push_back(0);
+        sector.loopStarts.push_back(sector.walls.size());
+        sector.walls.insert(sector.walls.end(), hole.walls.begin(), hole.walls.end());
+        sector.vertices.insert(sector.vertices.end(), hole.vertices.begin(), hole.vertices.end());
+    }
 
     // Side references must use the final ordering, not face discovery order.
     for (SectorId sectorId = 0; sectorId < m_sectors.size(); ++sectorId) {

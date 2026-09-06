@@ -3,6 +3,7 @@
 #include <QFile>
 #include <QPainterPath>
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <memory>
 #include <stdexcept>
@@ -150,21 +151,53 @@ bool MapDocument::openMap(const QString &filename, QString &error)
                     current = map->walls[current]->point2;
                 } while (current != initial);
             }
-            if (sector.loopStarts.size() > 1 || sector.walls.size() < 3) loaded.m_complexTopology = true;
+            if (sector.walls.size() < 3) loaded.m_complexTopology = true;
             loaded.m_sectors.push_back(std::move(sector));
         }
         if (!loaded.m_complexTopology) {
             std::vector<QPainterPath> shapes;
             for (const auto &sector : loaded.m_sectors) {
                 QPainterPath shape;
-                shape.moveTo(loaded.m_vertices[sector.vertices.front()].position);
-                for (std::size_t i = 1; i < sector.vertices.size(); ++i)
-                    shape.lineTo(loaded.m_vertices[sector.vertices[i]].position);
-                shape.closeSubpath();
+                shape.setFillRule(Qt::OddEvenFill);
+                for (std::size_t i = 0; i < sector.vertices.size(); ++i) {
+                    const auto position = loaded.m_vertices[sector.vertices[i]].position;
+                    if (i == 0 || std::find(sector.loopStarts.begin(), sector.loopStarts.end(), i)
+                                      != sector.loopStarts.end()) shape.moveTo(position);
+                    else shape.lineTo(position);
+                    if (sector.nextWallIndex(i) <= i) shape.closeSubpath();
+                }
                 for (const auto &other : shapes) {
-                    if (!shape.intersected(other).isEmpty()) loaded.m_complexTopology = true;
+                    // Intersections can contain zero-area shared portal edges.
+                    for (const auto &polygon : shape.intersected(other).toFillPolygons()) {
+                        qreal twiceArea = 0;
+                        for (int i = 0; i < polygon.size(); ++i) {
+                            const auto a = polygon[i];
+                            const auto b = polygon[(i + 1) % polygon.size()];
+                            twiceArea += a.x() * b.y() - b.x() * a.y();
+                        }
+                        if (std::abs(twiceArea) > 0.001) loaded.m_complexTopology = true;
+                    }
                 }
                 shapes.push_back(shape);
+            }
+        }
+        if (!loaded.m_complexTopology) {
+            // A hole enclosing a connected sector is now supported. Other
+            // imported loops (e.g. empty voids) must not gain sectors on edit.
+            auto rebuilt = loaded;
+            rebuilt.rebuildSectors();
+            if (rebuilt.m_sectors.size() != loaded.m_sectors.size()) {
+                loaded.m_complexTopology = true;
+            } else {
+                for (std::size_t i = 0; i < loaded.m_walls.size(); ++i) {
+                    const auto &before = loaded.m_walls[i];
+                    const auto &after = rebuilt.m_walls[i];
+                    if (before.forwardSector != after.forwardSector
+                        || before.reverseSector != after.reverseSector) {
+                        loaded.m_complexTopology = true;
+                        break;
+                    }
+                }
             }
         }
         for (int id = 0; id < map->numsprites; ++id) {
