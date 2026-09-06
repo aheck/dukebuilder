@@ -49,6 +49,10 @@ Run it:
 - **[ / ]:** decrease or increase the snapping grid size.
 - **G or the Grid toolbar button:** show or hide the grid.
 - **T:** enter Sprites mode.
+- **Lines mode:** select one or more lines and press Delete to remove them.
+  Connected selected lines collapse onto their lowest-numbered endpoint, keeping
+  the remaining sector boundaries closed. Surviving sectors retain their
+  properties and relative order. Sectors collapsed below three edges disappear.
 - **Sprites mode:** right-click empty space to add a sprite; left-click or
   rubber-band to select; right-drag to move; right-click a sprite to choose its
   texture; Delete removes selected sprites.

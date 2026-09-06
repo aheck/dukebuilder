@@ -1493,6 +1493,28 @@ void MapEditor::drawBackground(QPainter *painter, const QRectF &rect)
 
 void MapEditor::keyPressEvent(QKeyEvent *event)
 {
+    if (event->key() == Qt::Key_Delete && m_mode == Mode::Lines) {
+        std::vector<MapDocument::WallId> wallIds;
+        for (QGraphicsItem *item : m_scene->selectedItems()) {
+            if (auto *wall = dynamic_cast<WallItem *>(item)) {
+                wallIds.push_back(static_cast<MapDocument::WallId>(
+                    wall->data(wallIdRole).toULongLong()));
+            }
+        }
+        if (!wallIds.empty()) {
+            m_draggingVertices = false;
+            m_draggedVertices.clear();
+            m_draggedWalls.clear();
+            m_draggedSectors.clear();
+            setCursor(Qt::CrossCursor);
+            m_document.removeWalls(wallIds);
+            rebuildScene();
+            updateProperties();
+            reportStatus(QString("%1 line(s) deleted").arg(wallIds.size()));
+        }
+        event->accept();
+        return;
+    }
     if (event->key() == Qt::Key_Delete && m_mode == Mode::Sprites) {
         std::vector<MapDocument::SpriteId> spriteIds;
         for (QGraphicsItem *item : m_scene->selectedItems()) {

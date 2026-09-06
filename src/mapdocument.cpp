@@ -98,6 +98,119 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed)
     return false;
 }
 
+void MapDocument::removeWalls(const std::vector<WallId> &wallIds)
+{
+    const WallId removed = m_walls.size();
+    std::vector<bool> selected(m_walls.size(), false);
+    bool changed = false;
+    for (const WallId id : wallIds) {
+        if (id < selected.size()) {
+            selected[id] = true;
+            changed = true;
+        }
+    }
+    if (!changed) return;
+
+    // Collapse connected selections onto their lowest-numbered endpoint.
+    // Choosing an existing endpoint keeps the result on the original grid and
+    // makes multi-selection independent of selection order.
+    std::vector<VertexId> roots(m_vertices.size());
+    for (VertexId id = 0; id < roots.size(); ++id) roots[id] = id;
+    const auto root = [&](VertexId id) {
+        while (roots[id] != id) id = roots[id];
+        return id;
+    };
+    for (WallId id = 0; id < m_walls.size(); ++id) {
+        if (!selected[id]) continue;
+        const VertexId a = root(m_walls[id].start);
+        const VertexId b = root(m_walls[id].end);
+        roots[std::max(a, b)] = std::min(a, b);
+    }
+    for (VertexId id = 0; id < roots.size(); ++id) roots[id] = root(id);
+
+    std::vector<WallId> wallMapping(m_walls.size(), removed);
+    std::vector<Wall> remainingWalls;
+    for (WallId id = 0; id < m_walls.size(); ++id) {
+        Wall wall = m_walls[id];
+        wall.start = roots[wall.start];
+        wall.end = roots[wall.end];
+        if (selected[id] || wall.start == wall.end) continue;
+        const auto duplicate = std::find_if(remainingWalls.begin(), remainingWalls.end(),
+            [&](const Wall &other) {
+                return (other.start == wall.start && other.end == wall.end)
+                    || (other.start == wall.end && other.end == wall.start);
+            });
+        if (duplicate != remainingWalls.end()) {
+            wallMapping[id] = duplicate - remainingWalls.begin();
+        } else {
+            wallMapping[id] = remainingWalls.size();
+            remainingWalls.push_back(std::move(wall));
+        }
+    }
+
+    // Shorten each old boundary before matching rebuilt faces, preserving
+    // properties and sector order even when one of its edges was collapsed.
+    for (Sector &sector : m_sectors) {
+        std::vector<WallId> walls;
+        std::vector<VertexId> vertices;
+        for (std::size_t i = 0; i < sector.walls.size(); ++i) {
+            const WallId mapped = wallMapping[sector.walls[i]];
+            if (mapped == removed) continue;
+            walls.push_back(mapped);
+            vertices.push_back(roots[sector.vertices[i]]);
+        }
+        sector.walls = std::move(walls);
+        sector.vertices = std::move(vertices);
+    }
+    std::vector<bool> collapsedBoundary(remainingWalls.size(), false);
+    std::vector<bool> survivingBoundary(remainingWalls.size(), false);
+    m_sectors.erase(std::remove_if(m_sectors.begin(), m_sectors.end(),
+        [&](const Sector &sector) {
+            auto walls = sector.walls;
+            std::sort(walls.begin(), walls.end());
+            const bool collapsed = walls.size() < 3
+                || std::adjacent_find(walls.begin(), walls.end()) != walls.end();
+            for (WallId id : walls) {
+                (collapsed ? collapsedBoundary : survivingBoundary)[id] = true;
+            }
+            return collapsed;
+        }), m_sectors.end());
+
+    // A collapsed triangle leaves two coincident edges, deduplicated above
+    // into one line. Remove that remnant unless another sector still uses it.
+    m_walls.clear();
+    std::vector<WallId> compactedWalls(remainingWalls.size());
+    for (WallId id = 0; id < remainingWalls.size(); ++id) {
+        if (collapsedBoundary[id] && !survivingBoundary[id]) continue;
+        compactedWalls[id] = m_walls.size();
+        m_walls.push_back(std::move(remainingWalls[id]));
+    }
+    for (Sector &sector : m_sectors) {
+        for (WallId &id : sector.walls) id = compactedWalls[id];
+    }
+
+    // Remove orphaned vertices, retaining endpoints still used by open lines.
+    std::vector<bool> used(m_vertices.size(), false);
+    for (const Wall &wall : m_walls) used[wall.start] = used[wall.end] = true;
+    std::vector<VertexId> vertexMapping(m_vertices.size());
+    std::vector<Vertex> remainingVertices;
+    for (VertexId id = 0; id < m_vertices.size(); ++id) {
+        if (used[id]) {
+            vertexMapping[id] = remainingVertices.size();
+            remainingVertices.push_back(m_vertices[id]);
+        }
+    }
+    for (Wall &wall : m_walls) {
+        wall.start = vertexMapping[wall.start];
+        wall.end = vertexMapping[wall.end];
+    }
+    for (Sector &sector : m_sectors) {
+        for (VertexId &id : sector.vertices) id = vertexMapping[id];
+    }
+    m_vertices = std::move(remainingVertices);
+    rebuildSectors();
+}
+
 void MapDocument::setVertexPositions(
     const std::vector<std::pair<VertexId, QPointF>> &positions)
 {

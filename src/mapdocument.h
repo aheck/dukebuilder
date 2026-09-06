@@ -108,6 +108,7 @@ public:
     void setSprite(SpriteId spriteId, const Sprite &sprite);
     void clear();
     [[nodiscard]] bool addPolyline(const std::vector<QPointF> &points, bool closed);
+    void removeWalls(const std::vector<WallId> &wallIds);
     void setVertexPositions(const std::vector<std::pair<VertexId, QPointF>> &positions);
     void setSectorFloorZ(std::size_t sectorId, qreal z);
     void setSectorCeilingZ(std::size_t sectorId, qreal z);
