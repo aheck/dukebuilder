@@ -727,7 +727,19 @@ MainWindow::MainWindow(QWidget *parent)
 
     auto *fileMenu = menuBar()->addMenu("&File");
 
-    const auto saveMap = [this, editor](bool saveAs) -> bool {
+    const auto rememberMap = [](const QString &filename) {
+        const QFileInfo file(filename);
+        const QString path = file.canonicalFilePath().isEmpty()
+            ? file.absoluteFilePath() : file.canonicalFilePath();
+        QSettings settings;
+        QStringList recent = settings.value("files/recentMaps").toStringList();
+        recent.removeAll(path);
+        recent.prepend(path);
+        while (recent.size() > 10) recent.removeLast();
+        settings.setValue("files/recentMaps", recent);
+    };
+
+    const auto saveMap = [this, editor, rememberMap](bool saveAs) -> bool {
         // Commit any active property edit before taking the export snapshot.
         editor->setFocus();
         QString filename = m_mapFilename;
@@ -746,6 +758,7 @@ MainWindow::MainWindow(QWidget *parent)
             return false;
         }
         m_mapFilename = filename;
+        rememberMap(filename);
         setWindowFilePath(filename);
         setWindowTitle(QFileInfo(filename).fileName() + " - Duke Builder");
         statusBar()->showMessage("Saved " + QFileInfo(filename).fileName(), 5000);
@@ -776,20 +789,49 @@ MainWindow::MainWindow(QWidget *parent)
 
     auto *openMapAction = fileMenu->addAction("&Open Map");
     openMapAction->setShortcut(QKeySequence::Open);
-    connect(openMapAction, &QAction::triggered, this, [this, editor, confirmMapReplacement] {
-        if (!confirmMapReplacement()) return;
-        const QString filename = QFileDialog::getOpenFileName(this, "Open Build Map", m_mapFilename,
-                                                             "Build maps (*.map *.MAP);;All files (*)");
-        if (filename.isEmpty()) return;
+    const auto openMap = [this, editor, rememberMap](const QString &filename) {
         QString error;
         if (!editor->openMap(filename, error)) {
             QMessageBox::warning(this, "Unable to open map", error);
             return;
         }
         m_mapFilename = filename;
+        rememberMap(filename);
         setWindowFilePath(filename);
         setWindowTitle(QFileInfo(filename).fileName() + " - Duke Builder");
         statusBar()->showMessage("Opened " + QFileInfo(filename).fileName(), 5000);
+    };
+    connect(openMapAction, &QAction::triggered, this, [this, openMap, confirmMapReplacement] {
+        if (!confirmMapReplacement()) return;
+        const QString filename = QFileDialog::getOpenFileName(this, "Open Build Map", m_mapFilename,
+                                                             "Build maps (*.map *.MAP);;All files (*)");
+        if (!filename.isEmpty()) openMap(filename);
+    });
+
+    auto *recentMenu = fileMenu->addMenu("&Recent Files");
+    recentMenu->setToolTipsVisible(true);
+    connect(recentMenu, &QMenu::aboutToShow, this, [this, recentMenu, openMap, confirmMapReplacement] {
+        recentMenu->clear();
+        const QStringList recent = QSettings().value("files/recentMaps").toStringList();
+        if (recent.isEmpty()) {
+            recentMenu->addAction("No recent files")->setEnabled(false);
+            return;
+        }
+        for (int index = 0; index < recent.size(); ++index) {
+            const QString filename = recent[index];
+            // Full paths distinguish maps with identical filenames.
+            auto *action = recentMenu->addAction(
+                QString("%1. %2").arg(index + 1).arg(QString(filename).replace('&', "&&")));
+            action->setToolTip(filename);
+            connect(action, &QAction::triggered, this, [openMap, confirmMapReplacement, filename] {
+                if (confirmMapReplacement()) openMap(filename);
+            });
+        }
+        recentMenu->addSeparator();
+        auto *clearAction = recentMenu->addAction("&Clear Recent Files");
+        connect(clearAction, &QAction::triggered, this, [] {
+            QSettings().remove("files/recentMaps");
+        });
     });
 
     fileMenu->addSeparator();

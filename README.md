@@ -111,6 +111,11 @@ An unsuccessful open leaves the current map intact. New, Open, and closing the a
 save unsaved changes first; choose Discard to proceed without saving or Cancel
 to keep editing. A canceled or failed save stops the operation, including quitting.
 
+**File → Recent Files** lists the ten most recently opened or saved maps,
+newest first, and remembers them between sessions. Select a path to reopen it,
+or use **Clear Recent Files** to clear the list. Reopening a recent map uses
+the same unsaved-changes prompt as Open.
+
 Imported maps retain sector loops, independent portal-side properties, sprites,
 and player start information. Maps with holes, overlapping geometry, or effect
 sectors support vertex and property edits, but adding and deleting lines is
