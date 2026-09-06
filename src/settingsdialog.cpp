@@ -6,6 +6,7 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
 #include <QSettings>
@@ -14,6 +15,7 @@
 
 namespace {
 constexpr auto grpFilesSettingsKey = "gameData/grpFiles";
+constexpr auto eduke32BinarySettingsKey = "eduke32/binaryPath";
 }
 
 SettingsDialog::SettingsDialog(QWidget *parent)
@@ -25,6 +27,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     auto *categoryList = new QListWidget(this);
     categoryList->setFixedWidth(160);
     categoryList->addItem("Game Data");
+    categoryList->addItem("EDuke32");
 
     auto *pages = new QStackedWidget(this);
     auto *gameDataPage = new QWidget(pages);
@@ -49,6 +52,34 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     gameDataLayout->addWidget(grpFiles, 1);
     gameDataLayout->addLayout(buttonLayout);
     pages->addWidget(gameDataPage);
+
+    auto *eduke32Page = new QWidget(pages);
+    auto *eduke32Layout = new QVBoxLayout(eduke32Page);
+    auto *binaryLabel = new QLabel("EDuke32 binary", eduke32Page);
+    auto *binaryPath = new QLineEdit(eduke32Page);
+    binaryPath->setObjectName("EDuke32BinaryPath");
+    binaryPath->setPlaceholderText("Path to the EDuke32 executable");
+    binaryPath->setText(settings.value(eduke32BinarySettingsKey).toString());
+    binaryPath->setClearButtonEnabled(true);
+    binaryLabel->setBuddy(binaryPath);
+    auto *browseBinary = new QPushButton("Browse...", eduke32Page);
+    auto *binaryLayout = new QHBoxLayout;
+    binaryLayout->addWidget(binaryPath, 1);
+    binaryLayout->addWidget(browseBinary);
+    eduke32Layout->addWidget(binaryLabel);
+    eduke32Layout->addLayout(binaryLayout);
+    eduke32Layout->addStretch();
+    pages->addWidget(eduke32Page);
+
+    // Settings are saved immediately, matching the Game Data page.
+    connect(binaryPath, &QLineEdit::textChanged, this, [](const QString &path) {
+        QSettings().setValue(eduke32BinarySettingsKey, path);
+    });
+    connect(browseBinary, &QPushButton::clicked, this, [this, binaryPath] {
+        const QString path = QFileDialog::getOpenFileName(
+            this, "Choose EDuke32 Binary", binaryPath->text(), "All files (*)");
+        if (!path.isEmpty()) binaryPath->setText(path);
+    });
 
     auto *contentLayout = new QHBoxLayout();
     contentLayout->addWidget(categoryList);

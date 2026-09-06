@@ -123,4 +123,10 @@ numbers 0–6,143, matching the original
 [Duke 3D definitions](https://github.com/videogamepreservation/dukenukem3d/blob/master/source/BUILD.H).
 Textures are referenced by tile number; their artwork is supplied by the game.
 
+Configure the executable in **Settings → EDuke32**, then use
+**Testing → Run in eDuke32** (F9) to test the current map. New or modified maps
+are saved first; canceling or failing to save stops the launch. The executable
+receives `-usecwd -nosetup -j <map directory> -map <map filename>` and runs with its own
+directory as the working directory.
+
 Run geometry and map open/save regression tests with `meson test -C build`.

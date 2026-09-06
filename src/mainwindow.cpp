@@ -8,6 +8,7 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QDockWidget>
+#include <QDebug>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHeaderView>
@@ -23,6 +24,8 @@
 #include <QPersistentModelIndex>
 #include <QPixmap>
 #include <QPushButton>
+#include <QProcess>
+#include <QSettings>
 #include <QStatusBar>
 #include <QSignalBlocker>
 #include <QStyledItemDelegate>
@@ -821,6 +824,41 @@ MainWindow::MainWindow(QWidget *parent)
             [textureBrowserWindow] {
                 textureBrowserWindow->browse();
             });
+
+    auto *testingMenu = menuBar()->addMenu("T&esting");
+    auto *runMapAction = testingMenu->addAction("Run in eDuke32");
+    runMapAction->setShortcut(QKeySequence(Qt::Key_F9));
+    connect(runMapAction, &QAction::triggered, this, [this, editor, saveMap] {
+        const QString binary = QSettings().value("eduke32/binaryPath").toString();
+        if (binary.isEmpty()) {
+            QMessageBox::warning(this, "EDuke32 is not configured",
+                                 "Set the EDuke32 binary path in Settings → EDuke32 first.");
+            return;
+        }
+        // Run the current edits, requesting a filename for a new map.
+        editor->setFocus();
+        if ((m_mapFilename.isEmpty() || editor->hasUnsavedChanges()) && !saveMap(false)) return;
+
+        const QFileInfo mapFile(m_mapFilename);
+        const QFileInfo binaryFile(binary);
+        QProcess process;
+        process.setWorkingDirectory(binaryFile.absolutePath());
+        process.setProgram("./" + binaryFile.fileName());
+        process.setArguments({"-usecwd", "-nosetup", "-j", mapFile.absolutePath(), "-map", mapFile.fileName()});
+        const auto shellQuote = [](QString value) {
+            value.replace("'", "'\\''");
+            return "'" + value + "'";
+        };
+        QStringList command{shellQuote(process.program())};
+        for (const auto &argument : process.arguments()) command.append(shellQuote(argument));
+        qInfo().noquote() << "Launching eDuke32: cd"
+                          << shellQuote(process.workingDirectory()) << "&&" << command.join(' ');
+        if (!process.startDetached()) {
+            QMessageBox::warning(this, "Unable to run eDuke32", process.errorString());
+            return;
+        }
+        statusBar()->showMessage("Started eDuke32 with " + mapFile.fileName(), 5000);
+    });
 
     auto *viewMenu = menuBar()->addMenu("&View");
     auto *propertyEditorAction = viewMenu->addAction("&Property Editor");
