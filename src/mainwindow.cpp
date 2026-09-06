@@ -7,6 +7,7 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QComboBox>
+#include <QCloseEvent>
 #include <QDockWidget>
 #include <QDebug>
 #include <QFileDialog>
@@ -750,16 +751,17 @@ MainWindow::MainWindow(QWidget *parent)
         return true;
     };
 
-    const auto confirmMapReplacement = [this, editor, saveMap] {
+    m_confirmUnsavedChanges = [this, editor, saveMap] {
         // Finish editing the property cell before checking for changes.
         editor->setFocus();
         if (!editor->hasUnsavedChanges()) return true;
         const auto answer = QMessageBox::warning(
-            this, "Unsaved changes", "Do you want to save your changes before replacing this map?",
+            this, "Unsaved changes", "Do you want to save your changes?",
             QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
         if (answer == QMessageBox::Save) return saveMap(false);
         return answer == QMessageBox::Discard;
     };
+    const auto confirmMapReplacement = m_confirmUnsavedChanges;
 
     auto *newMapAction = fileMenu->addAction("&New Map");
     newMapAction->setShortcut(QKeySequence::New);
@@ -814,7 +816,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     auto *quitAction = fileMenu->addAction("&Quit");
     quitAction->setShortcut(QKeySequence::Quit);
-    connect(quitAction, &QAction::triggered, qApp, &QApplication::quit);
+    connect(quitAction, &QAction::triggered, this, &QWidget::close);
 
     auto *editMenu = menuBar()->addMenu("&Edit");
     auto *settingsAction = editMenu->addAction("&Settings");
@@ -985,4 +987,13 @@ MainWindow::MainWindow(QWidget *parent)
     });
 
     statusBar()->showMessage("Ready");
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    if (m_confirmUnsavedChanges && !m_confirmUnsavedChanges()) {
+        event->ignore();
+        return;
+    }
+    QMainWindow::closeEvent(event);
 }
