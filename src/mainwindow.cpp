@@ -538,7 +538,7 @@ MainWindow::MainWindow(QWidget *parent)
                     flag->setData(0, Qt::UserRole + 1, mask);
                     flag->setCheckState(1, flags & mask ? Qt::Checked : Qt::Unchecked);
                 }
-                group->setExpanded(true);
+                group->setExpanded(false);
             };
             const auto addChoice = [&](const QString &name, int value, MapEditor::Property property,
                                        const std::vector<std::pair<int, QString>> &choices) {
@@ -557,7 +557,7 @@ MainWindow::MainWindow(QWidget *parent)
             const auto advancedGroup = [&]() {
                 auto *group = new QTreeWidgetItem(propertiesControl, {"Advanced", ""});
                 group->setFlags(Qt::ItemIsEnabled);
-                group->setExpanded(true);
+                group->setExpanded(false);
                 return group;
             };
             if (properties->wall) {
