@@ -479,15 +479,39 @@ void MapScene::setGridVisible(bool visible)
     invalidate(sceneRect(), QGraphicsScene::BackgroundLayer);
 }
 
+void MapScene::setGridAngle(qreal angle)
+{
+    m_gridAngle = angle;
+    invalidate(sceneRect(), QGraphicsScene::BackgroundLayer);
+}
+
+QPointF MapScene::toGrid(const QPointF &point) const
+{
+    return QTransform().rotate(-m_gridAngle).map(point);
+}
+
+QPointF MapScene::fromGrid(const QPointF &point) const
+{
+    return QTransform().rotate(m_gridAngle).map(point);
+}
+
+QPointF MapScene::snapToGrid(const QPointF &point) const
+{
+    const QPointF local = toGrid(point);
+    return fromGrid({std::round(local.x() / m_gridSize) * m_gridSize,
+                     std::round(local.y() / m_gridSize) * m_gridSize});
+}
+
 void MapScene::paintBackground(QPainter *painter, const QRectF &rect)
 {
     painter->fillRect(rect, Qt::black);
 
-    const QRectF gridRect = rect.intersected(sceneRect());
+    const QRectF visibleRect = rect.intersected(sceneRect());
+    const QRectF gridRect = QTransform().rotate(-m_gridAngle).mapRect(visibleRect);
     if (gridRect.isEmpty()) {
         return;
     }
-    painter->fillRect(gridRect, QColor(24, 26, 31));
+    painter->fillRect(visibleRect, QColor(24, 26, 31));
 
     if (!m_gridVisible) {
         return;
@@ -520,6 +544,8 @@ void MapScene::paintBackground(QPainter *painter, const QRectF &rect)
     }
 
     painter->save();
+    painter->setClipRect(visibleRect, Qt::IntersectClip);
+    painter->rotate(m_gridAngle);
     painter->setRenderHint(QPainter::Antialiasing, false);
     painter->setPen(cosmeticPen(QColor(57, 62, 72), 1.0));
     painter->drawLines(minorLines);
@@ -975,6 +1001,26 @@ void MapEditor::setGridSize(qreal size)
     m_scene->setGridSize(size);
 }
 
+void MapEditor::reorientGridToSelectedLine()
+{
+    if (m_mode != Mode::Lines || m_scene->selectedItems().size() != 1) return;
+    auto *wall = dynamic_cast<WallItem *>(m_scene->selectedItems().front());
+    if (!wall || wall->line().isNull()) return;
+    const qreal angle = std::atan2(wall->line().dy(), wall->line().dx()) * 180.0 / std::acos(-1.0);
+    // Equivalent axes repeat every 90 degrees. Choose the smallest change
+    // from the current orientation, including when aligning a second line.
+    m_scene->setGridAngle(m_scene->gridAngle() + std::remainder(angle - m_scene->gridAngle(), 90.0));
+    clearSplitPreview();
+    viewport()->update();
+}
+
+void MapEditor::resetGridOrientation()
+{
+    m_scene->setGridAngle(0.0);
+    clearSplitPreview();
+    viewport()->update();
+}
+
 void MapEditor::setGridVisible(bool visible)
 {
     m_scene->setGridVisible(visible);
@@ -1041,9 +1087,7 @@ QPointF MapEditor::snappedPosition(const QPoint &viewportPosition, bool disableS
         return result;
     }
 
-    const qreal grid = m_scene->gridSize();
-    return QPointF(std::round(scenePosition.x() / grid) * grid,
-                   std::round(scenePosition.y() / grid) * grid);
+    return m_scene->snapToGrid(scenePosition);
 }
 
 void MapEditor::mousePressEvent(QMouseEvent *event)
@@ -1364,9 +1408,11 @@ void MapEditor::updateSplitPreview(const QPoint &position, bool disableSnapping)
         if (!disableSnapping) {
             // Snap along the dominant axis to a grid crossing, keeping diagonal
             // and off-grid walls straight rather than bending them onto the grid.
-            const bool useX = std::abs(delta.x()) >= std::abs(delta.y());
-            const qreal origin = useX ? start.x() : start.y();
-            const qreal extent = useX ? delta.x() : delta.y();
+            const QPointF gridStart = m_scene->toGrid(start);
+            const QPointF gridDelta = m_scene->toGrid(delta);
+            const bool useX = std::abs(gridDelta.x()) >= std::abs(gridDelta.y());
+            const qreal origin = useX ? gridStart.x() : gridStart.y();
+            const qreal extent = useX ? gridDelta.x() : gridDelta.y();
             const qreal grid = m_scene->gridSize();
             t = (std::round((origin + t * extent) / grid) * grid - origin) / extent;
         }

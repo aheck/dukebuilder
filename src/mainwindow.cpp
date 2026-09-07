@@ -509,11 +509,20 @@ MainWindow::MainWindow(QWidget *parent)
                     value);
             });
 
+    auto *reorientGridAction = new QAction("Reorient Grid to Line", this);
+    reorientGridAction->setShortcut(QKeySequence(Qt::Key_F11));
+    reorientGridAction->setEnabled(false);
+    connect(reorientGridAction, &QAction::triggered, editor, &MapEditor::reorientGridToSelectedLine);
+    auto *resetGridAction = new QAction("Reset Grid Orientation", this);
+    resetGridAction->setShortcut(QKeySequence(Qt::Key_F12));
+    connect(resetGridAction, &QAction::triggered, editor, &MapEditor::resetGridOrientation);
+
     editor->setPropertiesCallback(
         [propertiesControl, propertyDelegate, editor, wallTexturePreview, wallTexturePreviews, sectorTexturePreviews,
-         spriteTexturePreview, spriteTexturePreviews,
+         spriteTexturePreview, spriteTexturePreviews, reorientGridAction,
          ceilingTexturePreview, floorTexturePreview, updateTexturePreview](std::optional<MapEditor::SelectionProperties> properties) {
             const QSignalBlocker blocker(propertiesControl);
+            reorientGridAction->setEnabled(properties && properties->wall.has_value());
             // Clearing the rows can finish an edit while its widget is being retired.
             const QSignalBlocker delegateBlocker(propertyDelegate);
             propertiesControl->clear();
@@ -1055,6 +1064,9 @@ MainWindow::MainWindow(QWidget *parent)
     });
 
     auto *viewMenu = menuBar()->addMenu("&View");
+    viewMenu->addAction(reorientGridAction);
+    viewMenu->addAction(resetGridAction);
+    viewMenu->addSeparator();
     auto *propertyEditorAction = viewMenu->addAction("&Property Editor");
     propertyEditorAction->setCheckable(true);
     propertyEditorAction->setChecked(!propertiesDock->isHidden());

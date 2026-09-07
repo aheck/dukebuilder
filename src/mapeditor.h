@@ -30,9 +30,15 @@ public:
     void setGridVisible(bool visible);
     [[nodiscard]] bool isGridVisible() const { return m_gridVisible; }
     void paintBackground(QPainter *painter, const QRectF &rect);
+    void setGridAngle(qreal angle);
+    [[nodiscard]] qreal gridAngle() const { return m_gridAngle; }
+    [[nodiscard]] QPointF toGrid(const QPointF &point) const;
+    [[nodiscard]] QPointF fromGrid(const QPointF &point) const;
+    [[nodiscard]] QPointF snapToGrid(const QPointF &point) const;
 
 private:
     qreal m_gridSize = 256.0;
+    qreal m_gridAngle = 0.0;
     bool m_gridVisible = true;
 };
 
@@ -138,6 +144,8 @@ public:
     bool openMap(const QString &filename, QString &error);
     void setMode(Mode mode);
     void setGridSize(qreal size);
+    void reorientGridToSelectedLine();
+    void resetGridOrientation();
     void setGridVisible(bool visible);
     [[nodiscard]] bool isGridVisible() const;
     void setZoomPercent(qreal percent);

@@ -53,6 +53,10 @@ Run it:
   20 pixels at 100% zoom). The drawn grid uses this same spacing at every zoom;
   every eighth line is brighter for orientation.
 - **G or the Grid toolbar button:** show or hide the grid.
+- **F11 / View → Reorient Grid to Line:** with one line selected, rotate the
+  nearest grid axis parallel to it. Drawing and vertex-insertion snapping follow
+  the rotated grid; its origin and spacing stay unchanged.
+- **F12 / View → Reset Grid Orientation:** restore the default grid axes.
 - **T:** enter Sprites mode.
 - **Lines mode:** select one or more lines and press Delete to remove them.
   Connected selected lines collapse onto their lowest-numbered endpoint, keeping
