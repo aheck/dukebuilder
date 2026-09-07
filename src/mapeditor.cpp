@@ -1828,7 +1828,9 @@ void MapEditor::updateProperties() const
                 wallItem->setEditingSide(reversed);
                 SelectionProperties properties{};
                 properties.wall = WallProperties{reversed ? wall.reverseSide : wall.forwardSide,
-                                                wall.forwardSector, wall.reverseSector, reversed};
+                                                wall.forwardSector, wall.reverseSector, reversed,
+                                                QLineF(m_document.vertices()[wall.start].position,
+                                                       m_document.vertices()[wall.end].position).length()};
                 m_propertiesCallback(properties);
                 return;
             }

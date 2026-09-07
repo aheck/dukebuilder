@@ -65,6 +65,7 @@ public:
         std::optional<MapDocument::SectorId> forwardSector;
         std::optional<MapDocument::SectorId> reverseSector;
         bool reversed;
+        qreal length;
     };
 
     struct SelectionProperties {

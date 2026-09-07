@@ -595,6 +595,10 @@ MainWindow::MainWindow(QWidget *parent)
                             if (sideIndex.isValid()) editor->setSelectedWallSide(sideChooser->itemData(index).toBool());
                         }, Qt::QueuedConnection);
                 const auto &values = wall.values;
+                auto *lengthRow = new QTreeWidgetItem(propertiesControl,
+                    {"Length", number(wall.length)});
+                lengthRow->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+                lengthRow->setToolTip(1, "Line length in map units");
                 updateTexturePreview(wallTexturePreview, values.texture, "Wall");
                 wallTexturePreviews->show();
                 addTextureProperty("Texture", values.texture, MapEditor::Property::Texture);
