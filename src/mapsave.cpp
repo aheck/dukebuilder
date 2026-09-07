@@ -55,19 +55,10 @@ int16_t containingSector(const DukeMapFile &map, int32_t x, int32_t y, const QSt
 {
     int interior = -1, boundary = -1, interiorCount = 0;
     for (int s = 0; s < map.numsectors; ++s) {
-        bool inside = false, onBoundary = false;
-        const auto &sector = *map.sectors[s];
-        for (int i = sector.wallptr; i < sector.wallptr + sector.wallnum; ++i) {
-            const auto &a = *map.walls[i];
-            const auto &b = *map.walls[a.point2];
-            const long double dx = static_cast<long double>(b.x) - a.x;
-            const long double dy = static_cast<long double>(b.y) - a.y;
-            const long double px = static_cast<long double>(x) - a.x;
-            const long double py = static_cast<long double>(y) - a.y;
-            if (dx * py == dy * px && x >= std::min(a.x, b.x) && x <= std::max(a.x, b.x)
-                && y >= std::min(a.y, b.y) && y <= std::max(a.y, b.y)) onBoundary = true;
-            if ((a.y > y) != (b.y > y) && a.x + py * dx / dy > x) inside = !inside;
-        }
+        const auto location = duke_map_sector_classify_point(&map, s, x, y);
+        require(location != DUKE_MAP_POINT_INVALID, label + ": invalid sector geometry.");
+        const bool inside = location == DUKE_MAP_POINT_INSIDE;
+        const bool onBoundary = location == DUKE_MAP_POINT_BOUNDARY;
         if ((onBoundary || inside) && preferred && *preferred == static_cast<std::size_t>(s))
             return static_cast<int16_t>(s);
         if (onBoundary) {
