@@ -19,33 +19,9 @@ bool MapDocument::openMap(const QString &filename, QString &error)
         if (map->mapversion != 7) throw std::runtime_error("Only classic version-7 Build maps are supported.");
         if (map->numsectors == 0) throw std::runtime_error("The map contains no sectors.");
 
-        // Validate references without imposing the exporter's geometric rules:
-        // shipped Duke maps include intentional two-wall effect sectors.
-        std::vector<int> owners(map->numwalls, -1), incoming(map->numwalls, 0);
-        for (int s = 0; s < map->numsectors; ++s) {
-            const auto &sector = *map->sectors[s];
-            if (sector.wallptr < 0 || sector.wallnum < 1 || sector.wallptr + sector.wallnum > map->numwalls)
-                throw std::runtime_error("A sector has an invalid wall range.");
-            for (int w = sector.wallptr; w < sector.wallptr + sector.wallnum; ++w) {
-                if (owners[w] != -1) throw std::runtime_error("Sector wall ranges overlap.");
-                owners[w] = s;
-            }
-        }
-        for (int w = 0; w < map->numwalls; ++w) {
-            const auto &wall = *map->walls[w];
-            if (owners[w] < 0 || wall.point2 < 0 || wall.point2 >= map->numwalls
-                || owners[wall.point2] != owners[w] || ++incoming[wall.point2] != 1)
-                throw std::runtime_error("A wall has an invalid next-point link.");
-            if (wall.nextwall == -1 && wall.nextsector == -1) continue;
-            if (wall.nextwall < 0 || wall.nextwall >= map->numwalls || wall.nextsector < 0
-                || wall.nextsector >= map->numsectors || owners[wall.nextwall] != wall.nextsector)
-                throw std::runtime_error("A wall has an invalid portal reference.");
-            const auto &other = *map->walls[wall.nextwall];
-            if (other.nextwall != w || other.nextsector != owners[w] || other.point2 < 0
-                || other.point2 >= map->numwalls || wall.x != map->walls[other.point2]->x
-                || wall.y != map->walls[other.point2]->y || other.x != map->walls[wall.point2]->x
-                || other.y != map->walls[wall.point2]->y)
-                throw std::runtime_error("A portal's two wall sides do not match.");
+        // Import permits effect sectors; strict export geometry checks remain separate.
+        if (!duke_map_file_validate_references(map.get())) {
+            throw std::runtime_error(map->last_error);
         }
 
         MapDocument loaded;
