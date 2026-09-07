@@ -14,6 +14,7 @@
 #include <vector>
 
 class QGraphicsPathItem;
+class QGraphicsSimpleTextItem;
 class QKeyEvent;
 class QMouseEvent;
 class QWheelEvent;
@@ -171,6 +172,7 @@ private:
     MapDocument m_savedDocument;
     MapScene *m_scene = nullptr;
     QGraphicsPathItem *m_previewItem = nullptr;
+    QGraphicsSimpleTextItem *m_previewLengthItem = nullptr;
     std::vector<QPointF> m_drawingPoints;
     std::vector<std::pair<MapDocument::VertexId, QPointF>> m_draggedVertices;
     std::vector<MapDocument::WallId> m_draggedWalls;

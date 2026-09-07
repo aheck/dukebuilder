@@ -8,6 +8,7 @@
 #include <QGraphicsPolygonItem>
 #include <QGraphicsRectItem>
 #include <QGraphicsSceneHoverEvent>
+#include <QGraphicsSimpleTextItem>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
@@ -42,6 +43,23 @@ const QColor vertexColor(255, 190, 72);
 const QColor hoverColor(80, 210, 255);
 const QColor selectedColor(255, 110, 92);
 const QColor sectorColor(50, 116, 158, 38);
+
+class LineLengthItem final : public QGraphicsSimpleTextItem
+{
+public:
+    explicit LineLengthItem(QGraphicsItem *parent) : QGraphicsSimpleTextItem(parent)
+    {
+        setFlag(ItemIgnoresTransformations);
+        setAcceptedMouseButtons(Qt::NoButton);
+        setBrush(QColor(80, 210, 255));
+    }
+
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) override
+    {
+        painter->fillRect(boundingRect(), QColor(24, 26, 31, 235));
+        QGraphicsSimpleTextItem::paint(painter, option, widget);
+    }
+};
 
 QPen cosmeticPen(const QColor &color, qreal width)
 {
@@ -1657,6 +1675,7 @@ void MapEditor::cancelDrawing()
         m_scene->removeItem(m_previewItem);
         delete m_previewItem;
         m_previewItem = nullptr;
+        m_previewLengthItem = nullptr;
     }
     reportStatus("Drawing cancelled");
 }
@@ -1676,9 +1695,22 @@ void MapEditor::updatePreview(const QPointF &cursorPosition)
     if (!m_previewItem) {
         m_previewItem = m_scene->addPath(path, cosmeticPen(QColor(80, 210, 255), 2.0));
         m_previewItem->setZValue(20.0);
+        m_previewLengthItem = new LineLengthItem(m_previewItem);
     } else {
         m_previewItem->setPath(path);
     }
+
+    const QLineF segment(m_drawingPoints.back(), cursorPosition);
+    const qreal length = segment.length();
+    m_previewLengthItem->setVisible(length > 0.0);
+    m_previewLengthItem->setText(QString::number(length, 'f', 1));
+    m_previewLengthItem->setPos(segment.center());
+    const QRectF labelBounds = m_previewLengthItem->boundingRect();
+    // Keep the label horizontal and its gap fixed in pixels at every zoom.
+    const QPointF offset = std::abs(segment.dx()) >= std::abs(segment.dy())
+        ? QPointF(-labelBounds.width() / 2.0, -labelBounds.height() - 8.0)
+        : QPointF(8.0, -labelBounds.height() / 2.0);
+    m_previewLengthItem->setTransform(QTransform::fromTranslate(offset.x(), offset.y()));
 }
 
 void MapEditor::setSectorFill(SectorFill fill)
@@ -1710,6 +1742,7 @@ void MapEditor::rebuildScene()
 {
     m_scene->clear();
     m_previewItem = nullptr;
+    m_previewLengthItem = nullptr;
 
     for (std::size_t sectorId = 0; sectorId < m_document.sectors().size(); ++sectorId) {
         const MapDocument::Sector &sector = m_document.sectors()[sectorId];
