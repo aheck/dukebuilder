@@ -94,7 +94,7 @@ public:
     {
         if (!scene() || scene()->views().isEmpty()) return;
         // The marker stays pixel-sized, but its direction must follow the view's
-        // reflected Y axis (and any rotation) just like the wall does.
+        // transform just like the wall does.
         const QTransform transform = parentItem()->deviceTransform(scene()->views().front()->viewportTransform());
         const QPointF direction = transform.map(m_direction) - transform.map(QPointF());
         const qreal length = std::hypot(direction.x(), direction.y());
@@ -257,8 +257,8 @@ public:
     void setTexture(const QImage &image)
     {
         m_texture = image.isNull() ? QBrush(Qt::NoBrush) : QBrush(image);
-        // Anchor the repeating preview in map coordinates; compensate for the view's Y flip.
-        m_texture.setTransform(QTransform::fromScale(8.0, -8.0));
+        // Anchor the repeating preview in map coordinates.
+        m_texture.setTransform(QTransform::fromScale(8.0, 8.0));
         update();
     }
 
@@ -548,7 +548,7 @@ MapEditor::MapEditor(QWidget *parent)
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
-    scale(1.0, -1.0);
+    // Build map coordinates use positive Y downward, matching Qt's default view.
     centerOn(0.0, 0.0);
     rebuildScene();
 }
@@ -1756,6 +1756,9 @@ void MapEditor::rebuildScene()
     playerStart->setInteractive(m_mode == Mode::Sprites);
     m_scene->addItem(playerStart);
     playerStart->setPos(m_document.playerStart().position);
+    // Build angle zero faces +X; angles increase clockwise in the Y-down view.
+    // The artwork points up, so rotate it 90 degrees to face right at angle zero.
+    playerStart->setRotation(m_document.playerStart().angle + 90.0);
     playerStart->setZValue(13.0);
     updateSectorTextures();
 }
