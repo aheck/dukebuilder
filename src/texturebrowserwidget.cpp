@@ -46,25 +46,13 @@ struct Texture {
     int height = 0;
 };
 
-uint8_t expandVgaChannel(uint8_t channel)
-{
-    return static_cast<uint8_t>((channel << 2) | (channel >> 4));
-}
-
-QImage tileImage(const DukeArtTile &tile, const uint8_t *pixels,
+QImage tileImage(const DukeArtTile &tile, const uint8_t *pixels, size_t pixelsSize,
                  const DukePaletteFile &palette)
 {
-    QImage image(tile.width, tile.height, QImage::Format_ARGB32);
-    for (int y = 0; y < tile.height; ++y) {
-        auto *scanLine = reinterpret_cast<QRgb *>(image.scanLine(y));
-        for (int x = 0; x < tile.width; ++x) {
-            const uint8_t paletteIndex = pixels[x * tile.height + y];
-            const DukePaletteColor &color = palette.colors[paletteIndex];
-            const int alpha = paletteIndex == 255 ? 0 : 255;
-            scanLine[x] = qRgba(expandVgaChannel(color.red),
-                                expandVgaChannel(color.green),
-                                expandVgaChannel(color.blue), alpha);
-        }
+    QImage image(tile.width, tile.height, QImage::Format_RGBA8888);
+    if (image.isNull() || !duke_art_tile_to_rgba(&tile, pixels, pixelsSize, &palette,
+                                              image.bits(), static_cast<size_t>(image.sizeInBytes()))) {
+        return {};
     }
     return image;
 }
@@ -207,17 +195,17 @@ void TextureBrowserWidget::reload()
                     continue;
                 }
                 void *pixels = nullptr;
-                if (duke_art_get_tile_data_by_index(
-                        art.get(), static_cast<uint32_t>(tileIndex), &pixels)
-                        == static_cast<size_t>(-1)
-                    || !pixels) {
+                const size_t pixelsSize = duke_art_get_tile_data_by_index(
+                    art.get(), static_cast<uint32_t>(tileIndex), &pixels);
+                if (pixelsSize == static_cast<size_t>(-1) || !pixels) {
                     continue;
                 }
-                textures[tile->tile_number] = {
-                    tileImage(*tile, static_cast<const uint8_t *>(pixels), *palette),
-                    tile->width,
-                    tile->height,
-                };
+                const QImage image = tileImage(*tile, static_cast<const uint8_t *>(pixels),
+                                               pixelsSize, *palette);
+                if (image.isNull()) {
+                    continue;
+                }
+                textures[tile->tile_number] = {image, tile->width, tile->height};
             }
         }
     }
