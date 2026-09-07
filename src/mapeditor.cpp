@@ -156,6 +156,13 @@ public:
         }
     }
 
+    void setFirstWallHighlighted(bool highlighted)
+    {
+        if (m_firstWallHighlighted == highlighted) return;
+        m_firstWallHighlighted = highlighted;
+        update();
+    }
+
     void setEditingSide(bool reversed)
     {
         const QPointF normal(-line().dy(), line().dx());
@@ -200,15 +207,17 @@ protected:
 
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
     {
-        const QColor baseColor = m_twoSided ? twoSidedWallColor : wallColor;
+        const QColor baseColor = m_firstWallHighlighted ? QColor(180, 120, 255)
+            : (m_twoSided ? twoSidedWallColor : wallColor);
         const QColor color = isSelected() ? selectedColor : (m_hovered ? hoverColor : baseColor);
-        painter->setPen(cosmeticPen(color, (m_hovered || isSelected()) ? 3.0 : 1.6));
+        painter->setPen(cosmeticPen(color, (m_hovered || isSelected() || m_firstWallHighlighted) ? 3.0 : 1.6));
         painter->drawLine(line());
 
     }
 
 private:
     bool m_twoSided = false;
+    bool m_firstWallHighlighted = false;
     WallSideMarker *m_sideMarker = nullptr;
     bool m_hovered = false;
 };
@@ -1958,6 +1967,20 @@ void MapEditor::rebuildScene()
 
 void MapEditor::updateProperties() const
 {
+    std::optional<MapDocument::WallId> firstWall;
+    const auto selected = m_scene->selectedItems();
+    if (m_propertiesCallback && m_mode == Mode::Sectors && selected.size() == 1
+        && dynamic_cast<SectorItem *>(selected.front())) {
+        const auto sectorId = static_cast<std::size_t>(selected.front()->data(sectorIdRole).toULongLong());
+        if (sectorId < m_document.sectors().size() && !m_document.sectors()[sectorId].walls.empty()) {
+            firstWall = m_document.sectors()[sectorId].walls.front();
+        }
+    }
+    for (auto *item : m_scene->items()) {
+        if (auto *wall = dynamic_cast<WallItem *>(item)) {
+            wall->setFirstWallHighlighted(firstWall && item->data(wallIdRole).toULongLong() == *firstWall);
+        }
+    }
     if (!m_propertiesCallback) {
         return;
     }
