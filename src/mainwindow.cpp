@@ -9,6 +9,7 @@
 #include <QComboBox>
 #include <QCloseEvent>
 #include <QDockWidget>
+#include <QDir>
 #include <QDebug>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -752,6 +753,7 @@ MainWindow::MainWindow(QWidget *parent)
         const QString path = file.canonicalFilePath().isEmpty()
             ? file.absoluteFilePath() : file.canonicalFilePath();
         QSettings settings;
+        settings.setValue("files/lastMapDirectory", file.absolutePath());
         QStringList recent = settings.value("files/recentMaps").toStringList();
         recent.removeAll(path);
         recent.prepend(path);
@@ -759,12 +761,23 @@ MainWindow::MainWindow(QWidget *parent)
         settings.setValue("files/recentMaps", recent);
     };
 
-    const auto saveMap = [this, editor, rememberMap](bool saveAs) -> bool {
+    const auto mapDirectory = [this] {
+        const QSettings settings;
+        const QString saved = settings.value("files/lastMapDirectory").toString();
+        if (!saved.isEmpty() && QDir(saved).exists()) return saved;
+        if (!m_mapFilename.isEmpty() && QFileInfo(m_mapFilename).dir().exists()) {
+            return QFileInfo(m_mapFilename).absolutePath();
+        }
+        return QDir::homePath();
+    };
+
+    const auto saveMap = [this, editor, rememberMap, mapDirectory](bool saveAs) -> bool {
         // Commit any active property edit before taking the export snapshot.
         editor->setFocus();
         QString filename = m_mapFilename;
         if (saveAs || filename.isEmpty()) {
-            QFileDialog dialog(this, "Save Build Map", filename, "Build maps (*.map *.MAP)");
+            QFileDialog dialog(this, "Save Build Map", mapDirectory(), "Build maps (*.map *.MAP)");
+            if (!filename.isEmpty()) dialog.selectFile(QFileInfo(filename).fileName());
             dialog.setAcceptMode(QFileDialog::AcceptSave);
             dialog.setFileMode(QFileDialog::AnyFile);
             dialog.setDefaultSuffix("map");
@@ -821,9 +834,9 @@ MainWindow::MainWindow(QWidget *parent)
         setWindowTitle(QFileInfo(filename).fileName() + " - Duke Builder");
         statusBar()->showMessage("Opened " + QFileInfo(filename).fileName(), 5000);
     };
-    connect(openMapAction, &QAction::triggered, this, [this, openMap, confirmMapReplacement] {
+    connect(openMapAction, &QAction::triggered, this, [this, openMap, confirmMapReplacement, mapDirectory] {
         if (!confirmMapReplacement()) return;
-        const QString filename = QFileDialog::getOpenFileName(this, "Open Build Map", m_mapFilename,
+        const QString filename = QFileDialog::getOpenFileName(this, "Open Build Map", mapDirectory(),
                                                              "Build maps (*.map *.MAP);;All files (*)");
         if (!filename.isEmpty()) openMap(filename);
     });
