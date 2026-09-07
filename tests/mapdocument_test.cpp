@@ -33,6 +33,48 @@ void checkSideReferences(const MapDocument &document)
 
 int main()
 {
+    {
+        MapDocument split;
+        require(split.addPolyline({{0,0}, {1024,0}, {1024,1024}, {0,1024}}, true), "Split outer room");
+        require(split.addPolyline({{256,256}, {768,256}, {768,768}, {256,768}}, true), "Split inner room");
+        split.setSectorLotag(0, 17);
+        split.setSectorFloorZ(1, 4096);
+        const auto before = split;
+        require(!split.splitWall(0, {0,0}), "Do not split at an endpoint");
+        require(!split.splitWall(0, {512,1}), "Do not bend a wall to an off-line point");
+        require(!split.splitWall(999, {512,0}), "Reject unknown wall");
+        require(split == before, "Rejected splits leave document unchanged");
+        require(split.splitWall(0, {512,0}).has_value(), "Split outer wall");
+        require(split.sectors()[0].loopStarts == std::vector<std::size_t>({0,5}),
+                "Splitting outer loop shifts hole start");
+        checkSideReferences(split);
+        const auto wallId = split.sectors()[1].walls.front();
+        const auto wall = split.walls()[wallId];
+        auto front = wall.forwardSide;
+        auto back = wall.reverseSide;
+        front.texture = 123;
+        front.xpanning = 37;
+        back.texture = 456;
+        back.lotag = 42;
+        split.setWallSide(wallId, false, front);
+        split.setWallSide(wallId, true, back);
+        const auto position = (split.vertices()[wall.start].position + split.vertices()[wall.end].position) / 2.0;
+        const auto vertexId = split.splitWall(wallId, position);
+        require(vertexId.has_value(), "Split shared wall");
+        require(split.vertices()[*vertexId].position == position, "Inserted vertex position");
+        require(split.walls()[wallId].forwardSide == front && split.walls().back().forwardSide == front
+                && split.walls()[wallId].reverseSide == back && split.walls().back().reverseSide == back,
+                "Both halves retain both wall sides");
+        require(split.sectors()[0].walls.size() == 10 && split.sectors()[1].walls.size() == 5,
+                "Shared wall split updates both sectors");
+        require(split.sectors()[0].lotag == 17 && split.sectors()[1].floorz == 4096,
+                "Sector properties survive splits");
+        checkSideReferences(split);
+        MapDocument diagonal;
+        require(diagonal.addPolyline({{0,0}, {1024,1024}, {0,1024}}, true), "Diagonal room");
+        require(diagonal.splitWall(0, {256,256}).has_value(), "Split diagonal wall");
+        checkSideReferences(diagonal);
+    }
     MapDocument islands;
     require(islands.addPolyline({{0,0}, {1000,0}, {1000,1000}, {0,1000}}, true), "Outer room");
     islands.setSectorLotag(0, 17);

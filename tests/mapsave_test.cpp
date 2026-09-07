@@ -66,6 +66,22 @@ int main(int argc, char **argv)
             "Raised box height and texture survive reopening");
     require(saveBuildMap(reopenedBox, directory.filePath("box-copy.map"), error), error);
     require(read(boxPath) == read(directory.filePath("box-copy.map")), "Box portals survive round trip");
+    {
+        MapDocument splitBox = reopenedBox;
+        const auto id = splitBox.sectors()[1].walls.front();
+        const auto &wall = splitBox.walls()[id];
+        const QPointF midpoint = (splitBox.vertices()[wall.start].position
+                                  + splitBox.vertices()[wall.end].position) / 2.0;
+        require(splitBox.splitWall(id, midpoint).has_value(), "Split imported shared wall");
+        const QString splitPath = directory.filePath("split-box.map");
+        require(saveBuildMap(splitBox, splitPath, error), error);
+        MapDocument loadedSplit;
+        require(loadedSplit.openMap(splitPath, error), error);
+        require(loadedSplit.sectors()[0].walls.size() == 9 && loadedSplit.sectors()[1].walls.size() == 5,
+                "Split portal is retained on both sides after export/import");
+        require(saveBuildMap(loadedSplit, directory.filePath("split-copy.map"), error), error);
+        require(read(splitPath) == read(directory.filePath("split-copy.map")), "Split map round trip preserves bytes");
+    }
     require(reopenedBox.supportsTopologyEditing(), "Reopened connected box supports line editing");
     const auto boxWall = reopenedBox.sectors()[1].walls.front();
     reopenedBox.removeWalls({boxWall});

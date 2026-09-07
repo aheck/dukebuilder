@@ -58,6 +58,9 @@ Run it:
   Connected selected lines collapse onto their lowest-numbered endpoint, keeping
   the remaining sector boundaries closed. Surviving sectors retain their
   properties and relative order. Sectors collapsed below three edges disappear.
+- **Vertices mode:** hover over a line to preview a new vertex; double-click to
+  split the line there. The preview snaps to grid crossings along the line;
+  hold Alt for a free position on the line. Shared walls split on both sides.
 - **Sprites mode:** right-click empty space to add a sprite; left-click or
   rubber-band to select; right-drag to move; right-click a sprite to choose its
   texture; Delete removes selected sprites.

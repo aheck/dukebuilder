@@ -946,6 +946,7 @@ void MapEditor::setMode(Mode mode)
 
     cancelDrawing();
     m_mode = mode;
+    clearSplitPreview();
     m_scene->clearSelection();
     setDragMode(mode == Mode::Vertices || mode == Mode::Lines || mode == Mode::Sectors
                     || mode == Mode::Sprites
@@ -970,6 +971,7 @@ void MapEditor::setMode(Mode mode)
 
 void MapEditor::setGridSize(qreal size)
 {
+    clearSplitPreview();
     m_scene->setGridSize(size);
 }
 
@@ -986,6 +988,7 @@ bool MapEditor::isGridVisible() const
 
 void MapEditor::setZoomPercent(qreal percent)
 {
+    clearSplitPreview();
     const qreal currentScale = std::abs(transform().m11());
     const qreal targetScale = std::clamp(baseZoomScale * percent / 100.0,
                                        minimumZoomScale, maximumZoomScale);
@@ -1045,6 +1048,7 @@ QPointF MapEditor::snappedPosition(const QPoint &viewportPosition, bool disableS
 
 void MapEditor::mousePressEvent(QMouseEvent *event)
 {
+    if (event->button() != Qt::LeftButton) clearSplitPreview();
     if (event->button() == Qt::MiddleButton) {
         m_panning = true;
         m_lastPanPosition = event->position().toPoint();
@@ -1331,8 +1335,98 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
     QGraphicsView::mousePressEvent(event);
 }
 
+void MapEditor::clearSplitPreview()
+{
+    m_splitWall.reset();
+    if (m_splitPreviewItem) m_splitPreviewItem->hide();
+}
+
+void MapEditor::updateSplitPreview(const QPoint &position, bool disableSnapping)
+{
+    clearSplitPreview();
+    if (m_mode != Mode::Vertices) return;
+    const QPointF cursor = mapToScene(position);
+    const qreal tolerance = snapRadiusPixels / std::abs(transform().m11());
+    // Existing vertices take precedence over creating another nearby vertex.
+    for (const auto &vertex : m_document.vertices()) {
+        if (QLineF(cursor, vertex.position).length() <= tolerance) return;
+    }
+    qreal nearest = tolerance;
+    for (MapDocument::WallId id = 0; id < m_document.walls().size(); ++id) {
+        const auto &wall = m_document.walls()[id];
+        const QPointF start = m_document.vertices()[wall.start].position;
+        const QPointF delta = m_document.vertices()[wall.end].position - start;
+        const qreal squaredLength = QPointF::dotProduct(delta, delta);
+        if (squaredLength == 0.0) continue;
+        qreal t = QPointF::dotProduct(cursor - start, delta) / squaredLength;
+        const qreal distance = QLineF(cursor, start + std::clamp(t, 0.0, 1.0) * delta).length();
+        if (distance > nearest) continue;
+        if (!disableSnapping) {
+            // Snap along the dominant axis to a grid crossing, keeping diagonal
+            // and off-grid walls straight rather than bending them onto the grid.
+            const bool useX = std::abs(delta.x()) >= std::abs(delta.y());
+            const qreal origin = useX ? start.x() : start.y();
+            const qreal extent = useX ? delta.x() : delta.y();
+            const qreal grid = m_scene->gridSize();
+            t = (std::round((origin + t * extent) / grid) * grid - origin) / extent;
+        }
+        if (t <= 0.0 || t >= 1.0) continue;
+        const QPointF candidate = start + t * delta;
+        if (QLineF(candidate, start).length() < 0.001
+            || QLineF(candidate, start + delta).length() < 0.001) continue;
+        nearest = distance;
+        m_splitWall = id;
+        m_splitPosition = candidate;
+    }
+    if (!m_splitWall) return;
+    if (!m_splitPreviewItem) {
+        m_splitPreviewItem = m_scene->addEllipse(-4.5, -4.5, 9.0, 9.0,
+            cosmeticPen(hoverColor, 1.5), QColor(80, 210, 255, 90));
+        m_splitPreviewItem->setFlag(QGraphicsItem::ItemIgnoresTransformations);
+        m_splitPreviewItem->setAcceptedMouseButtons(Qt::NoButton);
+        m_splitPreviewItem->setZValue(25.0);
+    }
+    m_splitPreviewItem->setPos(m_splitPosition);
+    m_splitPreviewItem->show();
+}
+
+void MapEditor::mouseDoubleClickEvent(QMouseEvent *event)
+{
+    if (m_mode == Mode::Vertices && event->button() == Qt::LeftButton) {
+        updateSplitPreview(event->position().toPoint(), event->modifiers().testFlag(Qt::AltModifier));
+        if (m_splitWall) {
+            const auto vertexId = m_document.splitWall(*m_splitWall, m_splitPosition);
+            if (vertexId) {
+                rebuildScene();
+                for (auto *item : m_scene->items()) {
+                    if (dynamic_cast<VertexItem *>(item)
+                        && item->data(vertexIdRole).toULongLong() == *vertexId) {
+                        item->setSelected(true);
+                        break;
+                    }
+                }
+                reportStatus("Vertex created | Line split");
+            }
+            event->accept();
+            return;
+        }
+    }
+    QGraphicsView::mouseDoubleClickEvent(event);
+}
+
+void MapEditor::leaveEvent(QEvent *event)
+{
+    clearSplitPreview();
+    QGraphicsView::leaveEvent(event);
+}
+
 void MapEditor::mouseMoveEvent(QMouseEvent *event)
 {
+    if (event->buttons() == Qt::NoButton) {
+        updateSplitPreview(event->position().toPoint(), event->modifiers().testFlag(Qt::AltModifier));
+    } else {
+        clearSplitPreview();
+    }
     if (m_draggingSprites) {
         const QPoint viewportDelta = event->position().toPoint()
             - m_spriteRightPressPosition;
@@ -1553,6 +1647,7 @@ void MapEditor::mouseReleaseEvent(QMouseEvent *event)
 
 void MapEditor::wheelEvent(QWheelEvent *event)
 {
+    clearSplitPreview();
     const QPointF before = mapToScene(event->position().toPoint());
     const qreal factor = std::pow(1.0015, event->angleDelta().y());
     const qreal currentScale = std::abs(transform().m11());
@@ -1740,6 +1835,8 @@ void MapEditor::updateSectorTextures()
 
 void MapEditor::rebuildScene()
 {
+    m_splitPreviewItem = nullptr;
+    m_splitWall.reset();
     m_scene->clear();
     m_previewItem = nullptr;
     m_previewLengthItem = nullptr;

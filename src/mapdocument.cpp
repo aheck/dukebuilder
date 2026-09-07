@@ -102,6 +102,47 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed)
     return false;
 }
 
+std::optional<MapDocument::VertexId> MapDocument::splitWall(WallId wallId, const QPointF &position)
+{
+    if (wallId >= m_walls.size() || !std::isfinite(position.x()) || !std::isfinite(position.y())) {
+        return std::nullopt;
+    }
+    const Wall original = m_walls[wallId];
+    const QPointF start = m_vertices[original.start].position;
+    const QPointF delta = m_vertices[original.end].position - start;
+    const qreal length = std::hypot(delta.x(), delta.y());
+    if (length <= coordinateEpsilon) return std::nullopt;
+    const QPointF offset = position - start;
+    const qreal distance = QPointF::dotProduct(offset, delta) / length;
+    if (distance <= coordinateEpsilon || distance >= length - coordinateEpsilon
+        || std::abs(offset.x() * delta.y() - offset.y() * delta.x()) / length > coordinateEpsilon) {
+        return std::nullopt;
+    }
+    const VertexId vertexId = m_vertices.size();
+    const WallId secondId = m_walls.size();
+    m_vertices.push_back({position});
+    m_walls[wallId].end = vertexId;
+    Wall second = original;
+    second.start = vertexId;
+    m_walls.push_back(second);
+    // Update existing loops directly: rebuilding planar faces would lose imported
+    // overlapping rooms and effect sectors. Reverse sides traverse the new half first.
+    for (auto &sector : m_sectors) {
+        for (std::size_t i = 0; i < sector.walls.size(); ++i) {
+            if (sector.walls[i] != wallId) continue;
+            const bool reversed = sector.vertices[i] == original.end;
+            sector.walls[i] = reversed ? secondId : wallId;
+            sector.walls.insert(sector.walls.begin() + i + 1, reversed ? wallId : secondId);
+            sector.vertices.insert(sector.vertices.begin() + i + 1, vertexId);
+            for (auto &loopStart : sector.loopStarts) {
+                if (loopStart > i) ++loopStart;
+            }
+            ++i;
+        }
+    }
+    return vertexId;
+}
+
 void MapDocument::removeWalls(const std::vector<WallId> &wallIds)
 {
     if (!supportsLineDeletion()) return;

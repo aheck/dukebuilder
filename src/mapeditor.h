@@ -14,6 +14,7 @@
 #include <vector>
 
 class QGraphicsPathItem;
+class QGraphicsEllipseItem;
 class QGraphicsSimpleTextItem;
 class QKeyEvent;
 class QMouseEvent;
@@ -153,6 +154,8 @@ public:
 protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
+    void leaveEvent(QEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
@@ -164,6 +167,8 @@ private:
     void finishDrawing(bool close);
     void cancelDrawing();
     void updatePreview(const QPointF &cursorPosition);
+    void updateSplitPreview(const QPoint &position, bool disableSnapping);
+    void clearSplitPreview();
     void rebuildScene();
     void updateSectorTextures();
     void updateProperties() const;
@@ -173,6 +178,9 @@ private:
     MapDocument m_savedDocument;
     MapScene *m_scene = nullptr;
     QGraphicsPathItem *m_previewItem = nullptr;
+    QGraphicsEllipseItem *m_splitPreviewItem = nullptr;
+    std::optional<MapDocument::WallId> m_splitWall;
+    QPointF m_splitPosition;
     QGraphicsSimpleTextItem *m_previewLengthItem = nullptr;
     std::vector<QPointF> m_drawingPoints;
     std::vector<std::pair<MapDocument::VertexId, QPointF>> m_draggedVertices;
