@@ -1170,6 +1170,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
         if (vertex && vertex->isSelected()) {
             m_draggingVertices = true;
             m_vertexDragStart = mapToScene(event->position().toPoint());
+            m_vertexDragAnchor = vertex->pos();
             m_draggedVertices.clear();
             for (QGraphicsItem *selectedItem : m_scene->selectedItems()) {
                 if (auto *selectedVertex = dynamic_cast<VertexItem *>(selectedItem)) {
@@ -1539,6 +1540,11 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
 
     if (m_draggingVertices) {
         QPointF delta = mapToScene(event->position().toPoint()) - m_vertexDragStart;
+        if (m_mode == Mode::Vertices && !event->modifiers().testFlag(Qt::AltModifier)) {
+            // Snap the grabbed vertex, preserving the click offset and the
+            // relative positions of all other vertices in the selection.
+            delta = m_scene->snapToGrid(m_vertexDragAnchor + delta) - m_vertexDragAnchor;
+        }
         qreal minimumX = std::numeric_limits<qreal>::max();
         qreal maximumX = std::numeric_limits<qreal>::lowest();
         qreal minimumY = std::numeric_limits<qreal>::max();

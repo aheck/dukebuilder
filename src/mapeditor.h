@@ -197,6 +197,7 @@ private:
     std::vector<std::pair<MapDocument::SpriteId, QPointF>> m_draggedSprites;
     QMap<int, QImage> m_spriteTextures;
     QPointF m_vertexDragStart;
+    QPointF m_vertexDragAnchor;
     QPointF m_draggedPlayerStart;
     QPoint m_lastPanPosition;
     QPoint m_spriteRightPressPosition;

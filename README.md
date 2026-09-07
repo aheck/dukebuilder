@@ -65,6 +65,9 @@ Run it:
 - **Vertices mode:** hover over a line to preview a new vertex; double-click to
   split the line there. The preview snaps to grid crossings along the line;
   hold Alt for a free position on the line. Shared walls split on both sides.
+  Right-drag selected vertices to move them: the grabbed vertex snaps to the
+  active grid, including its rotation. Hold Alt to move freely. Multiple selected
+  vertices move together without changing their relative positions.
 - **Sprites mode:** right-click empty space to add a sprite; left-click or
   rubber-band to select; right-drag to move; right-click a sprite to choose its
   texture; Delete removes selected sprites.
