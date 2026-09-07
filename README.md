@@ -46,6 +46,8 @@ Run it:
 - **Escape:** cancel the active drawing.
 - **Middle-mouse drag:** pan the map.
 - **Mouse wheel:** zoom around the cursor.
+- **Zoom:** the default 100% is a level-design working scale (1024 map units
+  span about 82 pixels). Use the status-bar zoom selector to return to 100%.
 - **[ / ]:** decrease or increase the snapping grid size.
 - **G or the Grid toolbar button:** show or hide the grid.
 - **T:** enter Sprites mode.

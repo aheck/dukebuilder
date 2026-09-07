@@ -23,6 +23,10 @@
 
 namespace {
 constexpr qreal sceneExtent = 131072.0;
+// 100% is a room-scale working view: 1024 Build units occupy about 82 pixels.
+constexpr qreal baseZoomScale = 0.08;
+constexpr qreal minimumZoomScale = 0.001;
+constexpr qreal maximumZoomScale = 64.0;
 constexpr qreal vertexRadiusPixels = 3.5;
 constexpr qreal hoveredVertexRadiusPixels = 5.0;
 constexpr qreal snapRadiusPixels = 10.0;
@@ -549,6 +553,7 @@ MapEditor::MapEditor(QWidget *parent)
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
     // Build map coordinates use positive Y downward, matching Qt's default view.
+    scale(baseZoomScale, baseZoomScale);
     centerOn(0.0, 0.0);
     rebuildScene();
 }
@@ -960,12 +965,13 @@ bool MapEditor::isGridVisible() const
 void MapEditor::setZoomPercent(qreal percent)
 {
     const qreal currentScale = std::abs(transform().m11());
-    const qreal targetScale = std::clamp(percent / 100.0, 0.001, 64.0);
+    const qreal targetScale = std::clamp(baseZoomScale * percent / 100.0,
+                                       minimumZoomScale, maximumZoomScale);
     const QPointF center = mapToScene(viewport()->rect().center());
     scale(targetScale / currentScale, targetScale / currentScale);
     centerOn(center);
     if (m_zoomCallback) {
-        m_zoomCallback(targetScale * 100.0);
+        m_zoomCallback(targetScale / baseZoomScale * 100.0);
     }
 }
 
@@ -973,7 +979,7 @@ void MapEditor::setZoomCallback(std::function<void(qreal)> callback)
 {
     m_zoomCallback = std::move(callback);
     if (m_zoomCallback) {
-        m_zoomCallback(std::abs(transform().m11()) * 100.0);
+        m_zoomCallback(std::abs(transform().m11()) / baseZoomScale * 100.0);
     }
 }
 
@@ -1528,12 +1534,13 @@ void MapEditor::wheelEvent(QWheelEvent *event)
     const QPointF before = mapToScene(event->position().toPoint());
     const qreal factor = std::pow(1.0015, event->angleDelta().y());
     const qreal currentScale = std::abs(transform().m11());
-    const qreal targetScale = std::clamp(currentScale * factor, 0.001, 64.0);
+    const qreal targetScale = std::clamp(currentScale * factor,
+                                       minimumZoomScale, maximumZoomScale);
     scale(targetScale / currentScale, targetScale / currentScale);
     const QPointF after = mapToScene(event->position().toPoint());
     translate(after.x() - before.x(), after.y() - before.y());
     if (m_zoomCallback) {
-        m_zoomCallback(targetScale * 100.0);
+        m_zoomCallback(targetScale / baseZoomScale * 100.0);
     }
     event->accept();
 }
