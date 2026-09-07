@@ -48,7 +48,10 @@ Run it:
 - **Mouse wheel:** zoom around the cursor.
 - **Zoom:** the default 100% is a level-design working scale (1024 map units
   span about 82 pixels). Use the status-bar zoom selector to return to 100%.
-- **[ / ]:** decrease or increase the snapping grid size.
+- **[ / ]:** decrease or increase the snapping grid size, also selectable in the
+  status bar. Sizes range from 1 to 4096 map units; the default is 256 (about
+  20 pixels at 100% zoom). The drawn grid uses this same spacing at every zoom;
+  every eighth line is brighter for orientation.
 - **G or the Grid toolbar button:** show or hide the grid.
 - **T:** enter Sprites mode.
 - **Lines mode:** select one or more lines and press Delete to remove them.

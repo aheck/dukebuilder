@@ -905,19 +905,31 @@ MainWindow::MainWindow(QWidget *parent)
     const QIcon gridIcon(gridPixmap);
 
     auto *gridSizeCombo = new QComboBox(this);
-    gridSizeCombo->setToolTip("Grid size");
-    gridSizeCombo->setFixedWidth(76);
-    for (int size : {1, 2, 4, 8, 16, 32}) {
+    gridSizeCombo->setToolTip("Grid and snap spacing in map units ([ / ] to change)");
+    gridSizeCombo->setFixedWidth(90);
+    for (int size : {1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096}) {
         gridSizeCombo->addItem(gridIcon, QString::number(size), size);
     }
-    gridSizeCombo->setCurrentText("16");
-    editor->setGridSize(16);
+    gridSizeCombo->setCurrentText("256");
+    editor->setGridSize(256);
     connect(gridSizeCombo, &QComboBox::currentIndexChanged, editor,
             [gridSizeCombo, editor](int index) {
                 editor->setGridSize(gridSizeCombo->itemData(index).toReal());
             });
 
     statusBar()->addPermanentWidget(gridSizeCombo);
+
+    const auto addGridShortcut = [this, gridSizeCombo](const QString &name, int key, int step) {
+        auto *action = new QAction(name, this);
+        action->setShortcut(QKeySequence(key));
+        addAction(action);
+        connect(action, &QAction::triggered, gridSizeCombo, [gridSizeCombo, step] {
+            gridSizeCombo->setCurrentIndex(std::clamp(
+                gridSizeCombo->currentIndex() + step, 0, gridSizeCombo->count() - 1));
+        });
+    };
+    addGridShortcut("Decrease grid spacing", Qt::Key_BracketLeft, -1);
+    addGridShortcut("Increase grid spacing", Qt::Key_BracketRight, 1);
 
     auto *zoomCombo = new QComboBox(this);
     zoomCombo->setToolTip("Zoom level");

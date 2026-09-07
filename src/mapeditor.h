@@ -30,7 +30,7 @@ public:
     void paintBackground(QPainter *painter, const QRectF &rect);
 
 private:
-    qreal m_gridSize = 64.0;
+    qreal m_gridSize = 256.0;
     bool m_gridVisible = true;
 };
 

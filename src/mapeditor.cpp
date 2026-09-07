@@ -475,6 +475,7 @@ void MapScene::paintBackground(QPainter *painter, const QRectF &rect)
         return;
     }
 
+    // Draw the exact snapping grid, independent of zoom.
     const qreal visibleSpacing = m_gridSize;
 
     const qreal left = std::floor(gridRect.left() / visibleSpacing) * visibleSpacing;
@@ -500,15 +501,18 @@ void MapScene::paintBackground(QPainter *painter, const QRectF &rect)
         }
     }
 
-    painter->setPen(cosmeticPen(QColor(43, 47, 55), 1.0));
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, false);
+    painter->setPen(cosmeticPen(QColor(57, 62, 72), 1.0));
     painter->drawLines(minorLines);
-    painter->setPen(cosmeticPen(QColor(60, 66, 77), 1.0));
+    painter->setPen(cosmeticPen(QColor(77, 84, 97), 1.0));
     painter->drawLines(majorLines);
 
     painter->setPen(cosmeticPen(QColor(89, 72, 72), 1.25));
     painter->drawLine(QLineF(0.0, gridRect.top(), 0.0, gridRect.bottom()));
     painter->setPen(cosmeticPen(QColor(67, 82, 72), 1.25));
     painter->drawLine(QLineF(gridRect.left(), 0.0, gridRect.right(), 0.0));
+    painter->restore();
 }
 
 MapEditor::MapEditor(QWidget *parent)
