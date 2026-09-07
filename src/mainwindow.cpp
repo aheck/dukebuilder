@@ -422,6 +422,17 @@ MainWindow::MainWindow(QWidget *parent)
     wallPreviewLayout->addWidget(wallTexturePreview, 0, Qt::AlignHCenter);
     wallTexturePreviews->hide();
     propertiesLayout->addWidget(wallTexturePreviews);
+    auto *spriteTexturePreviews = new QWidget(propertiesPanel);
+    spriteTexturePreviews->setObjectName("SpriteTexturePreviews");
+    auto *spritePreviewLayout = new QVBoxLayout(spriteTexturePreviews);
+    spritePreviewLayout->setContentsMargins(4, 0, 4, 4);
+    auto *spriteTextureLabel = new QLabel("Sprite texture", spriteTexturePreviews);
+    spriteTextureLabel->setAlignment(Qt::AlignCenter);
+    spritePreviewLayout->addWidget(spriteTextureLabel);
+    auto *spriteTexturePreview = createPreview(spriteTexturePreviews, "SpriteTexturePreview");
+    spritePreviewLayout->addWidget(spriteTexturePreview, 0, Qt::AlignHCenter);
+    spriteTexturePreviews->hide();
+    propertiesLayout->addWidget(spriteTexturePreviews);
     auto *sectorTexturePreviews = new QWidget(propertiesPanel);
     sectorTexturePreviews->setObjectName("SectorTexturePreviews");
     auto *sectorPreviewLayout = new QHBoxLayout(sectorTexturePreviews);
@@ -463,6 +474,7 @@ MainWindow::MainWindow(QWidget *parent)
         });
     };
     connectPreview(wallTexturePreview, MapEditor::Property::Texture);
+    connectPreview(spriteTexturePreview, MapEditor::Property::Texture);
     connectPreview(floorTexturePreview, MapEditor::Property::FloorTexture);
     connectPreview(ceilingTexturePreview, MapEditor::Property::CeilingTexture);
     propertiesDock->setWidget(propertiesPanel);
@@ -498,12 +510,14 @@ MainWindow::MainWindow(QWidget *parent)
 
     editor->setPropertiesCallback(
         [propertiesControl, propertyDelegate, editor, wallTexturePreview, wallTexturePreviews, sectorTexturePreviews,
+         spriteTexturePreview, spriteTexturePreviews,
          ceilingTexturePreview, floorTexturePreview, updateTexturePreview](std::optional<MapEditor::SelectionProperties> properties) {
             const QSignalBlocker blocker(propertiesControl);
             // Clearing the rows can finish an edit while its widget is being retired.
             const QSignalBlocker delegateBlocker(propertyDelegate);
             propertiesControl->clear();
             wallTexturePreviews->hide();
+            spriteTexturePreviews->hide();
             sectorTexturePreviews->hide();
             if (!properties) {
                 return;
@@ -655,6 +669,8 @@ MainWindow::MainWindow(QWidget *parent)
             addProperty("Angle", number(std::clamp(properties->angle, 0.0, 360.0)),
                         MapEditor::Property::Angle);
             if (properties->texture) {
+                updateTexturePreview(spriteTexturePreview, *properties->texture, "Sprite");
+                spriteTexturePreviews->show();
                 addTextureProperty("Texture", *properties->texture, MapEditor::Property::Texture);
             }
             if (properties->hitag) {
