@@ -33,7 +33,7 @@ meson compile -C build
 Run it:
 
 ```sh
-./build/duke-builder
+./build/dukebuilder
 ```
 
 ## 2D editor controls

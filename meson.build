@@ -59,7 +59,7 @@ if host_machine.system() == 'linux'
 endif
 
 executable(
-  'duke-builder',
+  'dukebuilder',
   [
     'src/main.cpp',
     'src/mainwindow.cpp',
