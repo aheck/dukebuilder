@@ -415,12 +415,24 @@ MainWindow::MainWindow(QWidget *parent)
     };
     auto *wallTexturePreview = createPreview(propertiesPanel, "WallTexturePreview");
     auto *wallTexturePreviews = new QWidget(propertiesPanel);
-    auto *wallPreviewLayout = new QVBoxLayout(wallTexturePreviews);
+    auto *wallPreviewLayout = new QHBoxLayout(wallTexturePreviews);
     wallPreviewLayout->setContentsMargins(4, 0, 4, 4);
     auto *wallTextureLabel = new QLabel("Wall texture", wallTexturePreviews);
     wallTextureLabel->setAlignment(Qt::AlignCenter);
-    wallPreviewLayout->addWidget(wallTextureLabel);
-    wallPreviewLayout->addWidget(wallTexturePreview, 0, Qt::AlignHCenter);
+    auto *wallTextureColumn = new QVBoxLayout;
+    wallTextureColumn->addWidget(wallTextureLabel);
+    wallTextureColumn->addWidget(wallTexturePreview, 0, Qt::AlignHCenter);
+    wallPreviewLayout->addLayout(wallTextureColumn);
+    auto *oppositeTexturePanel = new QWidget(wallTexturePreviews);
+    auto *oppositeTextureColumn = new QVBoxLayout(oppositeTexturePanel);
+    oppositeTextureColumn->setContentsMargins(0, 0, 0, 0);
+    auto *oppositeTextureLabel = new QLabel(oppositeTexturePanel);
+    oppositeTextureLabel->setAlignment(Qt::AlignCenter);
+    auto *oppositeTexturePreview = createPreview(oppositeTexturePanel, "OppositeWallTexturePreview");
+    oppositeTextureColumn->addWidget(oppositeTextureLabel);
+    oppositeTextureColumn->addWidget(oppositeTexturePreview, 0, Qt::AlignHCenter);
+    wallPreviewLayout->addWidget(oppositeTexturePanel);
+    oppositeTexturePanel->hide();
     wallTexturePreviews->hide();
     propertiesLayout->addWidget(wallTexturePreviews);
     auto *spriteTexturePreviews = new QWidget(propertiesPanel);
@@ -475,6 +487,7 @@ MainWindow::MainWindow(QWidget *parent)
         });
     };
     connectPreview(wallTexturePreview, MapEditor::Property::Texture);
+    connectPreview(oppositeTexturePreview, MapEditor::Property::OppositeTexture);
     connectPreview(spriteTexturePreview, MapEditor::Property::Texture);
     connectPreview(floorTexturePreview, MapEditor::Property::FloorTexture);
     connectPreview(ceilingTexturePreview, MapEditor::Property::CeilingTexture);
@@ -520,6 +533,7 @@ MainWindow::MainWindow(QWidget *parent)
     editor->setPropertiesCallback(
         [propertiesControl, propertyDelegate, editor, wallTexturePreview, wallTexturePreviews, sectorTexturePreviews,
          spriteTexturePreview, spriteTexturePreviews, reorientGridAction,
+         wallTextureLabel, oppositeTexturePanel, oppositeTextureLabel, oppositeTexturePreview,
          ceilingTexturePreview, floorTexturePreview, updateTexturePreview](std::optional<MapEditor::SelectionProperties> properties) {
             const QSignalBlocker blocker(propertiesControl);
             reorientGridAction->setEnabled(properties && properties->wall.has_value());
@@ -609,7 +623,15 @@ MainWindow::MainWindow(QWidget *parent)
                     {"Length", number(wall.length)});
                 lengthRow->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
                 lengthRow->setToolTip(1, "Line length in map units");
-                updateTexturePreview(wallTexturePreview, values.texture, "Wall");
+                const QString selectedSide = wall.reversed ? "Back wall" : "Front wall";
+                wallTextureLabel->setText(wall.oppositeTexture ? selectedSide + " texture" : "Wall texture");
+                updateTexturePreview(wallTexturePreview, values.texture, selectedSide);
+                oppositeTexturePanel->setVisible(wall.oppositeTexture.has_value());
+                if (wall.oppositeTexture) {
+                    const QString oppositeSide = wall.reversed ? "Front wall" : "Back wall";
+                    oppositeTextureLabel->setText(oppositeSide + " texture");
+                    updateTexturePreview(oppositeTexturePreview, *wall.oppositeTexture, oppositeSide);
+                }
                 wallTexturePreviews->show();
                 addTextureProperty("Texture", values.texture, MapEditor::Property::Texture);
                 addTextureProperty("Overlay texture", values.overlayTexture, MapEditor::Property::OverlayTexture);

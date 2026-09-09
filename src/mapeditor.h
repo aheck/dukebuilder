@@ -73,6 +73,7 @@ public:
         std::optional<MapDocument::SectorId> reverseSector;
         bool reversed;
         qreal length;
+        std::optional<int> oppositeTexture = std::nullopt;
     };
 
     struct SelectionProperties {
@@ -102,6 +103,7 @@ public:
         FloorTexture,
         CeilingTexture,
         SectorLotag,
+        OppositeTexture,
         OverlayTexture,
         WallLotag,
         Shade,

@@ -677,13 +677,18 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
             selectedItem->data(wallIdRole).toULongLong());
         if (wallId >= m_document.walls().size()) return;
         const auto &wall = m_document.walls()[wallId];
-        const bool reversed = wall.isTwoSided() ? m_wallSideReversed : wall.reverseSector.has_value();
+        bool reversed = wall.isTwoSided() ? m_wallSideReversed : wall.reverseSector.has_value();
+        if (property == Property::OppositeTexture) {
+            if (!wall.isTwoSided()) return;
+            reversed = !reversed;
+        }
         auto side = reversed ? wall.reverseSide : wall.forwardSide;
         const auto integer = [value](int low, int high) {
             return static_cast<int>(std::round(std::clamp(value, qreal(low), qreal(high))));
         };
         switch (property) {
-        case Property::Texture: side.texture = integer(0, 32767); break;
+        case Property::Texture:
+        case Property::OppositeTexture: side.texture = integer(0, 32767); break;
         case Property::OverlayTexture: side.overlayTexture = integer(0, 32767); break;
         case Property::Shade: side.shade = integer(-128, 127); break;
         case Property::Palette: side.palette = integer(0, 255); break;
@@ -2003,6 +2008,10 @@ void MapEditor::updateProperties() const
                                                 wall.forwardSector, wall.reverseSector, reversed,
                                                 QLineF(m_document.vertices()[wall.start].position,
                                                        m_document.vertices()[wall.end].position).length()};
+                if (wall.isTwoSided()) {
+                    properties.wall->oppositeTexture =
+                        reversed ? wall.forwardSide.texture : wall.reverseSide.texture;
+                }
                 m_propertiesCallback(properties);
                 return;
             }
