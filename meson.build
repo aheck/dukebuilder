@@ -10,17 +10,18 @@ project(
   ],
 )
 
-qt6 = dependency('qt6', modules: ['Core', 'Widgets'])
+qt6 = dependency('qt6', modules: ['Core', 'Widgets', 'OpenGLWidgets'])
 cpp = meson.get_compiler('cpp')
 
 libduke_root = meson.current_source_dir() / '..' / 'libduke'
 libduke = cpp.find_library(
   'duke',
-  dirs: libduke_root / 'build',
+  dirs: libduke_root / 'build-render',
   static: true,
   required: true,
 )
-libduke_inc = include_directories('../libduke/include')
+libduke_inc = include_directories('../libduke/include', '../libduke/third_party/sokol')
+libduke_render = cpp.find_library('duke-render', dirs: libduke_root / 'build-render', required: true)
 
 # Qt's static Conan package uses the system BLAKE2 implementation, but its
 # generated pkg-config metadata does not currently propagate this dependency.
@@ -54,14 +55,17 @@ test('texturecatalog', texturecatalog_test)
 
 if host_machine.system() == 'linux'
   xcb_plugin = dependency('qt6-qtQXcbIntegrationPlugin')
-  app_dependencies += xcb_plugin
+  # Conan omits the static GLX integration plugin from its pkg-config metadata.
+  qt_prefix = xcb_plugin.get_variable(pkgconfig: 'prefix')
+  xcb_glx_plugin = cpp.find_library('qxcb-glx-integration',
+    dirs: qt_prefix / 'plugins/xcbglintegrations', static: true, required: true)
+  app_dependencies += [xcb_plugin, xcb_glx_plugin, dependency('xcb-glx')]
   app_cpp_args += '-DDUKE_BUILDER_STATIC_XCB_PLUGIN'
 endif
 
-executable(
-  'dukebuilder',
-  [
-    'src/main.cpp',
+app_sources = [
+    'src/mapview3d.cpp',
+    'src/previewcamera.cpp',
     'src/mainwindow.cpp',
     'src/mainwindow.h',
     'src/mapdocument.cpp',
@@ -79,9 +83,27 @@ executable(
     'src/texturecatalog.h',
     'src/texturebrowserwindow.cpp',
     'src/texturebrowserwindow.h',
-  ],
+  ]
+
+executable(
+  'dukebuilder',
+  ['src/main.cpp'] + app_sources,
   cpp_args: app_cpp_args,
-  dependencies: app_dependencies,
+  dependencies: app_dependencies + [libduke_render],
   include_directories: libduke_inc,
   install: true,
 )
+
+previewcamera_test = executable('previewcamera-test',
+  ['tests/previewcamera_test.cpp', 'src/previewcamera.cpp', 'src/mapdocument.cpp', 'src/mapsave.cpp'],
+  include_directories: [include_directories('src'), libduke_inc],
+  dependencies: [qt6, libb2, libduke])
+test('previewcamera', previewcamera_test)
+
+# Optional manual GPU smoke test: pass a DUKE3D.GRP path on a desktop display.
+qt_test = dependency('qt6', modules: ['Test'])
+executable('view3d-smoke',
+  ['tests/view3d_smoke.cpp'] + app_sources,
+  cpp_args: app_cpp_args,
+  include_directories: [include_directories('src'), libduke_inc],
+  dependencies: app_dependencies + [libduke_render, qt_test])

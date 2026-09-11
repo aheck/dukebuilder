@@ -9,7 +9,8 @@ the native file Meson uses to find it.
 - Meson
 - Ninja
 - A C++17 compiler
-- A configured and built `../libduke` checkout
+- A configured and built `../libduke` checkout with its renderer enabled
+- Desktop OpenGL 4.1
 
 Create a Conan profile once if you do not already have one:
 
@@ -22,6 +23,18 @@ Install the dependencies and generate the Meson native file:
 ```sh
 conan install . --output-folder=conan --build=missing -s build_type=Debug
 ```
+
+Build the libduke renderer (after its Conan dependency setup):
+
+```sh
+meson setup ../libduke/build-render ../libduke \
+  --native-file ../libduke/build/conan_meson_native.ini \
+  -Drenderer=enabled
+meson compile -C ../libduke/build-render
+```
+
+Duke Builder links libduke and libduke-render from `../libduke/build-render`.
+Qt's OpenGLWidgets module hosts the renderer; no Sokol window or event loop is used.
 
 Configure and build the application:
 
@@ -173,3 +186,32 @@ receives `-usecwd -nosetup -j <map directory> -map <map filename>` and runs with
 directory as the working directory.
 
 Run geometry and map open/save regression tests with `meson test -C build`.
+
+## 3D preview
+
+Configure a game archive containing ART tiles and PALETTE.DAT (normally
+DUKE3D.GRP) in **Settings → Game Data**. Press **Q** over the map to enter 3D,
+and **Q** again to return to the same 2D view. **View → 3D Mode** also switches
+views; when the pointer is outside the viewport it uses the 2D view's center.
+
+The camera starts at the map point under the cursor, or just inside the nearest
+sector when the cursor is outside. Its height is placed between the local floor
+and ceiling, accounting for slopes; its initial angle follows the player start.
+Each entry renders a fresh snapshot of the current edits, without saving the map
+or modifying the player start. Invalid/incomplete maps produce an explanatory
+message and remain in 2D. The renderer currently uses the first configured GRP
+it can render with; it does not combine multiple archives.
+
+- **W/S:** fly forward/backward along the viewing direction, including pitch.
+- **A/D:** strafe horizontally. **Shift:** move faster.
+- **Mouse:** look around (captured on entry).
+- **Escape:** release the mouse. **Left click:** capture it again.
+- **H:** toggle surface highlighting.
+- **Q:** return to 2D.
+
+This is a free-flight preview with no collision or game simulation. The
+libduke renderer's current rendering limitations also apply here.
+
+`meson test -C build` includes camera-placement and snapshot tests. For a desktop
+OpenGL integration check, run `./build/view3d-smoke /path/to/DUKE3D.GRP`; it checks
+repeated Q toggles, textured frames, resizing and preservation of editor data.

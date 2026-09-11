@@ -75,7 +75,8 @@ int16_t containingSector(const DukeMapFile &map, int32_t x, int32_t y, const QSt
 }
 }
 
-bool saveBuildMap(const MapDocument &document, const QString &filename, QString &error)
+bool withBuildMap(const MapDocument &document, QString &error,
+                  const std::function<bool(DukeMapFile &, QString &)> &consume)
 {
     error.clear();
     try {
@@ -226,6 +227,16 @@ bool saveBuildMap(const MapDocument &document, const QString &filename, QString 
         map.cursectnum = containingSector(map, map.posx, map.posy, "Player start", start.sectorId);
         if (!duke_map_file_validate(&map)) throw std::runtime_error(map.last_error);
 
+        return consume(map, error);
+    } catch (const std::exception &exception) {
+        error = QString::fromUtf8(exception.what());
+        return false;
+    }
+}
+
+bool saveBuildMap(const MapDocument &document, const QString &filename, QString &error)
+{
+    return withBuildMap(document, error, [&](DukeMapFile &map, QString &) {
         // libduke writes a filename, so stage its output before atomically
         // replacing the user's destination through QSaveFile.
         QTemporaryFile temporary;
@@ -243,8 +254,5 @@ bool saveBuildMap(const MapDocument &document, const QString &filename, QString 
         if (output.write(bytes) != bytes.size()) throw std::runtime_error(output.errorString().toStdString());
         if (!output.commit()) throw std::runtime_error(output.errorString().toStdString());
         return true;
-    } catch (const std::exception &exception) {
-        error = QString::fromUtf8(exception.what());
-        return false;
-    }
+    });
 }

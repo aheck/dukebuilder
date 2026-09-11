@@ -1,5 +1,8 @@
 #include "mainwindow.h"
 #include "mapeditor.h"
+#include "mapview3d.h"
+#include <QStackedWidget>
+#include <QCursor>
 #include "settingsdialog.h"
 #include "texturebrowserwindow.h"
 
@@ -380,7 +383,12 @@ MainWindow::MainWindow(QWidget *parent)
     editor->setStatusCallback([this](const QString &message) {
         statusBar()->showMessage(message);
     });
-    setCentralWidget(editor);
+    auto *views = new QStackedWidget(this);
+    auto *view3D = new MapView3D(views);
+    views->addWidget(editor);
+    views->addWidget(view3D);
+    setCentralWidget(views);
+
 
     auto *textureBrowserWindow = new TextureBrowserWindow(this);
     textureBrowserWindow->setUsedTexturesProvider([editor] { return editor->usedTextureTiles(); });
@@ -839,7 +847,11 @@ MainWindow::MainWindow(QWidget *parent)
         if (answer == QMessageBox::Save) return saveMap(false);
         return answer == QMessageBox::Discard;
     };
-    const auto confirmMapReplacement = m_confirmUnsavedChanges;
+    const auto confirmMapReplacement = [this, view3D] {
+        if (!m_confirmUnsavedChanges()) { return false; }
+        if (view3D->leave3D) { view3D->leave3D(); }
+        return true;
+    };
 
     auto *newMapAction = fileMenu->addAction("&New Map");
     newMapAction->setShortcut(QKeySequence::New);
@@ -1086,6 +1098,49 @@ MainWindow::MainWindow(QWidget *parent)
     });
 
     auto *viewMenu = menuBar()->addMenu("&View");
+    auto *toggle3D = viewMenu->addAction("3D Mode");
+    toggle3D->setCheckable(true);
+    toggle3D->setShortcut(QKeySequence(Qt::Key_Q));
+    toggle3D->setAutoRepeat(false);
+    toggle3D->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    views->addAction(toggle3D);
+    const auto leave3D = [=] {
+        view3D->stop();
+        views->setCurrentWidget(editor);
+        editor->setFocus();
+        toggle3D->setChecked(false);
+        propertiesDock->setEnabled(true);
+        editorToolBar->setEnabled(true);
+        modeGroup->setEnabled(true);
+        gridSizeCombo->setEnabled(true);
+        zoomCombo->setEnabled(true);
+        statusBar()->showMessage("2D mode");
+    };
+    view3D->leave3D = leave3D;
+    connect(toggle3D, &QAction::triggered, this, [=](bool enabled) {
+        if (!enabled) { leave3D(); return; }
+        // Read the pointer before swapping widgets or capturing the mouse.
+        QPoint cursor = editor->viewport()->mapFromGlobal(QCursor::pos());
+        if (!editor->viewport()->rect().contains(cursor)) {
+            cursor = editor->viewport()->rect().center();
+        }
+        const QPointF start = editor->mapToScene(cursor);
+        editor->setFocus(); // Commit any property edit before snapshotting.
+        views->setCurrentWidget(view3D);
+        QString error;
+        if (!view3D->start(editor->document(), start, error)) {
+            leave3D();
+            QMessageBox::warning(this, "Unable to enter 3D mode", error);
+            return;
+        }
+        propertiesDock->setEnabled(false);
+        editorToolBar->setEnabled(false);
+        modeGroup->setEnabled(false); // In particular, S must reach navigation.
+        gridSizeCombo->setEnabled(false);
+        zoomCombo->setEnabled(false);
+        statusBar()->showMessage("3D: WASD move · Mouse look · Shift faster · H highlight · Esc release mouse · Q return to 2D");
+    });
+    viewMenu->addSeparator();
     viewMenu->addAction(reorientGridAction);
     viewMenu->addAction(resetGridAction);
     viewMenu->addSeparator();

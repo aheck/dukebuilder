@@ -139,6 +139,7 @@ public:
         Alignment,
     };
 
+    [[nodiscard]] const MapDocument &document() const { return m_document; }
     void newMap();
     [[nodiscard]] std::set<int> usedTextureTiles() const { return m_document.usedTextureTiles(); }
     bool saveMap(const QString &filename, QString &error);
