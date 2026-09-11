@@ -16,6 +16,8 @@ public:
     bool start(const MapDocument &document, const QPointF &pointer, QString &error);
     void stop();
     std::function<void()> leave3D;
+    std::function<void(std::size_t, bool, qreal)> surfaceHeightChanged;
+    std::function<void(const QString &)> statusMessage;
 protected:
     void initializeGL() override;
     void paintGL() override;
@@ -23,6 +25,8 @@ protected:
     void keyReleaseEvent(QKeyEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
+    void wheelEvent(QWheelEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
     void focusOutEvent(QFocusEvent *event) override;
     void hideEvent(QHideEvent *event) override;
 private:
@@ -37,5 +41,10 @@ private:
     bool m_sokol = false;
     bool m_active = false;
     bool m_captured = false;
-    bool m_hover = false;
+    bool m_hover = true;
+    QWidget *m_crosshair = nullptr;
+    MapDocument m_snapshot;
+    QString m_archive;
+    int m_wheelRemainder = 0;
+    DukeSurfaceHit m_wheelTarget{};
 };

@@ -8,13 +8,40 @@
 #include <QMouseEvent>
 #include <QOpenGLContext>
 #include <QSettings>
+#include <QPainter>
+#include <QWheelEvent>
+#include <QResizeEvent>
 #include <algorithm>
 #include <cmath>
+
+namespace {
+class Crosshair final : public QWidget
+{
+public:
+    explicit Crosshair(QWidget *parent) : QWidget(parent)
+    {
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        setFixedSize(21, 21);
+    }
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter painter(this);
+        for (int width : {3, 1}) {
+            painter.setPen(QPen(width == 3 ? Qt::black : Qt::white, width));
+            painter.drawLine(3, 10, 17, 10);
+            painter.drawLine(10, 3, 10, 17);
+        }
+    }
+};
+}
 
 MapView3D::MapView3D(QWidget *parent) : QOpenGLWidget(parent)
 {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
+    setCursor(Qt::CrossCursor);
+    m_crosshair = new Crosshair(this);
+    m_crosshair->hide();
     setTextureFormat(GL_RGBA8);
     m_timer.setInterval(16);
     connect(&m_timer, &QTimer::timeout, this, [this] { update(); });
@@ -77,13 +104,16 @@ bool MapView3D::start(const MapDocument &document, const QPointF &pointer, QStri
                 diagnostic = QString::fromUtf8(message);
             } else { diagnostic = QString::fromUtf8(grp->last_error); }
             duke_grp_free(grp);
-            if (m_renderer) { return true; }
+            if (m_renderer) { m_archive = filename; return true; }
         }
         diagnostic = "Unable to load a renderable game archive: " + diagnostic;
         return false;
     });
     doneCurrent();
     if (!ok) { return false; }
+    m_snapshot = std::move(snapshot);
+    m_hover = true;
+    m_wheelRemainder = 0;
     m_active = true;
     duke_renderer_set_hover_enabled(m_renderer, m_hover);
     m_clock.start();
@@ -102,12 +132,16 @@ void MapView3D::captureLook()
 {
     if (!m_active) { return; }
     m_captured = true;
+    m_crosshair->move(rect().center() - QPoint(10, 10));
+    m_crosshair->show();
+    m_crosshair->raise();
     grabMouse(Qt::BlankCursor);
     QCursor::setPos(mapToGlobal(rect().center()));
 }
 void MapView3D::releaseLook()
 {
     m_keys.clear();
+    m_crosshair->hide();
     if (m_captured) { releaseMouse(); m_captured = false; }
 }
 void MapView3D::paintGL()
@@ -169,6 +203,78 @@ void MapView3D::mouseMoveEvent(QMouseEvent *event)
     duke_camera_rotate(&m_camera, delta.x()*0.003f, -delta.y()*0.003f);
     QCursor::setPos(mapToGlobal(rect().center()));
 }
+void MapView3D::resizeEvent(QResizeEvent *event)
+{
+    QOpenGLWidget::resizeEvent(event);
+    m_crosshair->move(rect().center() - QPoint(10, 10));
+}
+void MapView3D::wheelEvent(QWheelEvent *event)
+{
+    event->accept();
+    if (!m_active || !m_renderer || !m_hover) { m_wheelRemainder = 0; return; }
+    // Pick using the current camera and pointer rather than a previous frame.
+    repaint();
+    DukeSurfaceHit hit{};
+    if (!duke_renderer_get_hovered_surface(m_renderer, &hit)
+        || (hit.kind != DUKE_SURFACE_FLOOR && hit.kind != DUKE_SURFACE_CEILING)) {
+        m_wheelRemainder = 0;
+        return;
+    }
+    if (hit.kind != m_wheelTarget.kind || hit.sector_index != m_wheelTarget.sector_index) {
+        m_wheelRemainder = 0;
+    }
+    m_wheelTarget = hit;
+    m_wheelRemainder += event->angleDelta().y();
+    const int steps = m_wheelRemainder / 120;
+    m_wheelRemainder %= 120;
+    if (!steps || hit.sector_index < 0
+        || std::size_t(hit.sector_index) >= m_snapshot.sectors().size()) { return; }
+    const bool floor = hit.kind == DUKE_SURFACE_FLOOR;
+    const auto &sector = m_snapshot.sectors()[hit.sector_index];
+    // Build Z increases downward: wheel-up raises either surface.
+    const qreal height = (floor ? sector.floorz : sector.ceilingz) - steps * 1024.0;
+    auto candidate = m_snapshot;
+    if (floor) { candidate.setSectorFloorZ(hit.sector_index, height); }
+    else { candidate.setSectorCeilingZ(hit.sector_index, height); }
+
+    // Validate and upload before committing either the view or editor document.
+    // The renderer owns immutable snapshots, so retain the old one on failure.
+    QString error;
+    DukeRenderer *replacement = nullptr;
+    makeCurrent();
+    const bool ok = withBuildMap(candidate, error, [&](DukeMapFile &map, QString &diagnostic) {
+        DukeGrpFile *grp = duke_grp_new();
+        if (!grp) { diagnostic = "Unable to allocate the GRP archive."; return false; }
+        const auto name = QFile::encodeName(m_archive);
+        if (duke_grp_open_filename(grp, name.constData()) && duke_grp_read_entries_sparse(grp)) {
+            DukeRendererDesc desc{SG_PIXELFORMAT_RGBA8, SG_PIXELFORMAT_DEPTH_STENCIL, 1};
+            char message[512]{};
+            replacement = duke_renderer_create(&map, grp, &desc, message, sizeof(message));
+            diagnostic = QString::fromUtf8(message);
+        } else { diagnostic = QString::fromUtf8(grp->last_error); }
+        duke_grp_free(grp);
+        return replacement != nullptr;
+    });
+    if (ok) {
+        duke_renderer_destroy(m_renderer);
+        m_renderer = replacement;
+        duke_renderer_set_hover_enabled(m_renderer, m_hover);
+        m_snapshot = std::move(candidate);
+    }
+    doneCurrent();
+    m_clock.restart(); // Upload time must not become a navigation step.
+    if (!ok) {
+        if (statusMessage) { statusMessage("Cannot change surface height: " + error); }
+        return;
+    }
+    if (surfaceHeightChanged) { surfaceHeightChanged(hit.sector_index, floor, height); }
+    if (statusMessage) {
+        statusMessage(QString("Sector %1 %2 Z: %3").arg(hit.sector_index)
+                      .arg(floor ? "floor" : "ceiling").arg(height));
+    }
+    update();
+}
+
 void MapView3D::focusOutEvent(QFocusEvent *event)
 {
     releaseLook();

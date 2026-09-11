@@ -206,7 +206,12 @@ it can render with; it does not combine multiple archives.
 - **A/D:** strafe horizontally. **Shift:** move faster.
 - **Mouse:** look around (captured on entry).
 - **Escape:** release the mouse. **Left click:** capture it again.
-- **H:** toggle surface highlighting.
+- **H:** toggle surface highlighting (enabled on entry). A crosshair marks the
+  aim point while captured; a cross cursor follows the released mouse.
+- **Mouse wheel:** raise/lower the highlighted floor or ceiling by 1024 Build Z
+  units per notch. Wheel-up raises it; wheel-down lowers it. Walls are unaffected.
+  Height edits update the map, persist on return to 2D, and are saved normally.
+  Changes that would invalidate the map are rejected with a status message.
 - **Q:** return to 2D.
 
 This is a free-flight preview with no collision or game simulation. The
@@ -214,4 +219,5 @@ libduke renderer's current rendering limitations also apply here.
 
 `meson test -C build` includes camera-placement and snapshot tests. For a desktop
 OpenGL integration check, run `./build/view3d-smoke /path/to/DUKE3D.GRP`; it checks
-repeated Q toggles, textured frames, resizing and preservation of editor data.
+repeated Q toggles, textured frames, resizing, surface-height editing, validation
+and save persistence.

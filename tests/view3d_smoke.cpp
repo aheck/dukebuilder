@@ -9,6 +9,7 @@
 #include <QTest>
 #include <QAction>
 #include <QCursor>
+#include <QWheelEvent>
 #include <QtPlugin>
 #include <iostream>
 #ifdef DUKE_BUILDER_STATIC_XCB_PLUGIN
@@ -70,6 +71,44 @@ int main(int argc, char **argv)
         require(editor->isVisible() && !view->isVisible(), "Q returns to 2D");
         require(editor->document() == original && !editor->hasUnsavedChanges(), "preview preserves map");
     }
-    std::cout << "3D toggle, render, resize and document preservation passed\n";
+    editor->setFocus();
+    QCursor::setPos(editor->viewport()->mapToGlobal(editor->viewport()->rect().center()));
+    QTest::keyClick(editor, Qt::Key_Q);
+    QTest::qWait(150);
+    QTest::keyClick(view, Qt::Key_Escape);
+    require(view->cursor().shape() == Qt::CrossCursor, "released cross cursor");
+    const auto wheel = [&](double y, int delta) {
+        QPoint point(view->width()/2, int(view->height()*y));
+        QCursor::setPos(view->mapToGlobal(point));
+        QTest::qWait(50);
+        QWheelEvent event(QPointF(point), QPointF(view->mapToGlobal(point)), {}, QPoint(0,delta),
+                          Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QApplication::sendEvent(view, &event);
+        QTest::qWait(100);
+    };
+    wheel(0.1,120);
+    require(editor->document().sectors()[0].ceilingz == -33792, "wheel raises ceiling");
+    require(editor->document().sectors()[0].floorz == 0, "ceiling edit leaves floor alone");
+    require(editor->hasUnsavedChanges(), "3D edit marks document dirty");
+    wheel(0.9,60);
+    require(editor->document().sectors()[0].floorz == 0, "partial wheel notch accumulates");
+    wheel(0.9,60);
+    require(editor->document().sectors()[0].floorz == -1024, "wheel raises floor");
+    wheel(0.9,12000);
+    require(editor->document().sectors()[0].floorz == -1024, "reject floor above ceiling");
+    QTest::keyClick(view, Qt::Key_H);
+    wheel(0.9,120);
+    require(editor->document().sectors()[0].floorz == -1024, "disabled highlighting prevents edits");
+    QTest::keyClick(view, Qt::Key_H);
+    wheel(0.9,-120);
+    require(editor->document().sectors()[0].floorz == 0, "wheel lowers floor");
+    QTest::keyClick(view, Qt::Key_Q);
+    require(editor->isVisible(), "return to 2D after edits");
+    require(editor->document().sectors()[0].ceilingz == -33792, "3D edit persists into 2D");
+    require(editor->saveMap(path,error), "save edited map");
+    MapDocument saved;
+    require(saved.openMap(path,error), "reload edited map");
+    require(saved.sectors()[0].ceilingz == -33792, "saved ceiling height");
+    std::cout << "3D toggle, rendering, wheel edits, validation and save persistence passed\n";
     return 0;
 }

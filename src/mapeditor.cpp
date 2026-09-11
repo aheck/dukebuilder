@@ -923,6 +923,15 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
     }
 }
 
+void MapEditor::setSectorHeight(std::size_t sector, bool floor, qreal height)
+{
+    if (sector >= m_document.sectors().size()) { return; }
+    if (floor) { m_document.setSectorFloorZ(sector, height); }
+    else { m_document.setSectorCeilingZ(sector, height); }
+    rebuildScene();
+    updateProperties();
+}
+
 bool MapEditor::hasUnsavedChanges() const
 {
     return !m_drawingPoints.empty() || !(m_document == m_savedDocument);

@@ -140,6 +140,7 @@ public:
     };
 
     [[nodiscard]] const MapDocument &document() const { return m_document; }
+    void setSectorHeight(std::size_t sector, bool floor, qreal height);
     void newMap();
     [[nodiscard]] std::set<int> usedTextureTiles() const { return m_document.usedTextureTiles(); }
     bool saveMap(const QString &filename, QString &error);
