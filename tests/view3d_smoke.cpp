@@ -150,7 +150,7 @@ int main(int argc, char **argv)
     int changedSides = 0;
     for (const auto &wall : editor->document().walls()) {
         for (const auto &side : {wall.forwardSide, wall.reverseSide}) {
-            if (side.xpanning == 255 && side.yrepeat == 7 && side.xrepeat == 8) { ++changedSides; }
+            if (side.xpanning == 255 && side.yrepeat == 7 && side.xrepeat == 64) { ++changedSides; }
         }
     }
     require(changedSides == 1, "wall panning and vertical scaling affect one side only");
@@ -191,11 +191,27 @@ int main(int argc, char **argv)
     require(editor->document().sectors()[0].ceilingTexture == 0, "ceiling texture changed");
     choose(0.9, 0);
     require(editor->document().sectors()[0].floorTexture == 0, "floor texture changed");
-    choose(0.5, 102);
+    int copyTile = -1;
+    for (auto *widget : window.findChildren<QWidget *>()) {
+        auto *browser = dynamic_cast<TextureBrowserWindow *>(widget);
+        if (!browser) { continue; }
+        for (int tile = 100; tile < 200 && copyTile < 0; ++tile) {
+            const auto image = browser->textureImage(tile);
+            bool opaque = !image.isNull();
+            for (int y = 0; y < image.height() && opaque; ++y) {
+                for (int x = 0; x < image.width(); ++x) {
+                    if (qAlpha(image.pixel(x,y)) != 255) { opaque = false; break; }
+                }
+            }
+            if (opaque) { copyTile = tile; }
+        }
+    }
+    require(copyTile >= 0, "opaque texture fixture");
+    choose(0.5, copyTile);
     int changedTextures = 0;
     for (const auto &wall : editor->document().walls()) {
         for (const auto &side : {wall.forwardSide, wall.reverseSide}) {
-            if (side.texture == 102) { ++changedTextures; }
+            if (side.texture == copyTile) { ++changedTextures; }
         }
     }
     require(changedTextures == 1, "wall texture changed on one side");
@@ -205,7 +221,7 @@ int main(int argc, char **argv)
     require(editor->document() == beforeCopy, "copy does not edit map");
     aim(0.1);
     QTest::keyClick(view, Qt::Key_V, Qt::ControlModifier);
-    require(editor->document().sectors()[0].ceilingTexture == 102, "wall texture pasted onto ceiling");
+    require(editor->document().sectors()[0].ceilingTexture == copyTile, "wall texture pasted onto ceiling");
     aim(0.9);
     QTest::keyClick(view, Qt::Key_C, Qt::ControlModifier);
     aim(0.5);
@@ -217,6 +233,16 @@ int main(int argc, char **argv)
         }
     }
     require(pastedSides == 1, "paste changes one wall side and preserves mapping");
+    QTest::keyClick(view, Qt::Key_R);
+    int resetSides = 0;
+    for (const auto &wall : editor->document().walls()) {
+        for (const auto &side : {wall.forwardSide, wall.reverseSide}) {
+            if (side.texture == 0 && side.xpanning == 255 && side.yrepeat == 8 && side.xrepeat == 64) {
+                ++resetSides;
+            }
+        }
+    }
+    require(resetSides == 1, "reset restores wall scale and preserves panning");
     QTest::keyClick(view, Qt::Key_Q);
     require(editor->isVisible(), "return to 2D after edits");
     require(editor->document().sectors()[0].ceilingz == -33792, "3D edit persists into 2D");
@@ -230,7 +256,7 @@ int main(int argc, char **argv)
             "saved ceiling texture offsets");
     require(saved.sectors()[0].floorxpanning == 255 && (saved.sectors()[0].floorstat & 8),
             "saved floor offsets and scale");
-    require(saved.sectors()[0].ceilingTexture == 102 && saved.sectors()[0].floorTexture == 0,
+    require(saved.sectors()[0].ceilingTexture == copyTile && saved.sectors()[0].floorTexture == 0,
             "chosen textures persist in saved map");
     std::cout << "3D toggle, rendering, height and texture edits, validation and save persistence passed\n";
     return 0;

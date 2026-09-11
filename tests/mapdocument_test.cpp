@@ -62,9 +62,14 @@ int main()
         const auto vertexId = split.splitWall(wallId, position);
         require(vertexId.has_value(), "Split shared wall");
         require(split.vertices()[*vertexId].position == position, "Inserted vertex position");
-        require(split.walls()[wallId].forwardSide == front && split.walls().back().forwardSide == front
-                && split.walls()[wallId].reverseSide == back && split.walls().back().reverseSide == back,
-                "Both halves retain both wall sides");
+        auto firstFront = front, lastFront = front, firstBack = back, lastBack = back;
+        firstFront.xrepeat = lastFront.xrepeat = front.xrepeat / 2;
+        firstBack.xrepeat = lastBack.xrepeat = back.xrepeat / 2;
+        lastFront.xpanning = (front.xpanning + firstFront.xrepeat*8) % 256;
+        firstBack.xpanning = (back.xpanning + lastBack.xrepeat*8) % 256;
+        require(split.walls()[wallId].forwardSide == firstFront && split.walls().back().forwardSide == lastFront
+                && split.walls()[wallId].reverseSide == firstBack && split.walls().back().reverseSide == lastBack,
+                "Split preserves density and continues both sides' texture coordinates");
         require(split.sectors()[0].walls.size() == 10 && split.sectors()[1].walls.size() == 5,
                 "Shared wall split updates both sectors");
         require(split.sectors()[0].lotag == 17 && split.sectors()[1].floorz == 4096,
@@ -271,5 +276,22 @@ int main()
             && nestedHeights.sectors()[1].floorz == 2048
             && nestedHeights.sectors()[2].ceilingz == -12288, "Rebuild preserves existing heights");
     checkSideReferences(nestedHeights);
+
+    MapDocument density;
+    require(density.addPolyline({{0,0},{2048,0},{2048,1024},{0,1024}}, true), "Density room");
+    require(density.walls()[0].forwardSide.xrepeat == 16
+            && density.walls()[1].forwardSide.xrepeat == 8, "New walls have length-based density");
+    auto custom = density.walls()[0].forwardSide;
+    custom.xrepeat = 32; custom.yrepeat = 21;
+    density.setWallSide(0, false, custom);
+    const auto dragStart = density;
+    density.setVertexPositions({{1,{2050,0}}}, &dragStart);
+    density.setVertexPositions({{1,{4096,0}}}, &dragStart);
+    require(density.walls()[0].forwardSide.xrepeat == 64
+            && density.walls()[0].reverseSide.xrepeat == 32
+            && density.walls()[0].forwardSide.yrepeat == 21, "Resize preserves custom density on both sides");
+    density.setVertexPositions({{1,{2048,0}}}, &dragStart);
+    require(density.walls()[0].forwardSide.xrepeat == 32, "Drag back restores exact repeat");
+    require(density.defaultWallXRepeat(0) == 16, "Reset computes default independent of custom density");
 
 }

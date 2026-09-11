@@ -656,6 +656,21 @@ void MapEditor::setSelectedWallSide(bool reversed)
     updateProperties();
 }
 
+void MapEditor::resetSelectedWallTextureScale()
+{
+    if (m_mode != Mode::Lines || m_scene->selectedItems().size() != 1) { return; }
+    auto *item = dynamic_cast<WallItem *>(m_scene->selectedItems().front());
+    if (!item) { return; }
+    const auto id = static_cast<MapDocument::WallId>(item->data(wallIdRole).toULongLong());
+    if (id >= m_document.walls().size()) { return; }
+    const auto &wall = m_document.walls()[id];
+    const bool reversed = wall.isTwoSided() ? m_wallSideReversed : wall.reverseSector.has_value();
+    auto side = reversed ? wall.reverseSide : wall.forwardSide;
+    side.xrepeat = m_document.defaultWallXRepeat(id);
+    side.yrepeat = 8;
+    setWallSideValues(id, reversed, side);
+}
+
 void MapEditor::setSelectedProperty(Property property, qreal value)
 {
     if ((m_mode != Mode::Sprites && m_mode != Mode::Sectors && m_mode != Mode::Lines)
@@ -1204,6 +1219,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
             }
         }
         if (vertex && vertex->isSelected()) {
+            m_vertexDragDocument = m_document;
             m_draggingVertices = true;
             m_vertexDragStart = mapToScene(event->position().toPoint());
             m_vertexDragAnchor = vertex->pos();
@@ -1228,6 +1244,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
             }
         }
         if (wall && wall->isSelected()) {
+            m_vertexDragDocument = m_document;
             m_draggingVertices = true;
             m_vertexDragStart = mapToScene(event->position().toPoint());
             m_draggedVertices.clear();
@@ -1263,6 +1280,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
             }
         }
         if (sector && sector->isSelected()) {
+            m_vertexDragDocument = m_document;
             m_draggingVertices = true;
             m_vertexDragStart = mapToScene(event->position().toPoint());
             m_draggedVertices.clear();
@@ -1602,7 +1620,7 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
         for (const auto &[vertexId, originalPosition] : m_draggedVertices) {
             positions.emplace_back(vertexId, originalPosition + delta);
         }
-        m_document.setVertexPositions(positions);
+        m_document.setVertexPositions(positions, &m_vertexDragDocument);
         rebuildScene();
 
         for (QGraphicsItem *item : m_scene->items()) {

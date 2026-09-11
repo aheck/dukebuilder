@@ -181,6 +181,8 @@ void MapView3D::keyPressEvent(QKeyEvent *event)
         if (!event->isAutoRepeat()) { editTexture(event->key(), false); }
     } else if (event->key() == Qt::Key_Q && !event->isAutoRepeat()) {
         if (leave3D) { leave3D(); }
+    } else if (event->key() == Qt::Key_R) {
+        resetTextureScale();
     } else if (event->key() == Qt::Key_Escape) {
         releaseLook();
     } else if (event->key() == Qt::Key_H && !event->isAutoRepeat()) {
@@ -353,7 +355,10 @@ void MapView3D::editTexture(int key, bool scale)
         const auto &wall = candidate.walls()[wallId];
         const bool reversed = wall.start != sector.vertices[local];
         auto side = reversed ? wall.reverseSide : wall.forwardSide;
-        if (key == Qt::Key_C) {
+        if (key == Qt::Key_R) {
+            side.xrepeat = candidate.defaultWallXRepeat(wallId);
+            side.yrepeat = 8;
+        } else if (key == Qt::Key_C) {
             m_copiedTexture = side.texture;
             if (statusMessage) { statusMessage(QString("Copied texture %1").arg(*m_copiedTexture)); }
             return;
@@ -376,6 +381,7 @@ void MapView3D::editTexture(int key, bool scale)
         if (!applySnapshot(std::move(candidate))) { return; }
         if (wallSideChanged) { wallSideChanged(wallId, reversed, side); }
     } else if (hit.kind == DUKE_SURFACE_FLOOR || hit.kind == DUKE_SURFACE_CEILING) {
+        if (key == Qt::Key_R) { return; }
         const bool floor = hit.kind == DUKE_SURFACE_FLOOR;
         if (key == Qt::Key_C) {
             m_copiedTexture = floor ? sector.floorTexture : sector.ceilingTexture;
@@ -404,7 +410,7 @@ void MapView3D::editTexture(int key, bool scale)
         if (sectorChanged) { sectorChanged(hit.sector_index, sector); }
     } else { return; }
     if (statusMessage) {
-        statusMessage((key == 0 || key == Qt::Key_V) ? "Texture changed" : scale ? "Texture size changed" : "Texture offset changed");
+        statusMessage(key == Qt::Key_R ? "Texture scale reset" : (key == 0 || key == Qt::Key_V) ? "Texture changed" : scale ? "Texture size changed" : "Texture offset changed");
     }
 }
 

@@ -10,6 +10,10 @@
 
 namespace {
 constexpr qreal coordinateEpsilon = 0.001;
+int repeat(qreal value)
+{
+    return static_cast<int>(std::round(std::clamp(value, qreal(1), qreal(255))));
+}
 }
 
 void MapDocument::setWallSide(WallId wallId, bool reversed, const WallSide &side)
@@ -89,6 +93,9 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed)
         }
 
         m_walls.push_back({start, end});
+        const int density = defaultWallXRepeat(m_walls.size() - 1);
+        m_walls.back().forwardSide.xrepeat = density;
+        m_walls.back().reverseSide.xrepeat = density;
     }
 
     rebuildSectors();
@@ -125,6 +132,18 @@ std::optional<MapDocument::VertexId> MapDocument::splitWall(WallId wallId, const
     Wall second = original;
     second.start = vertexId;
     m_walls.push_back(second);
+    auto &firstHalf = m_walls[wallId];
+    auto &secondHalf = m_walls[secondId];
+    for (bool reversed : {false, true}) {
+        const auto &source = reversed ? original.reverseSide : original.forwardSide;
+        auto &first = reversed ? firstHalf.reverseSide : firstHalf.forwardSide;
+        auto &last = reversed ? secondHalf.reverseSide : secondHalf.forwardSide;
+        first.xrepeat = repeat(source.xrepeat * distance / length);
+        last.xrepeat = repeat(source.xrepeat * (length-distance) / length);
+        // Continue texture coordinates in each side's traversal direction.
+        if (reversed) { first.xpanning = (source.xpanning + last.xrepeat*8) % 256; }
+        else { last.xpanning = (source.xpanning + first.xrepeat*8) % 256; }
+    }
     // Update existing loops directly: rebuilding planar faces would lose imported
     // overlapping rooms and effect sectors. Reverse sides traverse the new half first.
     for (auto &sector : m_sectors) {
@@ -301,14 +320,40 @@ bool MapDocument::supportsLineDeletion() const
 }
 
 void MapDocument::setVertexPositions(
-    const std::vector<std::pair<VertexId, QPointF>> &positions)
+    const std::vector<std::pair<VertexId, QPointF>> &positions, const MapDocument *scaleReference)
 {
+    const MapDocument previous = scaleReference ? *scaleReference : *this;
     for (const auto &[vertexId, position] : positions) {
         if (vertexId < m_vertices.size()) {
             m_vertices[vertexId].position = position;
         }
     }
+    for (WallId id = 0; id < m_walls.size() && id < previous.m_walls.size(); ++id) {
+        auto &wall = m_walls[id];
+        const auto &old = previous.m_walls[id];
+        const auto before = previous.m_vertices[old.end].position - previous.m_vertices[old.start].position;
+        const auto after = m_vertices[wall.end].position - m_vertices[wall.start].position;
+        const qreal oldLength = std::hypot(before.x(), before.y());
+        const qreal newLength = std::hypot(after.x(), after.y());
+        if (oldLength > coordinateEpsilon && newLength > coordinateEpsilon) {
+            const auto resized = [&](int value) {
+                if (!value || std::abs(newLength-oldLength) < coordinateEpsilon) { return value; }
+                return repeat(value * newLength / oldLength);
+            };
+            wall.forwardSide.xrepeat = resized(old.forwardSide.xrepeat);
+            wall.reverseSide.xrepeat = resized(old.reverseSide.xrepeat);
+        }
+    }
     if (!m_complexTopology) rebuildSectors();
+}
+
+int MapDocument::defaultWallXRepeat(WallId id) const
+{
+    if (id >= m_walls.size()) { return 8; }
+    const auto &wall = m_walls[id];
+    const auto delta = m_vertices[wall.end].position - m_vertices[wall.start].position;
+    // 16 horizontal Build units per ART pixel, matching ordinary sector textures.
+    return repeat(std::hypot(delta.x(), delta.y()) / 128.0);
 }
 
 void MapDocument::setSectorFloorZ(std::size_t sectorId, qreal z)

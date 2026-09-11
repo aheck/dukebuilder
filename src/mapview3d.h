@@ -15,6 +15,7 @@ public:
     ~MapView3D() override;
     bool start(const MapDocument &document, const QPointF &pointer, QString &error);
     void stop();
+    void resetTextureScale() { editTexture(Qt::Key_R, false); }
     std::function<void()> leave3D;
     std::function<std::optional<int>(int)> chooseTexture;
     std::function<void(std::size_t, bool, qreal)> surfaceHeightChanged;

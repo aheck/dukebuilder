@@ -132,7 +132,10 @@ public:
     void removeWalls(const std::vector<WallId> &wallIds);
     // Split an edge in place, preserving sector order, loops and both wall sides.
     [[nodiscard]] std::optional<VertexId> splitWall(WallId wallId, const QPointF &position);
-    void setVertexPositions(const std::vector<std::pair<VertexId, QPointF>> &positions);
+    // A drag reference avoids cumulative rounding across successive mouse moves.
+    void setVertexPositions(const std::vector<std::pair<VertexId, QPointF>> &positions,
+                            const MapDocument *scaleReference = nullptr);
+    [[nodiscard]] int defaultWallXRepeat(WallId wall) const;
     void setSectorFloorZ(std::size_t sectorId, qreal z);
     void setSectorCeilingZ(std::size_t sectorId, qreal z);
     void setSectorFloorTexture(std::size_t sectorId, int texture);

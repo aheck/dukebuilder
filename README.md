@@ -237,3 +237,16 @@ libduke renderer's current rendering limitations also apply here.
 OpenGL integration check, run `./build/view3d-smoke /path/to/DUKE3D.GRP`; it checks
 repeated Q toggles, textured frames, resizing, surface-height editing, validation
 and save persistence.
+
+## Wall texture scale
+
+New walls use 16 horizontal map units per texture pixel (`xrepeat` is wall
+length / 128, rounded and limited to Build's 1–255 range). Vertical repeat starts
+at 8. Imported maps retain their stored repeats. Resizing walls preserves their
+current density, including custom scales; splitting also continues texture
+panning along both wall sides. Build's integer repeat/panning limits can cause
+rounding differences, particularly on very short or very long walls.
+
+Use **View → Reset Texture Scale** on the selected wall side in 2D or highlighted
+wall in 3D; **R** does the same in 3D. This resets horizontal density and vertical
+repeat without changing textures or offsets.

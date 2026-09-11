@@ -538,6 +538,20 @@ MainWindow::MainWindow(QWidget *parent)
     resetGridAction->setShortcut(QKeySequence(Qt::Key_F12));
     connect(resetGridAction, &QAction::triggered, editor, &MapEditor::resetGridOrientation);
 
+    // Keep expansion state outside the items: property edits rebuild the tree,
+    // sometimes through an intermediate empty selection. Rebuild signals are
+    // blocked below, so only user expansion/collapse changes this state.
+    const auto rememberExpansion = [propertiesControl](QTreeWidgetItem *item, bool expanded) {
+        QStringList groups = propertiesControl->property("expandedGroups").toStringList();
+        groups.removeAll(item->text(0));
+        if (expanded) { groups.append(item->text(0)); }
+        propertiesControl->setProperty("expandedGroups", groups);
+    };
+    connect(propertiesControl, &QTreeWidget::itemExpanded, propertiesControl,
+            [rememberExpansion](QTreeWidgetItem *item) { rememberExpansion(item, true); });
+    connect(propertiesControl, &QTreeWidget::itemCollapsed, propertiesControl,
+            [rememberExpansion](QTreeWidgetItem *item) { rememberExpansion(item, false); });
+
     editor->setPropertiesCallback(
         [propertiesControl, propertyDelegate, editor, wallTexturePreview, wallTexturePreviews, sectorTexturePreviews,
          spriteTexturePreview, spriteTexturePreviews, reorientGridAction,
@@ -585,7 +599,8 @@ MainWindow::MainWindow(QWidget *parent)
                     flag->setData(0, Qt::UserRole + 1, mask);
                     flag->setCheckState(1, flags & mask ? Qt::Checked : Qt::Unchecked);
                 }
-                group->setExpanded(false);
+                group->setExpanded(propertiesControl->property("expandedGroups")
+                                       .toStringList().contains(group->text(0)));
             };
             const auto addChoice = [&](const QString &name, int value, MapEditor::Property property,
                                        const std::vector<std::pair<int, QString>> &choices) {
@@ -604,7 +619,8 @@ MainWindow::MainWindow(QWidget *parent)
             const auto advancedGroup = [&]() {
                 auto *group = new QTreeWidgetItem(propertiesControl, {"Advanced", ""});
                 group->setFlags(Qt::ItemIsEnabled);
-                group->setExpanded(false);
+                group->setExpanded(propertiesControl->property("expandedGroups")
+                                       .toStringList().contains(group->text(0)));
                 return group;
             };
             if (properties->wall) {
@@ -1157,6 +1173,12 @@ MainWindow::MainWindow(QWidget *parent)
     viewMenu->addSeparator();
     viewMenu->addAction(reorientGridAction);
     viewMenu->addAction(resetGridAction);
+    auto *resetTextureScale = viewMenu->addAction("Reset Texture Scale");
+    resetTextureScale->setToolTip("Reset the selected wall side to the default texture scale (R in 3D)");
+    connect(resetTextureScale, &QAction::triggered, this, [editor, view3D] {
+        if (view3D->isVisible()) { view3D->resetTextureScale(); }
+        else { editor->resetSelectedWallTextureScale(); }
+    });
     viewMenu->addSeparator();
     auto *propertyEditorAction = viewMenu->addAction("&Property Editor");
     propertyEditorAction->setCheckable(true);

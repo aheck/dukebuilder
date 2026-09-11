@@ -143,6 +143,7 @@ public:
     void setSectorValues(std::size_t sector, const MapDocument::Sector &values);
     void setWallSideValues(std::size_t wall, bool reversed, const MapDocument::WallSide &values);
     void setSectorHeight(std::size_t sector, bool floor, qreal height);
+    void resetSelectedWallTextureScale();
     void newMap();
     [[nodiscard]] std::set<int> usedTextureTiles() const { return m_document.usedTextureTiles(); }
     bool saveMap(const QString &filename, QString &error);
@@ -190,6 +191,7 @@ private:
 
     MapDocument m_document;
     MapDocument m_savedDocument;
+    MapDocument m_vertexDragDocument;
     MapScene *m_scene = nullptr;
     QGraphicsPathItem *m_previewItem = nullptr;
     QGraphicsEllipseItem *m_splitPreviewItem = nullptr;
