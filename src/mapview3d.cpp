@@ -227,9 +227,15 @@ void MapView3D::wheelEvent(QWheelEvent *event)
         m_wheelRemainder = 0;
         return;
     }
-    if (hit.kind != m_wheelTarget.kind || hit.sector_index != m_wheelTarget.sector_index) {
+    // Ctrl takes precedence if both modifiers are held. Do not carry partial
+    // notches between height editing and either slope step size.
+    const int mode = event->modifiers().testFlag(Qt::ControlModifier) ? 2
+        : event->modifiers().testFlag(Qt::ShiftModifier) ? 1 : 0;
+    if (mode != m_wheelMode || hit.kind != m_wheelTarget.kind
+        || hit.sector_index != m_wheelTarget.sector_index) {
         m_wheelRemainder = 0;
     }
+    m_wheelMode = mode;
     m_wheelTarget = hit;
     m_wheelRemainder += event->angleDelta().y();
     const int steps = m_wheelRemainder / 120;
@@ -238,6 +244,24 @@ void MapView3D::wheelEvent(QWheelEvent *event)
         || std::size_t(hit.sector_index) >= m_snapshot.sectors().size()) { return; }
     const bool floor = hit.kind == DUKE_SURFACE_FLOOR;
     const auto &sector = m_snapshot.sectors()[hit.sector_index];
+    if (mode != 0) {
+        auto changed = sector;
+        int &slope = floor ? changed.floorheinum : changed.ceilingheinum;
+        int &flags = floor ? changed.floorstat : changed.ceilingstat;
+        slope = std::clamp(slope + steps * (mode == 2 ? 16 : 256), -32768, 32767);
+        if (slope != 0) { flags |= 2; }
+        else { flags &= ~2; }
+        if (changed == sector) { return; }
+        auto candidate = m_snapshot;
+        candidate.setSector(hit.sector_index, changed);
+        if (!applySnapshot(std::move(candidate))) { return; }
+        if (sectorChanged) { sectorChanged(hit.sector_index, changed); }
+        if (statusMessage) {
+            statusMessage(QString("Sector %1 %2 slope: %3").arg(hit.sector_index)
+                          .arg(floor ? "floor" : "ceiling").arg(slope));
+        }
+        return;
+    }
     // Build Z increases downward: wheel-up raises either surface.
     const qreal height = (floor ? sector.floorz : sector.ceilingz) - steps * 1024.0;
     auto candidate = m_snapshot;

@@ -79,12 +79,12 @@ int main(int argc, char **argv)
     QTest::qWait(150);
     QTest::keyClick(view, Qt::Key_Escape);
     require(view->cursor().shape() == Qt::CrossCursor, "released cross cursor");
-    const auto wheel = [&](double y, int delta) {
+    const auto wheel = [&](double y, int delta, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
         QPoint point(view->width()/2, int(view->height()*y));
         QCursor::setPos(view->mapToGlobal(point));
         QTest::qWait(50);
         QWheelEvent event(QPointF(point), QPointF(view->mapToGlobal(point)), {}, QPoint(0,delta),
-                          Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+                          Qt::NoButton, modifiers, Qt::NoScrollPhase, false);
         QApplication::sendEvent(view, &event);
         QTest::qWait(100);
     };
@@ -104,6 +104,28 @@ int main(int argc, char **argv)
     QTest::keyClick(view, Qt::Key_H);
     wheel(0.9,-120);
     require(editor->document().sectors()[0].floorz == 0, "wheel lowers floor");
+    const auto beforeSlope = editor->document().sectors()[0];
+    wheel(0.9,120,Qt::ShiftModifier);
+    require(editor->document().sectors()[0].floorheinum == 256
+            && (editor->document().sectors()[0].floorstat & 2), "coarse floor slope enables flag");
+    wheel(0.9,-120,Qt::ShiftModifier);
+    require(editor->document().sectors()[0].floorheinum == 0
+            && !(editor->document().sectors()[0].floorstat & 2), "zero floor slope clears flag");
+    wheel(0.1,-120,Qt::ControlModifier);
+    require(editor->document().sectors()[0].ceilingheinum == -16
+            && (editor->document().sectors()[0].ceilingstat & 2), "fine negative ceiling slope");
+    wheel(0.1,120,Qt::ControlModifier | Qt::ShiftModifier);
+    require(editor->document().sectors()[0].ceilingheinum == 0
+            && !(editor->document().sectors()[0].ceilingstat & 2), "Ctrl takes precedence and zero clears ceiling flag");
+    wheel(0.9,60,Qt::ShiftModifier);
+    wheel(0.9,60,Qt::ControlModifier);
+    require(editor->document().sectors()[0].floorheinum == 0, "modifier change resets partial notch");
+    wheel(0.9,60,Qt::ControlModifier);
+    require(editor->document().sectors()[0].floorheinum == 16, "fine slope accumulation");
+    require(editor->document().sectors()[0].walls == beforeSlope.walls
+            && editor->document().sectors()[0].vertices == beforeSlope.vertices
+            && editor->document().sectors()[0].floorz == beforeSlope.floorz,
+            "slope preserves first wall and base height");
     const auto aim = [&](double y) {
         QCursor::setPos(view->mapToGlobal(QPoint(view->width()/2, int(view->height()*y))));
         QTest::qWait(50);
@@ -202,6 +224,8 @@ int main(int argc, char **argv)
     MapDocument saved;
     require(saved.openMap(path,error), "reload edited map");
     require(saved.sectors()[0].ceilingz == -33792, "saved ceiling height");
+    require(saved.sectors()[0].floorheinum == 16 && (saved.sectors()[0].floorstat & 2),
+            "saved slope and flag");
     require(saved.sectors()[0].ceilingxpanning == 1 && saved.sectors()[0].ceilingypanning == 1,
             "saved ceiling texture offsets");
     require(saved.sectors()[0].floorxpanning == 255 && (saved.sectors()[0].floorstat & 8),

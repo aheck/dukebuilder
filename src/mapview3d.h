@@ -52,5 +52,6 @@ private:
     QString m_archive;
     std::optional<int> m_copiedTexture;
     int m_wheelRemainder = 0;
+    int m_wheelMode = 0;
     DukeSurfaceHit m_wheelTarget{};
 };
