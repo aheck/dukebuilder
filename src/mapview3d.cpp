@@ -229,7 +229,8 @@ void MapView3D::wheelEvent(QWheelEvent *event)
     repaint();
     DukeSurfaceHit hit{};
     if (!duke_renderer_get_hovered_surface(m_renderer, &hit)
-        || (hit.kind != DUKE_SURFACE_FLOOR && hit.kind != DUKE_SURFACE_CEILING)) {
+        || (hit.kind != DUKE_SURFACE_FLOOR && hit.kind != DUKE_SURFACE_CEILING
+            && hit.kind != DUKE_SURFACE_SPRITE)) {
         m_wheelRemainder = 0;
         return;
     }
@@ -238,7 +239,8 @@ void MapView3D::wheelEvent(QWheelEvent *event)
     const int mode = event->modifiers().testFlag(Qt::ControlModifier) ? 2
         : event->modifiers().testFlag(Qt::ShiftModifier) ? 1 : 0;
     if (mode != m_wheelMode || hit.kind != m_wheelTarget.kind
-        || hit.sector_index != m_wheelTarget.sector_index) {
+        || hit.sector_index != m_wheelTarget.sector_index
+        || hit.sprite_index != m_wheelTarget.sprite_index) {
         m_wheelRemainder = 0;
     }
     m_wheelMode = mode;
@@ -246,6 +248,22 @@ void MapView3D::wheelEvent(QWheelEvent *event)
     m_wheelRemainder += event->angleDelta().y();
     const int steps = m_wheelRemainder / 120;
     m_wheelRemainder %= 120;
+    if (hit.kind == DUKE_SURFACE_SPRITE) {
+        if (!steps || hit.sprite_index < 0
+            || std::size_t(hit.sprite_index) >= m_snapshot.sprites().size()) { return; }
+        auto sprite = m_snapshot.sprites()[hit.sprite_index];
+        // Build Z increases downward. Sprite modifiers do not edit sector slopes.
+        sprite.z -= steps * 1024.0;
+        auto candidate = m_snapshot;
+        candidate.setSprite(hit.sprite_index, sprite);
+        if (!applySnapshot(std::move(candidate))) { return; }
+        if (spriteChanged) { spriteChanged(hit.sprite_index, sprite); }
+        if (statusMessage) {
+            statusMessage(QString("Sprite %1 Z: %2").arg(hit.sprite_index).arg(sprite.z));
+        }
+        update();
+        return;
+    }
     if (!steps || hit.sector_index < 0
         || std::size_t(hit.sector_index) >= m_snapshot.sectors().size()) { return; }
     const bool floor = hit.kind == DUKE_SURFACE_FLOOR;

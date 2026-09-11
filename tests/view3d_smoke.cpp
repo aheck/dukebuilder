@@ -347,17 +347,28 @@ int main(int argc, char **argv)
     QTest::keyClick(editor, Qt::Key_Q);
     QTest::qWait(200);
     require(view->isVisible(), "enter 3D to select sprite");
+    const auto beforeWheel = editor->document().sprites()[targetId];
+    QTest::keyClick(view, Qt::Key_Escape);
+    wheel(0.5,60);
+    require(editor->document().sprites()[targetId].z == -6144, "sprite partial wheel notch");
+    wheel(0.5,60);
+    require(editor->document().sprites()[targetId].z == -7168, "wheel raises highlighted sprite");
+    wheel(0.5,-120);
+    require(editor->document().sprites()[targetId] == beforeWheel, "wheel lowers sprite and preserves other properties");
     QTest::keyClick(view, Qt::Key_O);
     const auto placed3D = editor->document().sprites()[targetId];
     require(placed3D.position == QPointF(4095,0) && placed3D.angle == 180
             && placed3D.z == -6144 && placed3D.lotag == 123 && placed3D.cstat == (128|16),
             "O picks and sticks the sprite under the 3D crosshair to nearest wall");
+    wheel(0.5,120);
+    require(editor->document().sprites()[targetId].z == -7168, "wheel raises wall-aligned sprite");
     QTest::keyClick(view, Qt::Key_Q);
     require(editor->isVisible() && editor->hasUnsavedChanges(), "3D sprite placement persists into 2D");
     require(editor->saveMap(path,error), "save 3D sprite edit");
     MapDocument placedReload;
     require(placedReload.openMap(path,error)
-            && placedReload.sprites()[targetId].position == placed3D.position,
+            && placedReload.sprites()[targetId].position == placed3D.position
+            && placedReload.sprites()[targetId].z == -7168,
             "saved 3D sprite placement");
     std::cout << "3D toggle, rendering, height and texture edits, validation and save persistence passed\n";
     return 0;

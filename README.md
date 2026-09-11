@@ -208,7 +208,7 @@ it can render with; it does not combine multiple archives.
 - **Escape:** release the mouse. **Left click:** capture it again.
 - **H:** toggle surface highlighting (enabled on entry). A crosshair marks the
   aim point while captured; a cross cursor follows the released mouse.
-- **Mouse wheel:** raise/lower the highlighted floor or ceiling by 1024 Build Z
+- **Mouse wheel:** raise/lower the highlighted sprite, floor or ceiling by 1024 Build Z
   units per notch. Wheel-up raises it; wheel-down lowers it. Walls are unaffected.
   Height edits update the map, persist on return to 2D, and are saved normally.
   Changes that would invalidate the map are rejected with a status message.
