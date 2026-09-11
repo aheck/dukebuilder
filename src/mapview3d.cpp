@@ -183,6 +183,9 @@ void MapView3D::keyPressEvent(QKeyEvent *event)
     } else if (event->key() == Qt::Key_H && !event->isAutoRepeat()) {
         m_hover = !m_hover;
         duke_renderer_set_hover_enabled(m_renderer, m_hover);
+    } else if (event->key() == Qt::Key_Left || event->key() == Qt::Key_Right
+               || event->key() == Qt::Key_Up || event->key() == Qt::Key_Down) {
+        editTexture(event->key(), event->modifiers().testFlag(Qt::ShiftModifier));
     } else { m_keys.insert(event->key()); }
     event->accept();
 }
@@ -237,6 +240,17 @@ void MapView3D::wheelEvent(QWheelEvent *event)
     if (floor) { candidate.setSectorFloorZ(hit.sector_index, height); }
     else { candidate.setSectorCeilingZ(hit.sector_index, height); }
 
+    if (!applySnapshot(std::move(candidate))) { return; }
+    if (surfaceHeightChanged) { surfaceHeightChanged(hit.sector_index, floor, height); }
+    if (statusMessage) {
+        statusMessage(QString("Sector %1 %2 Z: %3").arg(hit.sector_index)
+                      .arg(floor ? "floor" : "ceiling").arg(height));
+    }
+    update();
+}
+
+bool MapView3D::applySnapshot(MapDocument candidate)
+{
     // Validate and upload before committing either the view or editor document.
     // The renderer owns immutable snapshots, so retain the old one on failure.
     QString error;
@@ -264,15 +278,69 @@ void MapView3D::wheelEvent(QWheelEvent *event)
     doneCurrent();
     m_clock.restart(); // Upload time must not become a navigation step.
     if (!ok) {
-        if (statusMessage) { statusMessage("Cannot change surface height: " + error); }
-        return;
-    }
-    if (surfaceHeightChanged) { surfaceHeightChanged(hit.sector_index, floor, height); }
-    if (statusMessage) {
-        statusMessage(QString("Sector %1 %2 Z: %3").arg(hit.sector_index)
-                      .arg(floor ? "floor" : "ceiling").arg(height));
+        if (statusMessage) { statusMessage("Cannot edit surface: " + error); }
+        return false;
     }
     update();
+    return true;
+}
+
+void MapView3D::editTexture(int key, bool scale)
+{
+    if (!m_active || !m_renderer || !m_hover) { return; }
+    repaint();
+    DukeSurfaceHit hit{};
+    if (!duke_renderer_get_hovered_surface(m_renderer, &hit) || hit.sector_index < 0
+        || std::size_t(hit.sector_index) >= m_snapshot.sectors().size()) { return; }
+    auto candidate = m_snapshot;
+    auto sector = candidate.sectors()[hit.sector_index];
+    const bool horizontal = key == Qt::Key_Left || key == Qt::Key_Right;
+    const int pan = (key == Qt::Key_Left || key == Qt::Key_Down) ? 1 : -1;
+    const bool enlarge = key == Qt::Key_Right || key == Qt::Key_Up;
+    const auto wrap = [](int value) { return (value + 256) % 256; };
+    if (hit.kind == DUKE_SURFACE_WALL) {
+        // Export emits each sector's wall sides consecutively in boundary order.
+        int local = hit.wall_index;
+        for (int i = 0; i < hit.sector_index; ++i) {
+            local -= int(candidate.sectors()[i].walls.size());
+        }
+        if (local < 0 || std::size_t(local) >= sector.walls.size()) { return; }
+        const auto wallId = sector.walls[local];
+        const auto &wall = candidate.walls()[wallId];
+        const bool reversed = wall.start != sector.vertices[local];
+        auto side = reversed ? wall.reverseSide : wall.forwardSide;
+        if (scale) {
+            int &repeat = horizontal ? side.xrepeat : side.yrepeat;
+            // Fewer repeats make each texture copy larger; never collapse to zero.
+            repeat = std::clamp(repeat + (enlarge ? -1 : 1), 1, 255);
+        } else {
+            int &offset = horizontal ? side.xpanning : side.ypanning;
+            offset = wrap(offset + pan);
+        }
+        if (side == (reversed ? wall.reverseSide : wall.forwardSide)) { return; }
+        candidate.setWallSide(wallId, reversed, side);
+        if (!applySnapshot(std::move(candidate))) { return; }
+        if (wallSideChanged) { wallSideChanged(wallId, reversed, side); }
+    } else if (hit.kind == DUKE_SURFACE_FLOOR || hit.kind == DUKE_SURFACE_CEILING) {
+        const bool floor = hit.kind == DUKE_SURFACE_FLOOR;
+        if (scale) {
+            // Build's double-smoosh flag is the only floor/ceiling scale field.
+            int &flags = floor ? sector.floorstat : sector.ceilingstat;
+            if (enlarge) { flags &= ~8; } else { flags |= 8; }
+        } else {
+            int &offset = floor
+                ? (horizontal ? sector.floorxpanning : sector.floorypanning)
+                : (horizontal ? sector.ceilingxpanning : sector.ceilingypanning);
+            offset = wrap(offset + pan);
+        }
+        if (sector == candidate.sectors()[hit.sector_index]) { return; }
+        candidate.setSector(hit.sector_index, sector);
+        if (!applySnapshot(std::move(candidate))) { return; }
+        if (sectorChanged) { sectorChanged(hit.sector_index, sector); }
+    } else { return; }
+    if (statusMessage) {
+        statusMessage(scale ? "Texture size changed" : "Texture offset changed");
+    }
 }
 
 void MapView3D::focusOutEvent(QFocusEvent *event)

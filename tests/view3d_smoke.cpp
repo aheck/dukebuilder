@@ -102,6 +102,34 @@ int main(int argc, char **argv)
     QTest::keyClick(view, Qt::Key_H);
     wheel(0.9,-120);
     require(editor->document().sectors()[0].floorz == 0, "wheel lowers floor");
+    const auto aim = [&](double y) {
+        QCursor::setPos(view->mapToGlobal(QPoint(view->width()/2, int(view->height()*y))));
+        QTest::qWait(50);
+    };
+    aim(0.1);
+    QTest::keyClick(view, Qt::Key_Left);
+    require(editor->document().sectors()[0].ceilingxpanning == 1, "left increases ceiling offset");
+    QTest::keyClick(view, Qt::Key_Down);
+    require(editor->document().sectors()[0].ceilingypanning == 1, "ceiling vertical panning");
+    QTest::keyClick(view, Qt::Key_Left, Qt::ShiftModifier);
+    require((editor->document().sectors()[0].ceilingstat & 8) != 0, "ceiling smaller size");
+    QTest::keyClick(view, Qt::Key_Right, Qt::ShiftModifier);
+    require((editor->document().sectors()[0].ceilingstat & 8) == 0, "ceiling larger size");
+    aim(0.9);
+    QTest::keyClick(view, Qt::Key_Right);
+    require(editor->document().sectors()[0].floorxpanning == 255, "floor panning");
+    QTest::keyClick(view, Qt::Key_Down, Qt::ShiftModifier);
+    require((editor->document().sectors()[0].floorstat & 8) != 0, "floor smaller size");
+    aim(0.5);
+    QTest::keyClick(view, Qt::Key_Right);
+    QTest::keyClick(view, Qt::Key_Up, Qt::ShiftModifier);
+    int changedSides = 0;
+    for (const auto &wall : editor->document().walls()) {
+        for (const auto &side : {wall.forwardSide, wall.reverseSide}) {
+            if (side.xpanning == 255 && side.yrepeat == 7 && side.xrepeat == 8) { ++changedSides; }
+        }
+    }
+    require(changedSides == 1, "wall panning and vertical scaling affect one side only");
     QTest::keyClick(view, Qt::Key_Q);
     require(editor->isVisible(), "return to 2D after edits");
     require(editor->document().sectors()[0].ceilingz == -33792, "3D edit persists into 2D");
@@ -109,6 +137,10 @@ int main(int argc, char **argv)
     MapDocument saved;
     require(saved.openMap(path,error), "reload edited map");
     require(saved.sectors()[0].ceilingz == -33792, "saved ceiling height");
-    std::cout << "3D toggle, rendering, wheel edits, validation and save persistence passed\n";
+    require(saved.sectors()[0].ceilingxpanning == 1 && saved.sectors()[0].ceilingypanning == 1,
+            "saved ceiling texture offsets");
+    require(saved.sectors()[0].floorxpanning == 255 && (saved.sectors()[0].floorstat & 8),
+            "saved floor offsets and scale");
+    std::cout << "3D toggle, rendering, height and texture edits, validation and save persistence passed\n";
     return 0;
 }

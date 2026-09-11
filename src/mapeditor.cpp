@@ -923,6 +923,19 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
     }
 }
 
+void MapEditor::setSectorValues(std::size_t sector, const MapDocument::Sector &values)
+{
+    m_document.setSector(sector, values);
+    rebuildScene();
+    updateProperties();
+}
+void MapEditor::setWallSideValues(std::size_t wall, bool reversed, const MapDocument::WallSide &values)
+{
+    m_document.setWallSide(wall, reversed, values);
+    rebuildScene();
+    updateProperties();
+}
+
 void MapEditor::setSectorHeight(std::size_t sector, bool floor, qreal height)
 {
     if (sector >= m_document.sectors().size()) { return; }

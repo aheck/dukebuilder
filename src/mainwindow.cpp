@@ -1120,6 +1120,12 @@ MainWindow::MainWindow(QWidget *parent)
     view3D->surfaceHeightChanged = [editor](std::size_t sector, bool floor, qreal height) {
         editor->setSectorHeight(sector, floor, height);
     };
+    view3D->sectorChanged = [editor](std::size_t sector, const MapDocument::Sector &values) {
+        editor->setSectorValues(sector, values);
+    };
+    view3D->wallSideChanged = [editor](std::size_t wall, bool reversed, const MapDocument::WallSide &values) {
+        editor->setWallSideValues(wall, reversed, values);
+    };
     view3D->statusMessage = [this](const QString &message) { statusBar()->showMessage(message, 5000); };
     connect(toggle3D, &QAction::triggered, this, [=](bool enabled) {
         if (!enabled) { leave3D(); return; }
@@ -1142,7 +1148,7 @@ MainWindow::MainWindow(QWidget *parent)
         modeGroup->setEnabled(false); // In particular, S must reach navigation.
         gridSizeCombo->setEnabled(false);
         zoomCombo->setEnabled(false);
-        statusBar()->showMessage("3D: WASD move · Mouse look · Shift faster · Wheel raise/lower surface · H highlight · Esc release mouse · Q return to 2D");
+        statusBar()->showMessage("3D: WASD move · Mouse look · Shift faster · Wheel height · Arrows pan · Shift+Arrows scale · H highlight · Esc release mouse · Q return to 2D");
     });
     viewMenu->addSeparator();
     viewMenu->addAction(reorientGridAction);

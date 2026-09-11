@@ -17,6 +17,8 @@ public:
     void stop();
     std::function<void()> leave3D;
     std::function<void(std::size_t, bool, qreal)> surfaceHeightChanged;
+    std::function<void(std::size_t, const MapDocument::Sector &)> sectorChanged;
+    std::function<void(std::size_t, bool, const MapDocument::WallSide &)> wallSideChanged;
     std::function<void(const QString &)> statusMessage;
 protected:
     void initializeGL() override;
@@ -33,6 +35,8 @@ private:
     void releaseLook();
     void captureLook();
     void cleanup();
+    bool applySnapshot(MapDocument candidate);
+    void editTexture(int key, bool scale);
     QTimer m_timer;
     QElapsedTimer m_clock;
     QSet<int> m_keys;
