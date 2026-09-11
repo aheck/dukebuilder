@@ -560,6 +560,7 @@ void MapDocument::rebuildSectors()
     for (auto &sector : survivingSectors) {
         if (sector) m_sectors.push_back(std::move(*sector));
     }
+    const auto firstNewSector = m_sectors.size();
     for (auto &sector : newSectors) m_sectors.push_back(std::move(sector));
 
     // A disconnected component inside a face contributes a clockwise hole to
@@ -585,6 +586,29 @@ void MapDocument::rebuildSectors()
         }
         areas.push_back(area);
     }
+    // New nested faces inherit only heights; surviving sectors retain their
+    // own values. Process outer faces first for multiple new nested loops.
+    std::vector<SectorId> newFaces;
+    for (SectorId id = firstNewSector; id < m_sectors.size(); ++id) {
+        newFaces.push_back(id);
+    }
+    std::sort(newFaces.begin(), newFaces.end(), [&](SectorId a, SectorId b) {
+        return areas[a] > areas[b];
+    });
+    for (const auto child : newFaces) {
+        std::optional<SectorId> parent;
+        for (SectorId id = 0; id < m_sectors.size(); ++id) {
+            if (areas[id] > areas[child] && outlines[id].contains(outlines[child])
+                && (!parent || areas[id] < areas[*parent])) {
+                parent = id;
+            }
+        }
+        if (parent) {
+            m_sectors[child].floorz = m_sectors[*parent].floorz;
+            m_sectors[child].ceilingz = m_sectors[*parent].ceilingz;
+        }
+    }
+
     for (const auto &hole : exteriorLoops) {
         const auto holePath = outline(hole);
         std::optional<SectorId> parent;

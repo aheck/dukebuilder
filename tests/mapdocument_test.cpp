@@ -252,4 +252,24 @@ int main()
             "Collapsed triangle cleanup must preserve the neighbor's boundary");
     checkSideReferences(adjacentTriangle);
 
+    MapDocument nestedHeights;
+    require(nestedHeights.addPolyline({{0,0},{1000,0},{1000,1000},{0,1000}}, true), "Parent room");
+    nestedHeights.setSectorFloorZ(0, 4096);
+    nestedHeights.setSectorCeilingZ(0, -16384);
+    require(nestedHeights.addPolyline({{100,100},{900,100},{900,900},{100,900}}, true), "Child room");
+    require(nestedHeights.sectors()[1].floorz == 4096
+            && nestedHeights.sectors()[1].ceilingz == -16384, "Child inherits parent heights");
+    nestedHeights.setSectorFloorZ(1, 2048);
+    nestedHeights.setSectorCeilingZ(1, -12288);
+    require(nestedHeights.addPolyline({{200,200},{800,200},{800,800},{200,800}}, true), "Grandchild room");
+    require(nestedHeights.sectors()[2].floorz == 2048
+            && nestedHeights.sectors()[2].ceilingz == -12288, "Nearest parent supplies heights");
+    require(nestedHeights.addPolyline({{2000,0},{3000,0},{3000,1000},{2000,1000}}, true), "Outside room");
+    require(nestedHeights.sectors()[3].floorz == 0
+            && nestedHeights.sectors()[3].ceilingz == -8192, "Outside room uses defaults");
+    require(nestedHeights.sectors()[0].floorz == 4096
+            && nestedHeights.sectors()[1].floorz == 2048
+            && nestedHeights.sectors()[2].ceilingz == -12288, "Rebuild preserves existing heights");
+    checkSideReferences(nestedHeights);
+
 }
