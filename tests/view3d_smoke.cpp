@@ -2,6 +2,8 @@
 #include "mapeditor.h"
 #include "mapview3d.h"
 #include "mapsave.h"
+#include "texturebrowserwindow.h"
+#include "texturebrowserwidget.h"
 #include <QApplication>
 #include <QSurfaceFormat>
 #include <QTemporaryDir>
@@ -130,6 +132,47 @@ int main(int argc, char **argv)
         }
     }
     require(changedSides == 1, "wall panning and vertical scaling affect one side only");
+    const auto choose = [&](double y, int tile) {
+        aim(y);
+        QTimer closer;
+        closer.setInterval(50);
+        bool opened = false;
+        QObject::connect(&closer, &QTimer::timeout, &window, [&] {
+            for (auto *widget : window.findChildren<QWidget *>()) {
+                auto *dialog = dynamic_cast<TextureBrowserWindow *>(widget);
+                if (!dialog || !dialog->isVisible()) { continue; }
+                opened = true;
+                if (tile < 0) { dialog->reject(); return; }
+                for (auto *child : dialog->findChildren<QWidget *>()) {
+                    if (auto *browser = dynamic_cast<TextureBrowserWidget *>(child)) {
+                        browser->selectTile(tile);
+                        require(browser->selectedTile() == tile, "texture selectable");
+                    }
+                }
+                dialog->accept();
+                return;
+            }
+        });
+        closer.start();
+        QTest::mouseClick(view, Qt::RightButton, Qt::NoModifier, view->mapFromGlobal(QCursor::pos()));
+        closer.stop();
+        require(opened, "right click opens existing chooser");
+    };
+    auto beforeCancel = editor->document();
+    choose(0.1, -1);
+    require(editor->document() == beforeCancel, "cancel texture selection preserves document");
+    choose(0.1, 100);
+    require(editor->document().sectors()[0].ceilingTexture == 100, "ceiling texture changed");
+    choose(0.9, 101);
+    require(editor->document().sectors()[0].floorTexture == 101, "floor texture changed");
+    choose(0.5, 102);
+    int changedTextures = 0;
+    for (const auto &wall : editor->document().walls()) {
+        for (const auto &side : {wall.forwardSide, wall.reverseSide}) {
+            if (side.texture == 102) { ++changedTextures; }
+        }
+    }
+    require(changedTextures == 1, "wall texture changed on one side");
     QTest::keyClick(view, Qt::Key_Q);
     require(editor->isVisible(), "return to 2D after edits");
     require(editor->document().sectors()[0].ceilingz == -33792, "3D edit persists into 2D");
@@ -141,6 +184,8 @@ int main(int argc, char **argv)
             "saved ceiling texture offsets");
     require(saved.sectors()[0].floorxpanning == 255 && (saved.sectors()[0].floorstat & 8),
             "saved floor offsets and scale");
+    require(saved.sectors()[0].ceilingTexture == 100 && saved.sectors()[0].floorTexture == 101,
+            "chosen textures persist in saved map");
     std::cout << "3D toggle, rendering, height and texture edits, validation and save persistence passed\n";
     return 0;
 }

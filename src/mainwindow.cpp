@@ -1117,6 +1117,10 @@ MainWindow::MainWindow(QWidget *parent)
         statusBar()->showMessage("2D mode");
     };
     view3D->leave3D = leave3D;
+    view3D->chooseTexture = [textureBrowserWindow](int current) -> std::optional<int> {
+        const auto selection = textureBrowserWindow->chooseTexture(current);
+        return selection ? std::optional<int>(selection->tile) : std::nullopt;
+    };
     view3D->surfaceHeightChanged = [editor](std::size_t sector, bool floor, qreal height) {
         editor->setSectorHeight(sector, floor, height);
     };

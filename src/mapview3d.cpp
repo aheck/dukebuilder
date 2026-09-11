@@ -197,6 +197,7 @@ void MapView3D::keyReleaseEvent(QKeyEvent *event)
 void MapView3D::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) { setFocus(); captureLook(); }
+    if (event->button() == Qt::RightButton) { editTexture(0, false); event->accept(); }
 }
 void MapView3D::mouseMoveEvent(QMouseEvent *event)
 {
@@ -298,6 +299,21 @@ void MapView3D::editTexture(int key, bool scale)
     const int pan = (key == Qt::Key_Left || key == Qt::Key_Down) ? 1 : -1;
     const bool enlarge = key == Qt::Key_Right || key == Qt::Key_Up;
     const auto wrap = [](int value) { return (value + 256) % 256; };
+    // Keep the picked surface fixed while the modal chooser owns input.
+    const auto selectTile = [&](int current) -> std::optional<int> {
+        if (!chooseTexture) { return std::nullopt; }
+        const bool captured = m_captured;
+        m_timer.stop();
+        releaseLook();
+        const auto selection = chooseTexture(current);
+        if (m_active) {
+            setFocus();
+            if (captured) { captureLook(); }
+            m_clock.restart();
+            m_timer.start();
+        }
+        return selection;
+    };
     if (hit.kind == DUKE_SURFACE_WALL) {
         // Export emits each sector's wall sides consecutively in boundary order.
         int local = hit.wall_index;
@@ -309,7 +325,11 @@ void MapView3D::editTexture(int key, bool scale)
         const auto &wall = candidate.walls()[wallId];
         const bool reversed = wall.start != sector.vertices[local];
         auto side = reversed ? wall.reverseSide : wall.forwardSide;
-        if (scale) {
+        if (key == 0) {
+            const auto selection = selectTile(side.texture);
+            if (!selection || !m_active) { return; }
+            side.texture = *selection;
+        } else if (scale) {
             int &repeat = horizontal ? side.xrepeat : side.yrepeat;
             // Fewer repeats make each texture copy larger; never collapse to zero.
             repeat = std::clamp(repeat + (enlarge ? -1 : 1), 1, 255);
@@ -323,7 +343,12 @@ void MapView3D::editTexture(int key, bool scale)
         if (wallSideChanged) { wallSideChanged(wallId, reversed, side); }
     } else if (hit.kind == DUKE_SURFACE_FLOOR || hit.kind == DUKE_SURFACE_CEILING) {
         const bool floor = hit.kind == DUKE_SURFACE_FLOOR;
-        if (scale) {
+        if (key == 0) {
+            int &tile = floor ? sector.floorTexture : sector.ceilingTexture;
+            const auto selection = selectTile(tile);
+            if (!selection || !m_active) { return; }
+            tile = *selection;
+        } else if (scale) {
             // Build's double-smoosh flag is the only floor/ceiling scale field.
             int &flags = floor ? sector.floorstat : sector.ceilingstat;
             if (enlarge) { flags &= ~8; } else { flags |= 8; }
@@ -339,7 +364,7 @@ void MapView3D::editTexture(int key, bool scale)
         if (sectorChanged) { sectorChanged(hit.sector_index, sector); }
     } else { return; }
     if (statusMessage) {
-        statusMessage(scale ? "Texture size changed" : "Texture offset changed");
+        statusMessage(key == 0 ? "Texture changed" : scale ? "Texture size changed" : "Texture offset changed");
     }
 }
 

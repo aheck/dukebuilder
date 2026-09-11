@@ -16,6 +16,7 @@ public:
     bool start(const MapDocument &document, const QPointF &pointer, QString &error);
     void stop();
     std::function<void()> leave3D;
+    std::function<std::optional<int>(int)> chooseTexture;
     std::function<void(std::size_t, bool, qreal)> surfaceHeightChanged;
     std::function<void(std::size_t, const MapDocument::Sector &)> sectorChanged;
     std::function<void(std::size_t, bool, const MapDocument::WallSide &)> wallSideChanged;
