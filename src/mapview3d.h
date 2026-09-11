@@ -15,11 +15,13 @@ public:
     ~MapView3D() override;
     bool start(const MapDocument &document, const QPointF &pointer, QString &error);
     void stop();
+    void stickSpriteToWall();
     void resetTextureScale() { editTexture(Qt::Key_R, false); }
     std::function<void()> leave3D;
     std::function<std::optional<int>(int)> chooseTexture;
     std::function<void(std::size_t, bool, qreal)> surfaceHeightChanged;
     std::function<void(std::size_t, const MapDocument::Sector &)> sectorChanged;
+    std::function<void(std::size_t, const MapDocument::Sprite &)> spriteChanged;
     std::function<void(std::size_t, bool, const MapDocument::WallSide &)> wallSideChanged;
     std::function<void(const QString &)> statusMessage;
 protected:

@@ -253,6 +253,8 @@ public:
             auto *editor = new QComboBox(parent);
             editor->setEditable(true);
             editor->setInsertPolicy(QComboBox::NoInsert);
+            // Descriptive preset labels must not autocomplete over numeric input.
+            editor->setCompleter(nullptr);
             editor->setMinimumContentsLength(12);
             editor->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
             if (property == MapEditor::Property::WallLotag) {
@@ -274,7 +276,7 @@ public:
                 }
             } else {
                 editor->setToolTip("Sector Effector (tile 1) meanings. Other sprites use "
-                               "lotags differently. Enter any integer from -32768 to 32767.");
+                               "lotags differently. Enter -32768 to 32767, or 65535 as an alias for -1.");
                 int tag = 0;
                 for (const char *meaning : sectorEffectorLotags) {
                     editor->addItem(QString::number(tag) + " - " + meaning, tag);
@@ -287,8 +289,7 @@ public:
                 }
             };
             connect(editor, &QComboBox::activated, editor, commit, Qt::QueuedConnection);
-            connect(editor->lineEdit(), &QLineEdit::editingFinished,
-                    editor, commit, Qt::QueuedConnection);
+            connect(editor->lineEdit(), &QLineEdit::editingFinished, editor, commit);
             return editor;
         }
         if (property != MapEditor::Property::Texture
@@ -352,7 +353,10 @@ public:
                                        : text.toInt(&valid);
             const auto property = static_cast<MapEditor::Property>(
                 index.siblingAtColumn(0).data(Qt::UserRole).toInt());
-            if (property == MapEditor::Property::WallLotag && tag == 65535) tag = -1;
+            if ((property == MapEditor::Property::WallLotag
+                 || property == MapEditor::Property::Lotag) && tag == 65535) {
+                tag = -1;
+            }
             const int maximum = property == MapEditor::Property::SectorLotag ? 65535 : 32767;
             if (valid && tag >= -32768 && tag <= maximum) {
                 model->setData(index, QString::number(tag), Qt::EditRole);
@@ -1055,6 +1059,15 @@ MainWindow::MainWindow(QWidget *parent)
     addModeAction("Sprites", QKeySequence(Qt::Key_T), MapEditor::Mode::Sprites);
 
     auto *toolsMenu = menuBar()->addMenu("&Tools");
+    auto *stickSpriteAction = toolsMenu->addAction("Stick Sprite to Wall");
+    stickSpriteAction->setShortcut(QKeySequence(Qt::Key_O));
+    stickSpriteAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    stickSpriteAction->setAutoRepeat(false);
+    editor->addAction(stickSpriteAction);
+    connect(stickSpriteAction, &QAction::triggered, this, [editor, view3D] {
+        if (view3D->isVisible()) { view3D->stickSpriteToWall(); }
+        else { editor->stickSelectedSpriteToWall(); }
+    });
     auto *textureBrowserAction = toolsMenu->addAction("&Texture Browser");
     propertyDelegate->setTextureChooser(
         [textureBrowserWindow](std::optional<int> currentTexture) -> std::optional<int> {
@@ -1142,6 +1155,9 @@ MainWindow::MainWindow(QWidget *parent)
     };
     view3D->sectorChanged = [editor](std::size_t sector, const MapDocument::Sector &values) {
         editor->setSectorValues(sector, values);
+    };
+    view3D->spriteChanged = [editor](std::size_t sprite, const MapDocument::Sprite &values) {
+        editor->setSpriteValues(sprite, values);
     };
     view3D->wallSideChanged = [editor](std::size_t wall, bool reversed, const MapDocument::WallSide &values) {
         editor->setWallSideValues(wall, reversed, values);

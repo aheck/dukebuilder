@@ -143,6 +143,8 @@ public:
     void setSectorHitag(std::size_t sectorId, int hitag);
     void setSectorLotag(std::size_t sectorId, int lotag);
     SpriteId addSprite(const QPointF &position);
+    // Snap to the nearest boundary of the sprite's sector; preserve Z/tags.
+    bool stickSpriteToWall(SpriteId sprite, QString &error);
     void removeSprites(const std::vector<SpriteId> &spriteIds);
     void setSpritePositions(const std::vector<std::pair<SpriteId, QPointF>> &positions);
     void setSpriteZ(SpriteId spriteId, qreal z);

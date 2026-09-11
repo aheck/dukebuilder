@@ -12,6 +12,9 @@
 #include <QAction>
 #include <QCursor>
 #include <QWheelEvent>
+#include <QTreeWidget>
+#include <QComboBox>
+#include <QLineEdit>
 #include <QtPlugin>
 #include <iostream>
 #ifdef DUKE_BUILDER_STATIC_XCB_PLUGIN
@@ -258,6 +261,104 @@ int main(int argc, char **argv)
             "saved floor offsets and scale");
     require(saved.sectors()[0].ceilingTexture == copyTile && saved.sectors()[0].floorTexture == 0,
             "chosen textures persist in saved map");
+    editor->setMode(MapEditor::Mode::Sectors);
+    QTest::mouseClick(editor->viewport(), Qt::LeftButton, Qt::NoModifier,
+                      editor->mapFromScene(QPointF(0,0)));
+    auto *properties = window.findChild<QTreeWidget *>("PropertiesControl");
+    require(properties, "properties tree");
+    QTreeWidgetItem *lotag = nullptr;
+    for (int i=0; i<properties->topLevelItemCount(); ++i) {
+        if (properties->topLevelItem(i)->text(0) == "Lotag") { lotag = properties->topLevelItem(i); }
+    }
+    require(lotag, "sector lotag row");
+    properties->scrollToItem(lotag);
+    auto *combo = qobject_cast<QComboBox *>(properties->itemWidget(lotag,1));
+    require(combo, "lotag editor");
+    combo->lineEdit()->setFocus();
+    combo->lineEdit()->selectAll();
+    QTest::keyClicks(combo->lineEdit(), "12345");
+    editor->setFocus();
+    QTest::qWait(100);
+    require(editor->document().sectors()[0].lotag == 12345, "custom lotag committed");
+    for (int i=0; i<properties->topLevelItemCount(); ++i) {
+        auto *row = properties->topLevelItem(i);
+        if (row->text(0) != "Lotag") { continue; }
+        combo = qobject_cast<QComboBox *>(properties->itemWidget(row,1));
+        require(combo, "refreshed lotag editor");
+        combo->lineEdit()->setFocus();
+        combo->lineEdit()->selectAll();
+        QTest::keyClicks(combo->lineEdit(), "23456");
+        QTest::keyClick(combo->lineEdit(), Qt::Key_Return);
+        break;
+    }
+    QTest::qWait(100);
+    require(editor->document().sectors()[0].lotag == 23456, "custom lotag committed with Enter");
+    auto spriteMap = editor->document();
+    const auto spriteId = spriteMap.addSprite({512,512});
+    spriteMap.setSpriteTexture(spriteId, 1);
+    spriteMap.setSpriteZ(spriteId, -4096);
+    require(saveBuildMap(spriteMap, path, error) && editor->openMap(path, error), "sprite lotag fixture");
+    editor->setMode(MapEditor::Mode::Sprites);
+    QTest::mouseClick(editor->viewport(), Qt::LeftButton, Qt::NoModifier,
+                      editor->mapFromScene(QPointF(512,512)));
+    for (const bool enter : {false, true}) {
+        QComboBox *tagEditor = nullptr;
+        for (int i=0; i<properties->topLevelItemCount(); ++i) {
+            auto *row = properties->topLevelItem(i);
+            if (row->text(0) == "Lotag") {
+                tagEditor = qobject_cast<QComboBox *>(properties->itemWidget(row,1));
+                properties->scrollToItem(row);
+            }
+        }
+        require(tagEditor, "sprite lotag editor");
+        tagEditor->lineEdit()->setFocus();
+        tagEditor->lineEdit()->selectAll();
+        QTest::keyClicks(tagEditor->lineEdit(), enter ? "65535" : "-12345", Qt::NoModifier, 20);
+        if (enter) { QTest::keyClick(tagEditor->lineEdit(), Qt::Key_Return); }
+        else { editor->setFocus(); }
+        QTest::qWait(100);
+        require(editor->document().sprites()[spriteId].lotag == (enter ? -1 : -12345),
+                "sprite custom lotag commits on Enter and focus loss");
+    }
+    editor->setFocus();
+    QTest::keyClick(editor, Qt::Key_O);
+    require(editor->document().sprites()[spriteId].position == QPointF(4095,512)
+            && (editor->document().sprites()[spriteId].cstat & 48) == 16
+            && editor->document().sprites()[spriteId].z == -4096,
+            "O ornaments the selected sprite in 2D and preserves height");
+    require(editor->saveMap(path, error), "save custom sprite lotag");
+    MapDocument spriteReload;
+    require(spriteReload.openMap(path, error) && spriteReload.sprites()[spriteId].lotag == -1,
+            "sprite lotag 65535 alias persists as -1 in saved map");
+    MapDocument sprite3D;
+    require(sprite3D.addPolyline({{-4096,-4096},{4096,-4096},{4096,4096},{-4096,4096}}, true),
+            "3D sprite room");
+    sprite3D.setSectorCeilingZ(0,-32768);
+    const auto targetId = sprite3D.addSprite({3072,0});
+    auto target = sprite3D.sprites()[targetId];
+    target.texture = copyTile;
+    target.z = -6144;
+    target.cstat = 128;
+    target.lotag = 123;
+    sprite3D.setSprite(targetId,target);
+    require(saveBuildMap(sprite3D,path,error) && editor->openMap(path,error), "3D sprite fixture");
+    editor->setFocus();
+    QCursor::setPos(editor->viewport()->mapToGlobal(editor->mapFromScene(QPointF(0,0))));
+    QTest::keyClick(editor, Qt::Key_Q);
+    QTest::qWait(200);
+    require(view->isVisible(), "enter 3D to select sprite");
+    QTest::keyClick(view, Qt::Key_O);
+    const auto placed3D = editor->document().sprites()[targetId];
+    require(placed3D.position == QPointF(4095,0) && placed3D.angle == 180
+            && placed3D.z == -6144 && placed3D.lotag == 123 && placed3D.cstat == (128|16),
+            "O picks and sticks the sprite under the 3D crosshair to nearest wall");
+    QTest::keyClick(view, Qt::Key_Q);
+    require(editor->isVisible() && editor->hasUnsavedChanges(), "3D sprite placement persists into 2D");
+    require(editor->saveMap(path,error), "save 3D sprite edit");
+    MapDocument placedReload;
+    require(placedReload.openMap(path,error)
+            && placedReload.sprites()[targetId].position == placed3D.position,
+            "saved 3D sprite placement");
     std::cout << "3D toggle, rendering, height and texture edits, validation and save persistence passed\n";
     return 0;
 }

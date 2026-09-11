@@ -294,4 +294,37 @@ int main()
     require(density.walls()[0].forwardSide.xrepeat == 32, "Drag back restores exact repeat");
     require(density.defaultWallXRepeat(0) == 16, "Reset computes default independent of custom density");
 
+    MapDocument ornament;
+    require(ornament.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}}, true), "Ornament room");
+    const auto decoration = ornament.addSprite({900,512});
+    auto decorationValues = ornament.sprites()[decoration];
+    decorationValues.z=-2048; decorationValues.angle=0; decorationValues.texture=123; decorationValues.lotag=42;
+    decorationValues.cstat=32|1|64; decorationValues.xrepeat=37;
+    ornament.setSprite(decoration,decorationValues);
+    QString error;
+    require(ornament.stickSpriteToWall(decoration,error), "Ornament to nearest wall");
+    const auto attached=ornament.sprites()[decoration];
+    require(attached.position == QPointF(1023,512) && attached.angle == 180,
+            "Hits nearest wall regardless of sprite angle");
+    require(attached.z == decorationValues.z && attached.texture == decorationValues.texture
+            && attached.lotag == 42 && attached.xrepeat == 37
+            && attached.cstat == (16|1|64) && attached.sectorId == 0,
+            "Wall alignment preserves other sprite properties and sets sector");
+    require(ornament.stickSpriteToWall(decoration,error)
+            && ornament.sprites()[decoration] == attached, "Repeated ornament is stable");
+    ornament.setSpritePositions({{decoration,{2000,2000}}});
+    const auto outside=ornament;
+    require(!ornament.stickSpriteToWall(decoration,error) && ornament == outside,
+            "Outside sprite fails without changes");
+
+    MapDocument holes;
+    require(holes.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}},true), "Outer ornament room");
+    require(holes.addPolyline({{256,256},{768,256},{768,768},{256,768}},true), "Inner ornament room");
+    const auto holeSprite=holes.addSprite({200,512});
+    holes.setSpriteAngle(holeSprite,180);
+    require(holes.stickSpriteToWall(holeSprite,error), "Ornament onto shared hole boundary");
+    require(holes.sprites()[holeSprite].position == QPointF(255,512)
+            && holes.sprites()[holeSprite].angle == 180 && holes.sprites()[holeSprite].sectorId == 0,
+            "Stops at two-sided wall and faces back into owning sector");
+
 }

@@ -17,6 +17,7 @@
 #include <QScrollBar>
 #include <QStyleOption>
 #include <QWheelEvent>
+#include <QTimer>
 
 #include <algorithm>
 #include <cmath>
@@ -909,7 +910,10 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
             } else {
                 m_document.setSpriteLotag(spriteId, tag);
             }
-            break;
+            // Tags do not affect sprite geometry. Keep the selected item and
+            // let Qt finish committing the combo editor before rebuilding rows.
+            QTimer::singleShot(0, this, [this] { updateProperties(); });
+            return;
         }
         case Property::Texture: {
             const int texture = static_cast<int>(std::clamp(
@@ -936,6 +940,13 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
             break;
         }
     }
+}
+
+void MapEditor::setSpriteValues(std::size_t sprite, const MapDocument::Sprite &values)
+{
+    m_document.setSprite(sprite, values);
+    rebuildScene();
+    updateProperties();
 }
 
 void MapEditor::setSectorValues(std::size_t sector, const MapDocument::Sector &values)
@@ -1771,6 +1782,25 @@ void MapEditor::wheelEvent(QWheelEvent *event)
 void MapEditor::drawBackground(QPainter *painter, const QRectF &rect)
 {
     m_scene->paintBackground(painter, rect);
+}
+
+void MapEditor::stickSelectedSpriteToWall()
+{
+    if (!isVisible() || m_mode != Mode::Sprites || m_scene->selectedItems().size() != 1) {
+        reportStatus("Select one sprite in 2D sprite mode first."); return;
+    }
+    auto *item = dynamic_cast<SpriteItem *>(m_scene->selectedItems().front());
+    if (!item) { reportStatus("Select a sprite, not the player start."); return; }
+    const auto id = static_cast<MapDocument::SpriteId>(item->data(spriteIdRole).toULongLong());
+    QString error;
+    if (!m_document.stickSpriteToWall(id, error)) { reportStatus(error); return; }
+    rebuildScene();
+    for (auto *candidate : m_scene->items()) {
+        if (dynamic_cast<SpriteItem *>(candidate) && candidate->data(spriteIdRole).toULongLong() == id) {
+            candidate->setSelected(true); break;
+        }
+    }
+    reportStatus("Sprite placed against the nearest wall.");
 }
 
 void MapEditor::keyPressEvent(QKeyEvent *event)

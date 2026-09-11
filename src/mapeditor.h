@@ -144,6 +144,8 @@ public:
     void setWallSideValues(std::size_t wall, bool reversed, const MapDocument::WallSide &values);
     void setSectorHeight(std::size_t sector, bool floor, qreal height);
     void resetSelectedWallTextureScale();
+    void stickSelectedSpriteToWall();
+    void setSpriteValues(std::size_t sprite, const MapDocument::Sprite &values);
     void newMap();
     [[nodiscard]] std::set<int> usedTextureTiles() const { return m_document.usedTextureTiles(); }
     bool saveMap(const QString &filename, QString &error);

@@ -250,3 +250,16 @@ rounding differences, particularly on very short or very long walls.
 Use **View → Reset Texture Scale** on the selected wall side in 2D or highlighted
 wall in 3D; **R** does the same in 3D. This resets horizontal density and vertical
 repeat without changing textures or offsets.
+
+## Stick sprites to walls
+
+In **2D sprite mode**, select a sprite and press **O**. In **3D**, point the
+crosshair at a visible sprite and press **O**. The sprite is highlighted when
+selected. **Tools → Stick Sprite to Wall** is also available.
+
+The sprite snaps to the nearest wall of its own sector (including two-sided
+walls), regardless of its angle. It becomes wall-aligned, faces into the room,
+and sits slightly off the wall to avoid flicker. Height, texture, tags and
+unrelated flags are preserved. This is a one-time placement; it does not follow
+later wall movement. This intentionally differs from Build's directional
+ornament command.

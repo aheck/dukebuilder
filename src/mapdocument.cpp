@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <functional>
 #include <tuple>
+#include <limits>
 
 namespace {
 constexpr qreal coordinateEpsilon = 0.001;
@@ -26,6 +27,97 @@ void MapDocument::setWallSide(WallId wallId, bool reversed, const WallSide &side
 void MapDocument::setSector(SectorId sectorId, const Sector &sector)
 {
     if (sectorId < m_sectors.size()) m_sectors[sectorId] = sector;
+}
+
+bool MapDocument::stickSpriteToWall(SpriteId id, QString &error)
+{
+    error.clear();
+    if (id >= m_sprites.size()) { error = "Select a sprite first."; return false; }
+    const auto &sprite = m_sprites[id];
+    if (!std::isfinite(sprite.angle) || !std::isfinite(sprite.position.x())
+        || !std::isfinite(sprite.position.y())) {
+        error = "The sprite has invalid coordinates or angle."; return false;
+    }
+    // Sector loops keep holes and overlapping imported rooms distinct.
+    const auto sectorPath = [this](const Sector &sector) {
+        QPainterPath path;
+        path.setFillRule(Qt::OddEvenFill);
+        for (std::size_t i = 0; i < sector.vertices.size(); ++i) {
+            const auto point = m_vertices[sector.vertices[i]].position;
+            if (i == 0 || std::find(sector.loopStarts.begin(), sector.loopStarts.end(), i) != sector.loopStarts.end()) {
+                if (i) { path.closeSubpath(); }
+                path.moveTo(point);
+            } else { path.lineTo(point); }
+        }
+        path.closeSubpath();
+        return path;
+    };
+    std::optional<SectorId> owner;
+    if (sprite.sectorId && *sprite.sectorId < m_sectors.size()
+        && sectorPath(m_sectors[*sprite.sectorId]).contains(sprite.position)) {
+        owner = sprite.sectorId;
+    } else {
+        for (SectorId s = 0; s < m_sectors.size(); ++s) {
+            if (sectorPath(m_sectors[s]).contains(sprite.position)) {
+                if (owner) { error = "The sprite is in overlapping sectors without a valid sector assignment."; return false; }
+                owner = s;
+            }
+        }
+    }
+    if (!owner) { error = "Place the sprite inside a sector first."; return false; }
+    const auto &sector = m_sectors[*owner];
+    const auto cross = [](QPointF a, QPointF b) { return a.x()*b.y() - a.y()*b.x(); };
+    double nearest = std::numeric_limits<double>::infinity();
+    QPointF hit, normal;
+    for (std::size_t i = 0; i < sector.vertices.size(); ++i) {
+        const auto a = m_vertices[sector.vertices[i]].position;
+        const auto b = m_vertices[sector.vertices[sector.nextWallIndex(i)]].position;
+        const auto edge = b-a;
+        const double lengthSquared = QPointF::dotProduct(edge, edge);
+        if (lengthSquared < coordinateEpsilon*coordinateEpsilon) { continue; }
+        const double fraction = std::clamp(QPointF::dotProduct(sprite.position-a, edge)/lengthSquared, 0.0, 1.0);
+        const auto projection = a + edge*fraction;
+        const auto delta = sprite.position-projection;
+        const double distanceSquared = QPointF::dotProduct(delta, delta);
+        if (distanceSquared >= nearest) { continue; }
+        nearest = distanceSquared;
+        hit = projection;
+        normal = QPointF(-edge.y(), edge.x()) / std::sqrt(lengthSquared);
+        if (QPointF::dotProduct(normal, delta) < 0) { normal = -normal; }
+    }
+    if (!std::isfinite(nearest)) { error = "No wall was found in the sprite's sector."; return false; }
+    // Offset toward the room, avoiding coplanar flicker and integer rounding
+    // onto a boundary. At corners also step toward the original sprite position.
+    const auto path = sectorPath(sector);
+    const auto delta = sprite.position-hit;
+    const auto away = nearest > 0 ? delta/std::sqrt(nearest) : normal;
+    for (double gap : {1.0, 2.0, 4.0}) {
+        for (const auto offset : {normal*gap, (normal+away)*gap}) {
+            const auto candidate = hit+offset;
+            const QPointF position(std::round(candidate.x()), std::round(candidate.y()));
+            if (!path.contains(position)) { continue; }
+            bool onBoundary = false;
+            for (std::size_t i=0; i<sector.vertices.size(); ++i) {
+                const auto a=m_vertices[sector.vertices[i]].position;
+                const auto b=m_vertices[sector.vertices[sector.nextWallIndex(i)]].position;
+                const auto edge=b-a;
+                if (std::abs(cross(edge,position-a)) < 1e-6
+                    && QPointF::dotProduct(position-a,position-b) <= 0) { onBoundary=true; break; }
+            }
+            if (onBoundary) { continue; }
+            auto updated = sprite;
+            updated.position = position;
+            double degrees = std::atan2(normal.y(), normal.x())*180.0/3.14159265358979323846;
+            if (degrees < 0) { degrees += 360; }
+            updated.angle = (std::lround(degrees*2048.0/360.0) % 2048)*360.0/2048.0;
+            updated.cstat = (updated.cstat & ~48) | 16;
+            updated.sectorId = owner;
+            m_sprites[id] = updated;
+            return true;
+        }
+    }
+    error = "Not enough space to place the sprite just inside that wall.";
+    return false;
 }
 
 void MapDocument::setSprite(SpriteId spriteId, const Sprite &sprite)

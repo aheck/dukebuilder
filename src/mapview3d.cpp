@@ -116,6 +116,7 @@ bool MapView3D::start(const MapDocument &document, const QPointF &pointer, QStri
     m_wheelRemainder = 0;
     m_active = true;
     duke_renderer_set_hover_enabled(m_renderer, m_hover);
+    duke_renderer_set_sprite_picking_enabled(m_renderer, true);
     m_clock.start();
     m_timer.start();
     setFocus();
@@ -181,6 +182,8 @@ void MapView3D::keyPressEvent(QKeyEvent *event)
         if (!event->isAutoRepeat()) { editTexture(event->key(), false); }
     } else if (event->key() == Qt::Key_Q && !event->isAutoRepeat()) {
         if (leave3D) { leave3D(); }
+    } else if (event->key() == Qt::Key_O) {
+        if (!event->isAutoRepeat()) { stickSpriteToWall(); }
     } else if (event->key() == Qt::Key_R) {
         resetTextureScale();
     } else if (event->key() == Qt::Key_Escape) {
@@ -188,6 +191,7 @@ void MapView3D::keyPressEvent(QKeyEvent *event)
     } else if (event->key() == Qt::Key_H && !event->isAutoRepeat()) {
         m_hover = !m_hover;
         duke_renderer_set_hover_enabled(m_renderer, m_hover);
+        duke_renderer_set_sprite_picking_enabled(m_renderer, true);
     } else if (event->key() == Qt::Key_Left || event->key() == Qt::Key_Right
                || event->key() == Qt::Key_Up || event->key() == Qt::Key_Down) {
         editTexture(event->key(), event->modifiers().testFlag(Qt::ShiftModifier));
@@ -303,6 +307,7 @@ bool MapView3D::applySnapshot(MapDocument candidate)
         duke_renderer_destroy(m_renderer);
         m_renderer = replacement;
         duke_renderer_set_hover_enabled(m_renderer, m_hover);
+        duke_renderer_set_sprite_picking_enabled(m_renderer, true);
         m_snapshot = std::move(candidate);
     }
     doneCurrent();
@@ -412,6 +417,28 @@ void MapView3D::editTexture(int key, bool scale)
     if (statusMessage) {
         statusMessage(key == Qt::Key_R ? "Texture scale reset" : (key == 0 || key == Qt::Key_V) ? "Texture changed" : scale ? "Texture size changed" : "Texture offset changed");
     }
+}
+
+void MapView3D::stickSpriteToWall()
+{
+    if (!m_active || !m_renderer || !m_hover) { return; }
+    repaint();
+    DukeSurfaceHit hit{};
+    if (!duke_renderer_get_hovered_surface(m_renderer, &hit) || hit.kind != DUKE_SURFACE_SPRITE
+        || hit.sprite_index < 0 || std::size_t(hit.sprite_index) >= m_snapshot.sprites().size()) {
+        if (statusMessage) { statusMessage("Point at a sprite to stick it to the nearest wall."); }
+        return;
+    }
+    auto candidate = m_snapshot;
+    QString error;
+    if (!candidate.stickSpriteToWall(hit.sprite_index, error)) {
+        if (statusMessage) { statusMessage(error); }
+        return;
+    }
+    const auto sprite = candidate.sprites()[hit.sprite_index];
+    if (!applySnapshot(std::move(candidate))) { return; }
+    if (spriteChanged) { spriteChanged(hit.sprite_index, sprite); }
+    if (statusMessage) { statusMessage("Sprite placed against the nearest wall."); }
 }
 
 void MapView3D::focusOutEvent(QFocusEvent *event)
