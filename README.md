@@ -212,6 +212,9 @@ it can render with; it does not combine multiple archives.
   units per notch. Wheel-up raises it; wheel-down lowers it. Walls are unaffected.
   Height edits update the map, persist on return to 2D, and are saved normally.
   Changes that would invalidate the map are rejected with a status message.
+- **Ctrl+C / Ctrl+V:** copy/paste the highlighted surface's texture tile between
+  walls, floors and ceilings. Offsets, scale and other properties are preserved.
+  The copied tile remains available when switching between 2D and 3D.
 - **Right click:** choose a texture for the highlighted wall, floor or ceiling.
   Cancel leaves the map unchanged; mouse look resumes if it was captured.
 - **Arrow keys:** pan the highlighted wall, floor or ceiling in texture X/Y

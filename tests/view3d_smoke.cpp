@@ -158,13 +158,17 @@ int main(int argc, char **argv)
         closer.stop();
         require(opened, "right click opens existing chooser");
     };
+    aim(0.1);
+    const auto beforeEmptyPaste = editor->document();
+    QTest::keyClick(view, Qt::Key_V, Qt::ControlModifier);
+    require(editor->document() == beforeEmptyPaste, "empty texture clipboard does nothing");
     auto beforeCancel = editor->document();
     choose(0.1, -1);
     require(editor->document() == beforeCancel, "cancel texture selection preserves document");
-    choose(0.1, 100);
-    require(editor->document().sectors()[0].ceilingTexture == 100, "ceiling texture changed");
-    choose(0.9, 101);
-    require(editor->document().sectors()[0].floorTexture == 101, "floor texture changed");
+    choose(0.1, 0);
+    require(editor->document().sectors()[0].ceilingTexture == 0, "ceiling texture changed");
+    choose(0.9, 0);
+    require(editor->document().sectors()[0].floorTexture == 0, "floor texture changed");
     choose(0.5, 102);
     int changedTextures = 0;
     for (const auto &wall : editor->document().walls()) {
@@ -173,6 +177,24 @@ int main(int argc, char **argv)
         }
     }
     require(changedTextures == 1, "wall texture changed on one side");
+    aim(0.5);
+    const auto beforeCopy = editor->document();
+    QTest::keyClick(view, Qt::Key_C, Qt::ControlModifier);
+    require(editor->document() == beforeCopy, "copy does not edit map");
+    aim(0.1);
+    QTest::keyClick(view, Qt::Key_V, Qt::ControlModifier);
+    require(editor->document().sectors()[0].ceilingTexture == 102, "wall texture pasted onto ceiling");
+    aim(0.9);
+    QTest::keyClick(view, Qt::Key_C, Qt::ControlModifier);
+    aim(0.5);
+    QTest::keyClick(view, Qt::Key_V, Qt::ControlModifier);
+    int pastedSides = 0;
+    for (const auto &wall : editor->document().walls()) {
+        for (const auto &side : {wall.forwardSide, wall.reverseSide}) {
+            if (side.texture == 0 && side.xpanning == 255 && side.yrepeat == 7) { ++pastedSides; }
+        }
+    }
+    require(pastedSides == 1, "paste changes one wall side and preserves mapping");
     QTest::keyClick(view, Qt::Key_Q);
     require(editor->isVisible(), "return to 2D after edits");
     require(editor->document().sectors()[0].ceilingz == -33792, "3D edit persists into 2D");
@@ -184,7 +206,7 @@ int main(int argc, char **argv)
             "saved ceiling texture offsets");
     require(saved.sectors()[0].floorxpanning == 255 && (saved.sectors()[0].floorstat & 8),
             "saved floor offsets and scale");
-    require(saved.sectors()[0].ceilingTexture == 100 && saved.sectors()[0].floorTexture == 101,
+    require(saved.sectors()[0].ceilingTexture == 102 && saved.sectors()[0].floorTexture == 0,
             "chosen textures persist in saved map");
     std::cout << "3D toggle, rendering, height and texture edits, validation and save persistence passed\n";
     return 0;

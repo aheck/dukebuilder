@@ -50,6 +50,7 @@ private:
     QWidget *m_crosshair = nullptr;
     MapDocument m_snapshot;
     QString m_archive;
+    std::optional<int> m_copiedTexture;
     int m_wheelRemainder = 0;
     DukeSurfaceHit m_wheelTarget{};
 };

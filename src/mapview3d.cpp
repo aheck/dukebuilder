@@ -176,7 +176,10 @@ void MapView3D::paintGL()
 }
 void MapView3D::keyPressEvent(QKeyEvent *event)
 {
-    if (event->key() == Qt::Key_Q && !event->isAutoRepeat()) {
+    if (event->modifiers() == Qt::ControlModifier
+        && (event->key() == Qt::Key_C || event->key() == Qt::Key_V)) {
+        if (!event->isAutoRepeat()) { editTexture(event->key(), false); }
+    } else if (event->key() == Qt::Key_Q && !event->isAutoRepeat()) {
         if (leave3D) { leave3D(); }
     } else if (event->key() == Qt::Key_Escape) {
         releaseLook();
@@ -289,6 +292,7 @@ bool MapView3D::applySnapshot(MapDocument candidate)
 void MapView3D::editTexture(int key, bool scale)
 {
     if (!m_active || !m_renderer || !m_hover) { return; }
+    if (key == Qt::Key_V && !m_copiedTexture) { return; }
     repaint();
     DukeSurfaceHit hit{};
     if (!duke_renderer_get_hovered_surface(m_renderer, &hit) || hit.sector_index < 0
@@ -325,7 +329,13 @@ void MapView3D::editTexture(int key, bool scale)
         const auto &wall = candidate.walls()[wallId];
         const bool reversed = wall.start != sector.vertices[local];
         auto side = reversed ? wall.reverseSide : wall.forwardSide;
-        if (key == 0) {
+        if (key == Qt::Key_C) {
+            m_copiedTexture = side.texture;
+            if (statusMessage) { statusMessage(QString("Copied texture %1").arg(*m_copiedTexture)); }
+            return;
+        } else if (key == Qt::Key_V) {
+            side.texture = *m_copiedTexture;
+        } else if (key == 0) {
             const auto selection = selectTile(side.texture);
             if (!selection || !m_active) { return; }
             side.texture = *selection;
@@ -343,7 +353,13 @@ void MapView3D::editTexture(int key, bool scale)
         if (wallSideChanged) { wallSideChanged(wallId, reversed, side); }
     } else if (hit.kind == DUKE_SURFACE_FLOOR || hit.kind == DUKE_SURFACE_CEILING) {
         const bool floor = hit.kind == DUKE_SURFACE_FLOOR;
-        if (key == 0) {
+        if (key == Qt::Key_C) {
+            m_copiedTexture = floor ? sector.floorTexture : sector.ceilingTexture;
+            if (statusMessage) { statusMessage(QString("Copied texture %1").arg(*m_copiedTexture)); }
+            return;
+        } else if (key == Qt::Key_V) {
+            (floor ? sector.floorTexture : sector.ceilingTexture) = *m_copiedTexture;
+        } else if (key == 0) {
             int &tile = floor ? sector.floorTexture : sector.ceilingTexture;
             const auto selection = selectTile(tile);
             if (!selection || !m_active) { return; }
@@ -364,7 +380,7 @@ void MapView3D::editTexture(int key, bool scale)
         if (sectorChanged) { sectorChanged(hit.sector_index, sector); }
     } else { return; }
     if (statusMessage) {
-        statusMessage(key == 0 ? "Texture changed" : scale ? "Texture size changed" : "Texture offset changed");
+        statusMessage((key == 0 || key == Qt::Key_V) ? "Texture changed" : scale ? "Texture size changed" : "Texture offset changed");
     }
 }
 
