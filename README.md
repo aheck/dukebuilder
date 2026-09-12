@@ -33,7 +33,8 @@ meson setup ../libduke/build-render ../libduke \
 meson compile -C ../libduke/build-render
 ```
 
-Duke Builder links libduke and libduke-render from `../libduke/build-render`.
+Duke Builder statically links libduke and libduke-render from `../libduke/build-render`.
+Both archives are required; no libduke shared libraries are needed at runtime.
 Qt's OpenGLWidgets module hosts the renderer; no Sokol window or event loop is used.
 
 Configure and build the application:
