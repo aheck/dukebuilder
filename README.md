@@ -309,3 +309,74 @@ chmod +x DukeBuilder-0.1.0-x86_64.AppImage
 
 The desktop entry intentionally takes no filename argument: opening maps is
 currently handled through Duke Builder's File menu.
+
+## Windows NSIS installer
+
+The installer packaging is ready for a **future Windows x64 build**. It does not
+cross-compile Duke Builder or resolve the remaining Windows build dependencies.
+It uses NSIS 3 (`makensis`) and Python 3 and can run on either Linux or Windows.
+
+Prepare a clean deployment directory, for example:
+
+```text
+windows-stage/
+  dukebuilder.exe
+  ...required runtime DLLs...
+  platforms/qwindows.dll      # for dynamic Qt builds
+  ...other required Qt plugins...
+  licenses/...               # redistribution notices for bundled components
+```
+
+Put the executable at the root, not in `bin/`. Include the Windows dependencies
+of the actual release build: use Qt's `windeployqt --release` for a dynamic Qt
+build, then add any dependencies that it does not collect. For static Qt, ensure
+the Windows platform plugin is linked into the executable. Supply compiler
+runtime dependencies as appropriate for the toolchain. Keep libduke and its
+renderer statically linked. The staging folder must not contain game archives,
+maps, EDuke32, debug symbols or development libraries. Users supply game data
+and configure EDuke32 separately after installation.
+
+From the repository root on either operating system:
+
+```sh
+python scripts/build-windows-installer.py windows-stage --check-only
+python scripts/build-windows-installer.py windows-stage
+```
+
+Use `python3` on Linux if necessary. If NSIS is not on PATH, pass its compiler:
+
+```powershell
+python scripts/build-windows-installer.py windows-stage --makensis "C:\Program Files (x86)\NSIS\makensis.exe"
+```
+
+The output is `dist/DukeBuilder-0.1.0-x64-Setup.exe`. The version defaults to
+`meson.build`; `--version 0.1.0-beta.1` and `--output-dir PATH` override it.
+The wrapper checks PE headers for x64 executable/DLL payloads, rejects Linux
+binaries and invalid Windows filenames, generates an explicit installation and
+uninstallation file list, and runs the compiler with warnings treated as errors.
+An existing output installer is replaced only after successful compilation.
+These checks cannot establish that every runtime DLL is present or that the
+application runs correctly on Windows.
+
+Installer behavior:
+
+- Current-user installation in `%LOCALAPPDATA%\Programs\Duke Builder` by default,
+  with a selectable destination and no administrator prompt.
+- Windows 10 or newer, 64-bit; the application's OpenGL 4.1 requirement remains.
+- Start Menu shortcuts, an optional desktop shortcut, and an entry in Windows'
+  installed-apps list.
+- Upgrades invoke the previous uninstaller first so obsolete packaged DLLs are
+  removed. Close Duke Builder before installing or uninstalling.
+- Uninstall removes only explicitly packaged files and empty directories. It
+  preserves user maps, game data and Qt application settings. Installer metadata
+  uses a separate registry key from those settings.
+- Silent installation/uninstallation uses `/S`. No `.map` file association is
+  registered because command-line map opening is not yet implemented.
+
+`python3 tests/windows_installer_test.py` checks payload validation and manifest
+handling without Windows. The NSIS script has also been compiled with NSIS 3.11
+on Linux using synthetic test payloads; those are **not runnable Duke Builder
+releases**. Before distributing a real installer, test installation, 3D rendering,
+upgrades, silent mode, and uninstall preservation of user files on Windows with
+no development tools installed. Release signing is a separate step and is not
+configured here.
