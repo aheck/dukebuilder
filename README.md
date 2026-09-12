@@ -209,11 +209,11 @@ it can render with; it does not combine multiple archives.
 - **H:** toggle surface highlighting (enabled on entry). A crosshair marks the
   aim point while captured; a cross cursor follows the released mouse.
 - **Mouse wheel:** raise/lower the highlighted sprite, floor or ceiling by 1024 Build Z
-  units per notch. Wheel-up raises it; wheel-down lowers it. Walls are unaffected.
+  units per notch, or 128 with **Shift** held. Wheel-up raises it; wheel-down lowers it. Walls are unaffected.
   Height edits update the map, persist on return to 2D, and are saved normally.
   Changes that would invalidate the map are rejected with a status message.
-- **Shift+wheel:** change the highlighted floor/ceiling slope by 256 per notch.
-  **Ctrl+wheel:** use fine steps of 16 (also when Shift is held). Wheel-up
+- **Alt+wheel:** change the highlighted floor/ceiling slope by 256 per notch.
+  **Shift+Alt+wheel:** use fine steps of 16. Wheel-up
   increases the signed slope; wheel-down decreases it. Nonzero slopes enable
   the sloping flag; returning to zero clears it. Set the first wall in 2D to
   choose the slope axis. Changes that invalidate the sector are rejected.

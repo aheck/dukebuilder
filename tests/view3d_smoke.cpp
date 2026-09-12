@@ -82,11 +82,13 @@ int main(int argc, char **argv)
     QTest::qWait(150);
     QTest::keyClick(view, Qt::Key_Escape);
     require(view->cursor().shape() == Qt::CrossCursor, "released cross cursor");
-    const auto wheel = [&](double y, int delta, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+    const auto wheel = [&](double y, int delta, Qt::KeyboardModifiers modifiers = Qt::NoModifier,
+                           bool horizontal = false) {
         QPoint point(view->width()/2, int(view->height()*y));
         QCursor::setPos(view->mapToGlobal(point));
         QTest::qWait(50);
-        QWheelEvent event(QPointF(point), QPointF(view->mapToGlobal(point)), {}, QPoint(0,delta),
+        QWheelEvent event(QPointF(point), QPointF(view->mapToGlobal(point)), {},
+                          horizontal ? QPoint(delta,0) : QPoint(0,delta),
                           Qt::NoButton, modifiers, Qt::NoScrollPhase, false);
         QApplication::sendEvent(view, &event);
         QTest::qWait(100);
@@ -107,23 +109,42 @@ int main(int argc, char **argv)
     QTest::keyClick(view, Qt::Key_H);
     wheel(0.9,-120);
     require(editor->document().sectors()[0].floorz == 0, "wheel lowers floor");
-    const auto beforeSlope = editor->document().sectors()[0];
     wheel(0.9,120,Qt::ShiftModifier);
+    require(editor->document().sectors()[0].floorz == -128
+            && editor->document().sectors()[0].floorheinum == 0, "Shift finely raises floor without slope");
+    wheel(0.9,-120,Qt::ShiftModifier);
+    const auto ceilingBeforeFine = editor->document().sectors()[0].ceilingz;
+    wheel(0.1,120,Qt::ShiftModifier);
+    require(editor->document().sectors()[0].ceilingz == ceilingBeforeFine - 128,
+            "Shift finely raises ceiling");
+    wheel(0.1,-120,Qt::ShiftModifier);
+    const auto beforeSlope = editor->document().sectors()[0];
+    wheel(0.9,120,Qt::AltModifier,true);
+    require(editor->document().sectors()[0].floorheinum == 256,
+            "Alt horizontal wheel delta raises slope on X11");
+    wheel(0.9,-120,Qt::AltModifier,true);
+    require(editor->document().sectors()[0] == beforeSlope,
+            "Alt horizontal wheel restores flat floor");
+    wheel(0.1,-120,Qt::AltModifier | Qt::ShiftModifier,true);
+    require(editor->document().sectors()[0].ceilingheinum == -16,
+            "Shift Alt horizontal wheel uses fine slope");
+    wheel(0.1,120,Qt::AltModifier | Qt::ShiftModifier,true);
+    wheel(0.9,120,Qt::AltModifier);
     require(editor->document().sectors()[0].floorheinum == 256
             && (editor->document().sectors()[0].floorstat & 2), "coarse floor slope enables flag");
-    wheel(0.9,-120,Qt::ShiftModifier);
+    wheel(0.9,-120,Qt::AltModifier);
     require(editor->document().sectors()[0].floorheinum == 0
             && !(editor->document().sectors()[0].floorstat & 2), "zero floor slope clears flag");
-    wheel(0.1,-120,Qt::ControlModifier);
+    wheel(0.1,-120,Qt::AltModifier | Qt::ShiftModifier);
     require(editor->document().sectors()[0].ceilingheinum == -16
             && (editor->document().sectors()[0].ceilingstat & 2), "fine negative ceiling slope");
-    wheel(0.1,120,Qt::ControlModifier | Qt::ShiftModifier);
+    wheel(0.1,120,Qt::AltModifier | Qt::ShiftModifier);
     require(editor->document().sectors()[0].ceilingheinum == 0
-            && !(editor->document().sectors()[0].ceilingstat & 2), "Ctrl takes precedence and zero clears ceiling flag");
-    wheel(0.9,60,Qt::ShiftModifier);
-    wheel(0.9,60,Qt::ControlModifier);
+            && !(editor->document().sectors()[0].ceilingstat & 2), "fine Alt slope clears ceiling flag");
+    wheel(0.9,60,Qt::AltModifier);
+    wheel(0.9,60,Qt::AltModifier | Qt::ShiftModifier);
     require(editor->document().sectors()[0].floorheinum == 0, "modifier change resets partial notch");
-    wheel(0.9,60,Qt::ControlModifier);
+    wheel(0.9,60,Qt::AltModifier | Qt::ShiftModifier);
     require(editor->document().sectors()[0].floorheinum == 16, "fine slope accumulation");
     require(editor->document().sectors()[0].walls == beforeSlope.walls
             && editor->document().sectors()[0].vertices == beforeSlope.vertices
@@ -355,6 +376,9 @@ int main(int argc, char **argv)
     require(editor->document().sprites()[targetId].z == -7168, "wheel raises highlighted sprite");
     wheel(0.5,-120);
     require(editor->document().sprites()[targetId] == beforeWheel, "wheel lowers sprite and preserves other properties");
+    wheel(0.5,120,Qt::ShiftModifier);
+    require(editor->document().sprites()[targetId].z == -6272, "Shift finely raises sprite");
+    wheel(0.5,-120,Qt::ShiftModifier);
     QTest::keyClick(view, Qt::Key_O);
     const auto placed3D = editor->document().sprites()[targetId];
     require(placed3D.position == QPointF(4095,0) && placed3D.angle == 180
@@ -370,6 +394,30 @@ int main(int argc, char **argv)
             && placedReload.sprites()[targetId].position == placed3D.position
             && placedReload.sprites()[targetId].z == -7168,
             "saved 3D sprite placement");
+    MapDocument nested;
+    require(nested.addPolyline({{-8192,-8192},{8192,-8192},{8192,8192},{-8192,8192}}, true), "nested outer room");
+    nested.setSectorCeilingZ(0,-32768);
+    require(nested.addPolyline({{-4096,-4096},{4096,-4096},{4096,4096},{-4096,4096}}, true), "nested inner room");
+    nested.setPlayerStartPosition({-6144,0});
+    nested.setPlayerStartZ(-6144);
+    require(saveBuildMap(nested,path,error) && editor->openMap(path,error), "load nested fixture");
+    const auto actualStart = editor->document().playerStart();
+    editor->centerOn(QPointF(0,0));
+    editor->setFocus();
+    QCursor::setPos(editor->viewport()->mapToGlobal(editor->mapFromScene(QPointF(0,0))));
+    QTest::keyClick(editor, Qt::Key_Q);
+    QTest::qWait(200);
+    QTest::keyClick(view, Qt::Key_Escape);
+    // Cross the preview-only starting Z (-6144) in one edit while the floor
+    // is still under the pointer. The old snapshot validation rejected this.
+    wheel(0.9,8*120);
+    require(editor->document().sectors()[1].floorz == -8192,
+            "nested floor can rise past temporary preview start Z");
+    require(editor->document().sectors()[0].floorz == 0,
+            "raising nested floor preserves parent height");
+    QTest::keyClick(view, Qt::Key_Q);
+    require(editor->document().playerStart() == actualStart, "preview rebuild preserves actual player start");
+    require(editor->saveMap(path,error), "save raised nested floor");
     std::cout << "3D toggle, rendering, height and texture edits, validation and save persistence passed\n";
     return 0;
 }

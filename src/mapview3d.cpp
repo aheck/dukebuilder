@@ -234,10 +234,12 @@ void MapView3D::wheelEvent(QWheelEvent *event)
         m_wheelRemainder = 0;
         return;
     }
-    // Ctrl takes precedence if both modifiers are held. Do not carry partial
-    // notches between height editing and either slope step size.
-    const int mode = event->modifiers().testFlag(Qt::ControlModifier) ? 2
-        : event->modifiers().testFlag(Qt::ShiftModifier) ? 1 : 0;
+    // Keep partial notches separate for height/slope and coarse/fine edits.
+    const bool fine = event->modifiers().testFlag(Qt::ShiftModifier);
+    const bool slopeEdit = hit.kind != DUKE_SURFACE_SPRITE
+        && event->modifiers().testFlag(Qt::AltModifier);
+    const int mode = (slopeEdit ? 2 : 0) + (fine ? 1 : 0);
+    const qreal heightStep = fine ? 128.0 : 1024.0;
     if (mode != m_wheelMode || hit.kind != m_wheelTarget.kind
         || hit.sector_index != m_wheelTarget.sector_index
         || hit.sprite_index != m_wheelTarget.sprite_index) {
@@ -245,7 +247,12 @@ void MapView3D::wheelEvent(QWheelEvent *event)
     }
     m_wheelMode = mode;
     m_wheelTarget = hit;
-    m_wheelRemainder += event->angleDelta().y();
+    // Qt's X11 backend transposes wheel axes while Alt is held. Accept that
+    // representation as well as vertical deltas from other platforms.
+    const QPoint delta = event->angleDelta();
+    const int wheelDelta = delta.y() != 0 ? delta.y()
+        : event->modifiers().testFlag(Qt::AltModifier) ? delta.x() : 0;
+    m_wheelRemainder += wheelDelta;
     const int steps = m_wheelRemainder / 120;
     m_wheelRemainder %= 120;
     if (hit.kind == DUKE_SURFACE_SPRITE) {
@@ -253,7 +260,7 @@ void MapView3D::wheelEvent(QWheelEvent *event)
             || std::size_t(hit.sprite_index) >= m_snapshot.sprites().size()) { return; }
         auto sprite = m_snapshot.sprites()[hit.sprite_index];
         // Build Z increases downward. Sprite modifiers do not edit sector slopes.
-        sprite.z -= steps * 1024.0;
+        sprite.z -= steps * heightStep;
         auto candidate = m_snapshot;
         candidate.setSprite(hit.sprite_index, sprite);
         if (!applySnapshot(std::move(candidate))) { return; }
@@ -268,11 +275,11 @@ void MapView3D::wheelEvent(QWheelEvent *event)
         || std::size_t(hit.sector_index) >= m_snapshot.sectors().size()) { return; }
     const bool floor = hit.kind == DUKE_SURFACE_FLOOR;
     const auto &sector = m_snapshot.sectors()[hit.sector_index];
-    if (mode != 0) {
+    if (slopeEdit) {
         auto changed = sector;
         int &slope = floor ? changed.floorheinum : changed.ceilingheinum;
         int &flags = floor ? changed.floorstat : changed.ceilingstat;
-        slope = std::clamp(slope + steps * (mode == 2 ? 16 : 256), -32768, 32767);
+        slope = std::clamp(slope + steps * (fine ? 16 : 256), -32768, 32767);
         if (slope != 0) { flags |= 2; }
         else { flags &= ~2; }
         if (changed == sector) { return; }
@@ -287,7 +294,7 @@ void MapView3D::wheelEvent(QWheelEvent *event)
         return;
     }
     // Build Z increases downward: wheel-up raises either surface.
-    const qreal height = (floor ? sector.floorz : sector.ceilingz) - steps * 1024.0;
+    const qreal height = (floor ? sector.floorz : sector.ceilingz) - steps * heightStep;
     auto candidate = m_snapshot;
     if (floor) { candidate.setSectorFloorZ(hit.sector_index, height); }
     else { candidate.setSectorCeilingZ(hit.sector_index, height); }
@@ -307,6 +314,13 @@ bool MapView3D::applySnapshot(MapDocument candidate)
     // The renderer owns immutable snapshots, so retain the old one on failure.
     QString error;
     DukeRenderer *replacement = nullptr;
+    // The snapshot's start is only a validation placeholder, not the live
+    // camera or the document's player start. Keep it inside the edited sector
+    // when a floor/ceiling moves past its previous Z.
+    if (!placePreviewCamera(candidate, candidate.playerStart().position, error)) {
+        if (statusMessage) { statusMessage("Cannot edit surface: " + error); }
+        return false;
+    }
     makeCurrent();
     const bool ok = withBuildMap(candidate, error, [&](DukeMapFile &map, QString &diagnostic) {
         DukeGrpFile *grp = duke_grp_new();
