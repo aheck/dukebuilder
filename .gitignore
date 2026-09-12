@@ -1,6 +1,7 @@
 /build/
 /build-*/
 /conan/
+/dist/
 __pycache__/
 *.py[cod]
 compile_commands.json

@@ -264,3 +264,48 @@ and sits slightly off the wall to avoid flicker. Height, texture, tags and
 unrelated flags are preserved. This is a one-time placement; it does not follow
 later wall movement. This intentionally differs from Build's directional
 ornament command.
+
+## Linux AppImage
+
+The optional packaging script creates a single x86-64 AppImage, with libduke
+and its renderer linked statically and the remaining redistributable runtime
+libraries collected by linuxdeploy. Game data and EDuke32 are not included.
+
+After configuring and building libduke with its renderer enabled, configure a
+separate release build (the normal development build enables AddressSanitizer):
+
+```sh
+meson setup build-appimage --native-file=conan/conan_meson_native.ini \
+  --buildtype=release -Db_sanitize=none --prefix=/usr
+./scripts/build-appimage.sh build-appimage
+```
+
+The result is `dist/DukeBuilder-0.1.0-x86_64.AppImage`, using the version from
+Meson. An optional second argument chooses the output directory. The script
+builds the project, stages only runtime installation files, bundles dependencies,
+and removes its temporary AppDir after packaging. Existing artifacts are replaced
+only after packaging succeeds. It requires Meson, Python 3, curl, coreutils and
+binutils (`readelf` and `strip`). The first invocation downloads a pinned linuxdeploy release
+with its bundled AppImage output plugin and a pinned AppImage runtime; every
+invocation verifies both SHA-256 checksums.
+The tool is cached in `dist/.tools`. Packaging uses extraction mode, so FUSE is
+not required on the build machine. The current Conan Qt configuration links its
+XCB and GLX plugins statically; a dynamic Qt build would need additional deployment
+support.
+
+For public releases, build **all dependencies, including Qt and libduke**, on the
+oldest Linux baseline you intend to support, ideally in a reproducible container.
+Building an AppImage on a newer distribution does not lower its glibc requirement.
+The host still needs working graphics drivers and OpenGL 4.1. Test the artifact
+on a clean supported desktop, including loading game data and entering 3D mode.
+Users can run it with:
+
+```sh
+chmod +x DukeBuilder-0.1.0-x86_64.AppImage
+./DukeBuilder-0.1.0-x86_64.AppImage
+# Without FUSE:
+./DukeBuilder-0.1.0-x86_64.AppImage --appimage-extract-and-run
+```
+
+The desktop entry intentionally takes no filename argument: opening maps is
+currently handled through Duke Builder's File menu.

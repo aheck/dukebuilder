@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Duke Builder
+Comment=Create and edit Duke Nukem 3D maps
+Exec=dukebuilder
+Icon=dukebuilder
+Terminal=false
+Categories=Development;
+Keywords=Duke;Build;Map;Editor;

@@ -100,7 +100,13 @@ executable(
   dependencies: app_dependencies + renderer_dependencies,
   include_directories: libduke_inc,
   install: true,
+  install_tag: 'runtime',
 )
+
+install_data('packaging/dukebuilder.desktop',
+  install_dir: get_option('datadir') / 'applications', install_tag: 'runtime')
+install_data('packaging/dukebuilder.svg',
+  install_dir: get_option('datadir') / 'icons/hicolor/scalable/apps', install_tag: 'runtime')
 
 previewcamera_test = executable('previewcamera-test',
   ['tests/previewcamera_test.cpp', 'src/previewcamera.cpp', 'src/mapdocument.cpp', 'src/mapsave.cpp'],
