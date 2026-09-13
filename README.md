@@ -438,3 +438,7 @@ sector side uses its incoming wall's properties. Sector properties and loops are
 preserved. Junctions with more than two incident walls, loops reduced below three
 vertices, intersecting/inverted boundaries, and changes to a first wall needed by
 slopes or relative texture alignment are rejected without changing the map.
+
+Sprites display a facing arrow in every 2D mode. It follows the sprite's Angle
+property (0° right, 90° down, 180° left, 270° up), while the texture thumbnail
+stays upright. The arrow stays visible at a fixed screen size when zooming.

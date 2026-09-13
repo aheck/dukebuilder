@@ -22,10 +22,12 @@ public:
     explicit TextureBrowserWindow(QWidget *parent = nullptr);
 
     void browse();
-    void setUsedTexturesProvider(std::function<std::set<int>()> provider)
-    { m_usedTexturesProvider = std::move(provider); }
-    [[nodiscard]] std::optional<Selection> chooseTexture(
-        std::optional<int> currentTexture = std::nullopt);
+
+    void setUsedTexturesProvider(std::function<std::set<int>()> provider) {
+        m_usedTexturesProvider = std::move(provider);
+    }
+
+    [[nodiscard]] std::optional<Selection> chooseTexture(std::optional<int> currentTexture = std::nullopt);
     [[nodiscard]] QImage textureImage(int tile);
 
 private:

@@ -32,8 +32,7 @@ void TextureBrowserWindow::browse()
     exec();
 }
 
-std::optional<TextureBrowserWindow::Selection> TextureBrowserWindow::chooseTexture(
-    std::optional<int> currentTexture)
+std::optional<TextureBrowserWindow::Selection> TextureBrowserWindow::chooseTexture(std::optional<int> currentTexture)
 {
     m_browser->setUsedTiles(m_usedTexturesProvider ? m_usedTexturesProvider() : std::set<int>{});
     m_browser->reload();

@@ -350,9 +350,10 @@ private:
 class SpriteItem final : public QGraphicsRectItem
 {
 public:
-    explicit SpriteItem(const QImage &texture)
+    explicit SpriteItem(const QImage &texture, qreal angle)
         : QGraphicsRectItem(-22.0, -18.0, 44.0, 36.0)
         , m_texture(texture)
+        , m_angle(angle)
     {
         setFlag(QGraphicsItem::ItemIgnoresTransformations);
         setInteractive(false);
@@ -368,6 +369,11 @@ public:
             setSelected(false);
             update();
         }
+    }
+
+    QRectF boundingRect() const override
+    {
+        return QRectF(-39, -39, 78, 78);
     }
 
 protected:
@@ -401,10 +407,26 @@ protected:
             isSelected() ? selectedColor : (m_hovered ? hoverColor : vertexColor),
             (isSelected() || m_hovered) ? 2.5 : 1.5));
         painter->drawRoundedRect(body, 8.0, 8.0);
+        // Build angle zero points right; positive angles turn clockwise in
+        // the map's Y-down coordinates. Keep the thumbnail upright and place
+        // a fixed-pixel arrow outside it, visible at every zoom level.
+        painter->save();
+        painter->rotate(m_angle);
+        QPainterPath facing;
+        facing.moveTo(35, 0);
+        facing.lineTo(26, -5);
+        facing.lineTo(26, 5);
+        facing.closeSubpath();
+        painter->setPen(cosmeticPen(QColor(24,26,31), 1.5));
+        painter->setBrush(isSelected() ? selectedColor : (m_hovered ? hoverColor : vertexColor));
+        painter->drawPath(facing);
+        painter->restore();
+
     }
 
 private:
     QImage m_texture;
+    qreal m_angle = 0;
     bool m_hovered = false;
 };
 
@@ -2098,7 +2120,7 @@ void MapEditor::rebuildScene()
     for (MapDocument::SpriteId spriteId = 0;
          spriteId < m_document.sprites().size(); ++spriteId) {
         const MapDocument::Sprite &sprite = m_document.sprites()[spriteId];
-        auto *item = new SpriteItem(m_spriteTextures.value(sprite.texture));
+        auto *item = new SpriteItem(m_spriteTextures.value(sprite.texture), sprite.angle);
         item->setInteractive(m_mode == Mode::Sprites);
         item->setData(spriteIdRole, static_cast<qulonglong>(spriteId));
         m_scene->addItem(item);
