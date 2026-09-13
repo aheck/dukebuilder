@@ -420,6 +420,106 @@ std::optional<MapDocument::SectorId> MapDocument::joinSectors(
     return sectorMap[donor];
 }
 
+bool MapDocument::removeSectors(const std::vector<SectorId> &ids, QString &error)
+{
+    error.clear();
+    const std::set<SectorId> removed(ids.begin(), ids.end());
+    if (removed.empty() || *removed.rbegin() >= m_sectors.size()) {
+        error = "Select sectors to delete.";
+        return false;
+    }
+    auto candidate = *this;
+    std::vector<std::optional<SectorId>> sectorMap(m_sectors.size());
+    candidate.m_sectors.clear();
+    for (SectorId s = 0; s < m_sectors.size(); ++s) {
+        if (removed.count(s)) { continue; }
+        sectorMap[s] = candidate.m_sectors.size();
+        candidate.m_sectors.push_back(m_sectors[s]);
+    }
+    std::vector<bool> usedWall(m_walls.size());
+    for (const auto &sector : candidate.m_sectors) {
+        for (auto w : sector.walls) { usedWall[w] = true; }
+    }
+    std::vector<WallId> wallMap(m_walls.size());
+    candidate.m_walls.clear();
+    for (WallId w = 0; w < m_walls.size(); ++w) {
+        const auto &old = m_walls[w];
+        // Retain unrelated unfinished lines, but remove orphaned sector walls.
+        if (!usedWall[w] && (old.forwardSector || old.reverseSector)) { continue; }
+        wallMap[w] = candidate.m_walls.size();
+        auto wall = old;
+        if (wall.forwardSector) { wall.forwardSector = sectorMap[*wall.forwardSector]; }
+        if (wall.reverseSector) { wall.reverseSector = sectorMap[*wall.reverseSector]; }
+        candidate.m_walls.push_back(wall);
+    }
+    for (auto &sector : candidate.m_sectors) {
+        for (auto &w : sector.walls) { w = wallMap[w]; }
+    }
+    std::vector<QPainterPath> paths;
+    for (const auto &sector : m_sectors) {
+        QPainterPath path;
+        path.setFillRule(Qt::OddEvenFill);
+        for (std::size_t i = 0; i < sector.vertices.size(); ++i) {
+            const auto p = m_vertices[sector.vertices[i]].position;
+            if (i == 0 || std::find(sector.loopStarts.begin(), sector.loopStarts.end(), i) != sector.loopStarts.end()) {
+                path.moveTo(p);
+            } else { path.lineTo(p); }
+            if (sector.nextWallIndex(i) <= i) { path.closeSubpath(); }
+        }
+        paths.push_back(path);
+    }
+    const auto ownerAt = [&](QPointF position, std::optional<SectorId> hint) {
+        if (hint && *hint < paths.size() && paths[*hint].contains(position)) { return hint; }
+        std::optional<SectorId> found;
+        for (SectorId s = 0; s < paths.size(); ++s) {
+            if (!paths[s].contains(position)) { continue; }
+            if (found) { return std::optional<SectorId>{}; }
+            found = s;
+        }
+        return found;
+    };
+    std::vector<int> spriteMap(m_sprites.size(), -1);
+    candidate.m_sprites.clear();
+    for (SpriteId s = 0; s < m_sprites.size(); ++s) {
+        auto sprite = m_sprites[s];
+        auto owner = ownerAt(sprite.position, sprite.sectorId);
+        if (owner && removed.count(*owner)) { continue; }
+        sprite.sectorId = owner ? sectorMap[*owner] : std::nullopt;
+        spriteMap[s] = static_cast<int>(candidate.m_sprites.size());
+        candidate.m_sprites.push_back(sprite);
+    }
+    for (auto &sprite : candidate.m_sprites) {
+        if (sprite.owner >= 0 && std::size_t(sprite.owner) < spriteMap.size()) {
+            sprite.owner = spriteMap[sprite.owner];
+        }
+    }
+    const auto playerOwner = ownerAt(m_playerStart.position, m_playerStart.sectorId);
+    candidate.m_playerStart.sectorId = playerOwner ? sectorMap[*playerOwner] : std::nullopt;
+    std::vector<bool> usedVertex(m_vertices.size());
+    for (const auto &wall : candidate.m_walls) { usedVertex[wall.start] = usedVertex[wall.end] = true; }
+    std::vector<VertexId> vertexMap(m_vertices.size());
+    candidate.m_vertices.clear();
+    for (VertexId v = 0; v < m_vertices.size(); ++v) {
+        if (usedVertex[v]) { vertexMap[v] = candidate.m_vertices.size(); candidate.m_vertices.push_back(m_vertices[v]); }
+    }
+    for (auto &wall : candidate.m_walls) {
+        wall.start = vertexMap[wall.start]; wall.end = vertexMap[wall.end];
+    }
+    for (auto &sector : candidate.m_sectors) {
+        for (auto &v : sector.vertices) { v = vertexMap[v]; }
+    }
+    // The general face builder would fill an empty hole back in. Detect that
+    // situation without replacing the deliberately preserved sector loops.
+    if (candidate.m_sectors.empty() && candidate.m_walls.empty()) { candidate.m_complexTopology = false; }
+    if (!candidate.m_complexTopology) {
+        auto rebuilt = candidate;
+        rebuilt.rebuildSectors();
+        candidate.m_complexTopology = rebuilt.m_sectors != candidate.m_sectors;
+    }
+    *this = std::move(candidate);
+    return true;
+}
+
 void MapDocument::removeWalls(const std::vector<WallId> &wallIds)
 {
     if (!supportsLineDeletion()) return;

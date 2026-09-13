@@ -1845,6 +1845,25 @@ void MapEditor::stickSelectedSpriteToWall()
 
 void MapEditor::keyPressEvent(QKeyEvent *event)
 {
+    if (event->key() == Qt::Key_Delete && m_mode == Mode::Sectors) {
+        if (!m_sectorSelectionOrder.empty()) {
+            const auto count = m_sectorSelectionOrder.size();
+            QString error;
+            if (m_document.removeSectors(m_sectorSelectionOrder, error)) {
+                m_draggingVertices = false;
+                m_draggedVertices.clear();
+                m_draggedWalls.clear();
+                m_draggedSectors.clear();
+                setCursor(Qt::CrossCursor);
+                rebuildScene();
+                updateProperties();
+                reportStatus(QString("%1 sector(s) and their sprites deleted. Shared boundaries remain solid walls; move the player start if it was inside.").arg(count));
+            } else { reportStatus(error); }
+        }
+        event->accept();
+        return;
+    }
+
     if (event->key() == Qt::Key_Delete && m_mode == Mode::Lines) {
         if (!m_document.supportsLineDeletion()) {
             reportStatus("Line deletion is not yet supported for this imported map's void loops or effect sectors.");

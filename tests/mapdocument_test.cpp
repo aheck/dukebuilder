@@ -370,4 +370,29 @@ int main()
             && ringJoin.sectors()[0].loopStarts.size() == 2, "Join retains unselected hole");
     checkSideReferences(ringJoin);
 
+    {
+    MapDocument deletion;
+    require(deletion.addPolyline({{0,0},{4096,0},{4096,4096},{0,4096}},true), "Delete outer fixture");
+    require(deletion.addPolyline({{1024,1024},{3072,1024},{3072,3072},{1024,3072}},true), "Delete inner fixture");
+    const auto outerBefore = deletion.sectors()[0];
+    const auto inside = deletion.addSprite({2048,2048});
+    const auto outside = deletion.addSprite({512,512});
+    auto outsideSprite = deletion.sprites()[outside];
+    outsideSprite.owner = static_cast<int>(inside);
+    deletion.setSprite(outside,outsideSprite);
+    require(deletion.removeSectors({1},error), "Delete inner sector");
+    require(deletion.sectors().size() == 1 && deletion.walls().size() == 8
+            && deletion.sectors()[0].loopStarts.size() == 2, "Deletion retains hole loop");
+    require(deletion.sprites().size() == 1 && deletion.sprites()[0].position == QPointF(512,512)
+            && deletion.sprites()[0].owner == -1, "Deletion removes contained sprites and remaps owners");
+    require(deletion.sectors()[0].floorz == outerBefore.floorz, "Deletion retains outer properties");
+    require(std::none_of(deletion.walls().begin(),deletion.walls().end(),[](const auto &w){return w.isTwoSided();}), "Hole walls are solid");
+    checkSideReferences(deletion);
+    require(!deletion.supportsTopologyEditing(), "Void loop cannot be filled accidentally by face rebuilding");
+    const auto deletionBefore = deletion;
+    require(!deletion.removeSectors({99},error) && deletion == deletionBefore, "Invalid deletion does not mutate map");
+    require(deletion.removeSectors({0},error) && deletion.sectors().empty()
+            && deletion.walls().empty() && deletion.vertices().empty(), "Delete final sector cleans up geometry");
+    }
+
 }

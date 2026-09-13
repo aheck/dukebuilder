@@ -415,3 +415,19 @@ relative texture alignment, choose a surviving outer first wall before joining.
 The source heights replace those of the other selected sectors; check player and
 sprite placement afterward. A source slope that crosses the opposite surface in
 the enlarged sector is rejected.
+
+## Deleting sectors
+
+In **Sectors mode**, select a sector (Shift-click to select more) and press
+**Delete**. This removes the selected sector interiors and their sprites.
+Boundaries still used by neighboring sectors remain, with those neighbors' wall
+properties intact, and become one-sided solid walls. Deleting an inner sector
+therefore leaves a void hole in its surrounding sector; it does not fill the hole
+or merge the two sectors. The result saves and reloads as a sector with inner loops.
+
+The player-start marker is retained. If its sector was deleted, move it into a
+remaining sector before saving. Maps containing void holes currently share the
+existing imported-void restrictions on drawing new sectors and deleting lines;
+property editing, vertex insertion/movement, sector joining and sector deletion
+remain available. These restrictions prevent the face builder from recreating
+the deleted interior.

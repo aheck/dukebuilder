@@ -441,6 +441,20 @@ int main(int argc, char **argv)
     MapDocument joinReload;
     require(joinReload.openMap(path,error) && joinReload.sectors().size() == 1
             && joinReload.sectors()[0].floorTexture == 42, "joined map reload preserves source properties");
+    MapDocument holeRoom;
+    require(holeRoom.addPolyline({{0,0},{4096,0},{4096,4096},{0,4096}},true), "hole deletion outer");
+    require(holeRoom.addPolyline({{1024,1024},{3072,1024},{3072,3072},{1024,3072}},true), "hole deletion inner");
+    holeRoom.setPlayerStartPosition({512,512});
+    require(saveBuildMap(holeRoom,path,error) && editor->openMap(path,error), "load hole deletion fixture");
+    editor->setMode(MapEditor::Mode::Sectors);
+    editor->centerOn(QPointF(2048,2048));
+    QTest::mouseClick(editor->viewport(),Qt::LeftButton,Qt::NoModifier,editor->mapFromScene(QPointF(2048,2048)));
+    QTest::keyClick(editor,Qt::Key_Delete);
+    require(editor->document().sectors().size() == 1 && editor->hasUnsavedChanges(), "Delete removes selected inner sector");
+    require(editor->saveMap(path,error), "save sector with void hole");
+    MapDocument holeReload;
+    require(holeReload.openMap(path,error) && holeReload.sectors().size() == 1
+            && holeReload.sectors()[0].loopStarts.size() == 2, "Void hole persists after reload");
     std::cout << "3D toggle, rendering, height and texture edits, validation and save persistence passed\n";
     return 0;
 }
