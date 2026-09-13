@@ -431,3 +431,10 @@ existing imported-void restrictions on drawing new sectors and deleting lines;
 property editing, vertex insertion/movement, sector joining and sector deletion
 remain available. These restrictions prevent the face builder from recreating
 the deleted interior.
+
+In **Vertices mode**, **Delete** removes selected vertices and reconnects their
+neighboring walls, including both sides of a shared wall midpoint. Each surviving
+sector side uses its incoming wall's properties. Sector properties and loops are
+preserved. Junctions with more than two incident walls, loops reduced below three
+vertices, intersecting/inverted boundaries, and changes to a first wall needed by
+slopes or relative texture alignment are rejected without changing the map.

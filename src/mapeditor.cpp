@@ -1845,6 +1845,24 @@ void MapEditor::stickSelectedSpriteToWall()
 
 void MapEditor::keyPressEvent(QKeyEvent *event)
 {
+    if (event->key() == Qt::Key_Delete && m_mode == Mode::Vertices) {
+        std::vector<MapDocument::VertexId> ids;
+        for (auto *item : m_scene->selectedItems()) {
+            if (dynamic_cast<VertexItem *>(item)) { ids.push_back(item->data(vertexIdRole).toULongLong()); }
+        }
+        if (!ids.empty()) {
+            QString error;
+            if (m_document.removeVertices(ids,error)) {
+                m_draggingVertices = false;
+                m_draggedVertices.clear();
+                rebuildScene();
+                updateProperties();
+                reportStatus(QString("%1 vertex/vertices deleted").arg(ids.size()));
+            } else { reportStatus(error); }
+        }
+        event->accept(); return;
+    }
+
     if (event->key() == Qt::Key_Delete && m_mode == Mode::Sectors) {
         if (!m_sectorSelectionOrder.empty()) {
             const auto count = m_sectorSelectionOrder.size();

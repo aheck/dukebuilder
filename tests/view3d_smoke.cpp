@@ -455,6 +455,18 @@ int main(int argc, char **argv)
     MapDocument holeReload;
     require(holeReload.openMap(path,error) && holeReload.sectors().size() == 1
             && holeReload.sectors()[0].loopStarts.size() == 2, "Void hole persists after reload");
+    MapDocument vertexRoom;
+    require(vertexRoom.addPolyline({{0,0},{2048,0},{4096,0},{4096,4096},{0,4096}},true), "vertex deletion UI fixture");
+    vertexRoom.setPlayerStartPosition({1024,1024});
+    require(saveBuildMap(vertexRoom,path,error) && editor->openMap(path,error), "load vertex deletion fixture");
+    editor->setMode(MapEditor::Mode::Vertices);
+    editor->centerOn(QPointF(2048,0));
+    QTest::mouseClick(editor->viewport(),Qt::LeftButton,Qt::NoModifier,editor->mapFromScene(QPointF(2048,0)));
+    QTest::keyClick(editor,Qt::Key_Delete);
+    require(editor->document().vertices().size() == 4 && editor->hasUnsavedChanges(), "Delete removes selected vertex");
+    require(editor->saveMap(path,error), "save deleted vertex");
+    MapDocument vertexReload;
+    require(vertexReload.openMap(path,error) && vertexReload.walls().size() == 4, "Vertex deletion survives reload");
     std::cout << "3D toggle, rendering, height and texture edits, validation and save persistence passed\n";
     return 0;
 }

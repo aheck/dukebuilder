@@ -133,6 +133,7 @@ public:
     std::optional<SectorId> joinSectors(const std::vector<SectorId> &ids, QString &error);
     // Remove sector interiors, retaining shared boundaries as solid walls.
     bool removeSectors(const std::vector<SectorId> &ids, QString &error);
+    bool removeVertices(const std::vector<VertexId> &ids, QString &error);
     void removeWalls(const std::vector<WallId> &wallIds);
     // Split an edge in place, preserving sector order, loops and both wall sides.
     [[nodiscard]] std::optional<VertexId> splitWall(WallId wallId, const QPointF &position);

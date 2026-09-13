@@ -395,4 +395,26 @@ int main()
             && deletion.walls().empty() && deletion.vertices().empty(), "Delete final sector cleans up geometry");
     }
 
+    {
+        MapDocument vertexDelete;
+        require(vertexDelete.addPolyline({{0,0},{512,0},{1024,0},{1024,1024},{0,1024}},true), "Vertex delete fixture");
+        require(vertexDelete.removeVertices({1},error), "Delete inserted vertex");
+        require(vertexDelete.vertices().size() == 4 && vertexDelete.walls().size() == 4
+                && vertexDelete.sectors()[0].vertices.size() == 4, "Reconnect neighbors after deletion");
+        checkSideReferences(vertexDelete);
+        require(vertexDelete.removeVertices({0},error), "Delete first vertex");
+        checkSideReferences(vertexDelete);
+        const auto before = vertexDelete;
+        require(!vertexDelete.removeVertices({0},error) && vertexDelete == before, "Cannot collapse triangle");
+        MapDocument portalDelete;
+        require(portalDelete.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}},true), "Portal vertex left");
+        require(portalDelete.addPolyline({{1024,0},{2048,0},{2048,1024},{1024,1024}},true), "Portal vertex right");
+        const auto inserted = portalDelete.splitWall(1,{1024,512});
+        require(inserted && portalDelete.removeVertices({*inserted},error), "Delete shared wall midpoint");
+        require(portalDelete.walls().size() == 7, "Shared boundary reconnects both sectors");
+        checkSideReferences(portalDelete);
+        const auto beforeJunction = portalDelete;
+        require(!portalDelete.removeVertices({1},error) && portalDelete == beforeJunction, "Reject junction transactionally");
+    }
+
 }

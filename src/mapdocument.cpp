@@ -2,6 +2,7 @@
 
 #include <QtGlobal>
 #include <QPainterPath>
+#include <QLineF>
 
 #include <cmath>
 #include <algorithm>
@@ -515,6 +516,110 @@ bool MapDocument::removeSectors(const std::vector<SectorId> &ids, QString &error
         auto rebuilt = candidate;
         rebuilt.rebuildSectors();
         candidate.m_complexTopology = rebuilt.m_sectors != candidate.m_sectors;
+    }
+    *this = std::move(candidate);
+    return true;
+}
+
+bool MapDocument::removeVertices(const std::vector<VertexId> &ids, QString &error)
+{
+    error.clear();
+    const std::set<VertexId> selected(ids.begin(), ids.end());
+    if (selected.empty() || *selected.rbegin() >= m_vertices.size()) {
+        error = "Select vertices to delete."; return false;
+    }
+    auto candidate = *this;
+    std::set<WallId> removedWalls;
+    for (auto v : selected) {
+        std::vector<WallId> incident;
+        for (WallId w = 0; w < candidate.m_walls.size(); ++w) {
+            const auto &wall = candidate.m_walls[w];
+            if (!removedWalls.count(w) && (wall.start == v || wall.end == v)) { incident.push_back(w); }
+        }
+        if (incident.size() != 2) {
+            error = "Only vertices connecting exactly two walls can be deleted. Edit junction walls or sectors first."; return false;
+        }
+        const auto keep = incident[0], drop = incident[1];
+        auto &wall = candidate.m_walls[keep];
+        const auto &other = candidate.m_walls[drop];
+        const auto a = wall.start == v ? wall.end : wall.start;
+        const auto b = other.start == v ? other.end : other.start;
+        if (a == b) { error = "Deleting these vertices would collapse a boundary."; return false; }
+        Wall merged = wall;
+        merged.start = a; merged.end = b;
+        merged.forwardSector.reset(); merged.reverseSector.reset();
+        for (SectorId id = 0; id < candidate.m_sectors.size(); ++id) {
+            auto &sector = candidate.m_sectors[id];
+            const auto found = std::find(sector.vertices.begin(),sector.vertices.end(),v);
+            if (found == sector.vertices.end()) { continue; }
+            const std::size_t index = found - sector.vertices.begin();
+            std::size_t prev = index;
+            for (std::size_t j = 0; j < sector.vertices.size(); ++j) {
+                if (sector.nextWallIndex(j) == index) { prev = j; break; }
+            }
+            const auto next = sector.nextWallIndex(index);
+            std::size_t count = 1;
+            for (auto j = next; j != index; j = sector.nextWallIndex(j)) { ++count; }
+            if (count <= 3) { error = "A boundary needs at least three vertices. Delete the sector instead."; return false; }
+            if ((index == 0 || prev == 0) &&
+                ((((sector.floorstat & 2) && sector.floorheinum) || ((sector.ceilingstat & 2) && sector.ceilingheinum))
+                 || ((sector.floorstat | sector.ceilingstat) & 64))) {
+                error = "This would change the first wall used by a slope or relative texture alignment."; return false;
+            }
+            const auto &incoming = candidate.m_walls[sector.walls[prev]];
+            const bool incomingReverse = incoming.end == sector.vertices[prev];
+            const auto side = incomingReverse ? incoming.reverseSide : incoming.forwardSide;
+            const bool reversed = sector.vertices[prev] == b;
+            (reversed ? merged.reverseSide : merged.forwardSide) = side;
+            (reversed ? merged.reverseSector : merged.forwardSector) = id;
+            sector.walls[prev] = keep;
+            sector.walls.erase(sector.walls.begin()+index);
+            sector.vertices.erase(sector.vertices.begin()+index);
+            for (auto &start : sector.loopStarts) { if (start > index) { --start; } }
+        }
+        wall = merged;
+        removedWalls.insert(drop);
+    }
+    std::vector<WallId> wallMap(candidate.m_walls.size());
+    std::vector<Wall> walls;
+    for (WallId w = 0; w < candidate.m_walls.size(); ++w) {
+        if (!removedWalls.count(w)) { wallMap[w] = walls.size(); walls.push_back(candidate.m_walls[w]); }
+    }
+    std::vector<VertexId> vertexMap(m_vertices.size());
+    candidate.m_vertices.clear();
+    for (VertexId v = 0; v < m_vertices.size(); ++v) {
+        if (!selected.count(v)) { vertexMap[v] = candidate.m_vertices.size(); candidate.m_vertices.push_back(m_vertices[v]); }
+    }
+    for (auto &wall : walls) { wall.start = vertexMap[wall.start]; wall.end = vertexMap[wall.end]; }
+    candidate.m_walls = std::move(walls);
+    for (auto &sector : candidate.m_sectors) {
+        for (auto &v : sector.vertices) { v = vertexMap[v]; }
+        for (auto &w : sector.walls) { w = wallMap[w]; }
+    }
+    // Check resulting loops before committing a cut across a concave boundary.
+    for (const auto &sector : candidate.m_sectors) {
+        double area = 0;
+        std::size_t loopStart = 0;
+        for (std::size_t i = 0; i < sector.vertices.size(); ++i) {
+            const auto next = sector.nextWallIndex(i);
+            const auto a = candidate.m_vertices[sector.vertices[i]].position;
+            const auto b = candidate.m_vertices[sector.vertices[next]].position;
+            area += a.x()*b.y()-a.y()*b.x();
+            if (next <= i) {
+                if ((loopStart == 0 && area <= coordinateEpsilon) || (loopStart != 0 && area >= -coordinateEpsilon)) {
+                    error = "Deleting these vertices would collapse or invert a boundary."; return false;
+                }
+                loopStart = i+1; area = 0;
+            }
+            for (std::size_t j = i+1; j < sector.vertices.size(); ++j) {
+                if (next == j || sector.nextWallIndex(j) == i) { continue; }
+                const auto c = candidate.m_vertices[sector.vertices[j]].position;
+                const auto d = candidate.m_vertices[sector.vertices[sector.nextWallIndex(j)]].position;
+                if (QLineF(a,b).intersects(QLineF(c,d),nullptr) == QLineF::BoundedIntersection) {
+                    error = "Deleting these vertices would intersect another boundary."; return false;
+                }
+            }
+        }
     }
     *this = std::move(candidate);
     return true;
