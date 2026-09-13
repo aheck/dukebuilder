@@ -6,6 +6,8 @@
 #include "settingsdialog.h"
 #include "texturebrowserwindow.h"
 
+#include "info.h"
+
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
@@ -1248,8 +1250,8 @@ MainWindow::MainWindow(QWidget *parent)
             this,
             "About Duke Builder",
             "<h3>Duke Builder</h3>"
-            "<p>A map-building application powered by Qt 6.</p>"
-            "<p>Version 0.1.0</p>");
+            "<p>A level editor for Duke 3D powered by Qt 6.</p>"
+            "<p>Version " PROGRAM_VERSION "</p>");
     });
 
     statusBar()->showMessage("Ready");
