@@ -7,6 +7,8 @@
 #include <QImage>
 #include <QMap>
 #include <QPoint>
+#include <QUndoStack>
+#include <memory>
 
 #include <functional>
 #include <optional>
@@ -149,6 +151,12 @@ public:
     void joinSelectedSectors();
     std::function<void(bool)> joinAvailabilityChanged;
     void setSpriteValues(std::size_t sprite, const MapDocument::Sprite &values);
+    QUndoStack *undoStack() { return &m_undoStack; }
+    void undo();
+    void redo();
+    std::function<void()> documentRestored;
+    // Set only for the duration of a continuous 3D edit callback.
+    QString continuousEditKey;
     void newMap();
     [[nodiscard]] std::set<int> usedTextureTiles() const { return m_document.usedTextureTiles(); }
     bool saveMap(const QString &filename, QString &error);
@@ -182,6 +190,26 @@ protected:
     void drawBackground(QPainter *painter, const QRectF &rect) override;
 
 private:
+    struct Selection {
+        std::vector<std::pair<int, qulonglong>> items;
+        std::vector<MapDocument::SectorId> sectorOrder;
+        Mode mode;
+        bool reversed;
+    };
+    struct Snapshot { MapDocument document; Selection selection; };
+    class Edit;
+    class SnapshotCommand;
+    Selection selection() const;
+    void restore(const Snapshot &snapshot);
+    void beginEdit(const QString &label, const QString &mergeKey = {});
+    void endEdit();
+    void finishPendingEdit();
+    QUndoStack m_undoStack;
+    std::optional<Snapshot> m_beforeEdit;
+    QString m_editLabel, m_editKey;
+    int m_editDepth = 0;
+    unsigned m_historyGeneration = 0;
+    bool m_mouseEdit = false;
     QPointF snappedPosition(const QPoint &viewportPosition, bool disableSnapping) const;
     void addDrawingPoint(const QPointF &position);
     void finishDrawing(bool close);

@@ -18,6 +18,8 @@
 #include <QStyleOption>
 #include <QWheelEvent>
 #include <QTimer>
+#include <QDateTime>
+#include <QSignalBlocker>
 
 #include <algorithm>
 #include <cmath>
@@ -489,6 +491,159 @@ private:
 };
 }
 
+// Snapshots retain topology and references together, including imported maps.
+class MapEditor::SnapshotCommand final : public QUndoCommand
+{
+public:
+    SnapshotCommand(MapEditor *editor, Snapshot before, Snapshot after,
+                    const QString &label, const QString &key)
+        : QUndoCommand(label), editor(editor), before(std::move(before)),
+          after(std::move(after)), key(key), time(QDateTime::currentMSecsSinceEpoch()) {}
+    void undo() override { editor->restore(*before); }
+    void redo() override {
+        if (first) { first = false; return; }
+        editor->restore(*after);
+    }
+    int id() const override { return key.isEmpty() ? -1 : 1; }
+    bool mergeWith(const QUndoCommand *command) override {
+        const auto *other = dynamic_cast<const SnapshotCommand *>(command);
+        if (!other || !before || key != other->key || other->time - time > 500) return false;
+        after = other->after;
+        time = other->time;
+        if (before->document == after->document) setObsolete(true);
+        return true;
+    }
+    std::size_t bytes() const {
+        const auto size = [](const MapDocument &d) {
+            std::size_t n = sizeof(d) + d.vertices().size() * sizeof(MapDocument::Vertex)
+                + d.walls().size() * sizeof(MapDocument::Wall)
+                + d.sectors().size() * sizeof(MapDocument::Sector)
+                + d.sprites().size() * sizeof(MapDocument::Sprite);
+            for (const auto &s : d.sectors())
+                n += (s.walls.size() + s.vertices.size() + s.loopStarts.size()) * sizeof(std::size_t);
+            return n;
+        };
+        return before ? size(before->document) + size(after->document) : 0;
+    }
+    void expire() { before.reset(); after.reset(); setObsolete(true); }
+private:
+    MapEditor *editor;
+    std::optional<Snapshot> before, after;
+    QString key;
+    qint64 time;
+    bool first = true;
+};
+
+class MapEditor::Edit {
+public:
+    Edit(MapEditor *editor, const QString &label, const QString &key = {}) : editor(editor) {
+        editor->beginEdit(label, key);
+    }
+    ~Edit() { editor->endEdit(); }
+private:
+    MapEditor *editor;
+};
+
+MapEditor::Selection MapEditor::selection() const
+{
+    Selection result{{}, m_sectorSelectionOrder, m_mode, m_wallSideReversed};
+    for (auto *item : m_scene->selectedItems()) {
+        int role = dynamic_cast<VertexItem *>(item) ? vertexIdRole
+            : dynamic_cast<WallItem *>(item) ? wallIdRole
+            : dynamic_cast<SectorItem *>(item) ? sectorIdRole
+            : dynamic_cast<SpriteItem *>(item) ? spriteIdRole : -1;
+        result.items.emplace_back(role, role < 0 ? 0 : item->data(role).toULongLong());
+    }
+    return result;
+}
+
+void MapEditor::restore(const Snapshot &snapshot)
+{
+    cancelDrawing();
+    m_draggingVertices = m_draggingSprites = m_draggingPlayerStart = false;
+    m_draggedVertices.clear(); m_draggedWalls.clear(); m_draggedSectors.clear();
+    m_draggedSprites.clear();
+    m_document = snapshot.document;
+    m_wallSideReversed = snapshot.selection.reversed;
+    for (const auto &sprite : m_document.sprites()) {
+        if (m_textureResolver && sprite.texture >= 0 && !m_spriteTextures.contains(sprite.texture))
+            m_spriteTextures.insert(sprite.texture, m_textureResolver(sprite.texture));
+    }
+    rebuildScene();
+    // Keep the current mode, camera and zoom. Restore selection if its mode is active.
+    if (m_mode == snapshot.selection.mode) {
+        const QSignalBlocker blocker(m_scene);
+        for (auto *item : m_scene->items()) {
+            for (const auto &[role, id] : snapshot.selection.items) {
+                if ((role < 0 && dynamic_cast<PlayerStartItem *>(item))
+                    || (role >= 0 && item->data(role).isValid() && item->data(role).toULongLong() == id))
+                    item->setSelected(true);
+            }
+        }
+        m_sectorSelectionOrder = snapshot.selection.sectorOrder;
+    }
+    updateProperties();
+    if (joinAvailabilityChanged) joinAvailabilityChanged(canJoinSelectedSectors());
+    if (documentRestored) documentRestored();
+}
+
+void MapEditor::beginEdit(const QString &label, const QString &key)
+{
+    if (m_editDepth++ != 0) return;
+    m_beforeEdit = Snapshot{m_document, selection()};
+    m_editLabel = label;
+    m_editKey = key.isEmpty() ? QString{} : key + ":" + QString::number(m_historyGeneration);
+}
+
+void MapEditor::endEdit()
+{
+    if (--m_editDepth != 0) return;
+    auto before = std::move(*m_beforeEdit);
+    m_beforeEdit.reset();
+    if (before.document == m_document) return;
+    auto afterSelection = selection();
+    if (m_editLabel.startsWith("Change") && afterSelection.items.empty())
+        afterSelection = before.selection;
+    m_undoStack.push(new SnapshotCommand(this, std::move(before),
+        Snapshot{m_document, std::move(afterSelection)}, m_editLabel, m_editKey));
+    // Drop oldest payloads above 128 MiB; always retain the newest operation.
+    std::size_t bytes = 0;
+    for (int i = m_undoStack.count() - 1; i >= 0; --i) {
+        auto *command = const_cast<SnapshotCommand *>(
+            static_cast<const SnapshotCommand *>(m_undoStack.command(i)));
+        bytes += command->bytes();
+        if (bytes > 128u * 1024u * 1024u && i != m_undoStack.count() - 1) command->expire();
+    }
+}
+
+void MapEditor::finishPendingEdit()
+{
+    if (m_mouseEdit) {
+        m_mouseEdit = false;
+        m_draggingVertices = m_draggingSprites = m_draggingPlayerStart = false;
+        endEdit();
+    }
+}
+
+void MapEditor::undo()
+{
+    finishPendingEdit();
+    if (!m_drawingPoints.empty()) { cancelDrawing(); return; }
+    ++m_historyGeneration;
+    m_undoStack.undo();
+    // Obsolete commands at the memory boundary have no remaining payload.
+    while (m_undoStack.index() > 0 && m_undoStack.command(m_undoStack.index() - 1)->isObsolete())
+        m_undoStack.undo();
+}
+
+void MapEditor::redo()
+{
+    finishPendingEdit();
+    cancelDrawing();
+    ++m_historyGeneration;
+    m_undoStack.redo();
+}
+
 MapScene::MapScene(QObject *parent)
     : QGraphicsScene(parent)
 {
@@ -595,6 +750,7 @@ MapEditor::MapEditor(QWidget *parent)
     : QGraphicsView(parent)
     , m_scene(new MapScene(this))
 {
+    m_undoStack.setUndoLimit(100);
     setScene(m_scene);
     connect(m_scene, &QGraphicsScene::selectionChanged, this, [this] {
         std::set<MapDocument::SectorId> selectedSectors;
@@ -713,6 +869,7 @@ void MapEditor::resetSelectedWallTextureScale()
 
 void MapEditor::setSelectedProperty(Property property, qreal value)
 {
+    Edit edit(this, "Change property");
     if ((m_mode != Mode::Sprites && m_mode != Mode::Sectors && m_mode != Mode::Lines)
         || m_scene->selectedItems().size() != 1) {
         return;
@@ -983,6 +1140,7 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
 
 void MapEditor::setSpriteValues(std::size_t sprite, const MapDocument::Sprite &values)
 {
+    Edit edit(this, "Change sprite", continuousEditKey);
     m_document.setSprite(sprite, values);
     rebuildScene();
     updateProperties();
@@ -990,12 +1148,14 @@ void MapEditor::setSpriteValues(std::size_t sprite, const MapDocument::Sprite &v
 
 void MapEditor::setSectorValues(std::size_t sector, const MapDocument::Sector &values)
 {
+    Edit edit(this, "Change sector", continuousEditKey);
     m_document.setSector(sector, values);
     rebuildScene();
     updateProperties();
 }
 void MapEditor::setWallSideValues(std::size_t wall, bool reversed, const MapDocument::WallSide &values)
 {
+    Edit edit(this, "Change wall", continuousEditKey);
     m_document.setWallSide(wall, reversed, values);
     rebuildScene();
     updateProperties();
@@ -1003,6 +1163,7 @@ void MapEditor::setWallSideValues(std::size_t wall, bool reversed, const MapDocu
 
 void MapEditor::setSectorHeight(std::size_t sector, bool floor, qreal height)
 {
+    Edit edit(this, "Change sector height", continuousEditKey);
     if (sector >= m_document.sectors().size()) { return; }
     if (floor) { m_document.setSectorFloorZ(sector, height); }
     else { m_document.setSectorCeilingZ(sector, height); }
@@ -1017,12 +1178,14 @@ bool MapEditor::hasUnsavedChanges() const
 
 bool MapEditor::saveMap(const QString &filename, QString &error)
 {
+    finishPendingEdit();
     if (!m_drawingPoints.empty()) {
         error = "Finish or cancel the current drawing before saving.";
         return false;
     }
     if (!saveBuildMap(m_document, filename, error)) return false;
     m_savedDocument = m_document;
+    m_undoStack.setClean();
     return true;
 }
 
@@ -1038,6 +1201,8 @@ bool MapEditor::openMap(const QString &filename, QString &error)
     m_draggedSectors.clear();
     m_draggedSprites.clear();
     m_wallSideReversed = false;
+    finishPendingEdit();
+    m_undoStack.clear();
     m_document = std::move(loaded);
     m_savedDocument = m_document;
     m_spriteTextures.clear();
@@ -1058,6 +1223,8 @@ bool MapEditor::openMap(const QString &filename, QString &error)
 
 void MapEditor::newMap()
 {
+    finishPendingEdit();
+    m_undoStack.clear();
     cancelDrawing();
     m_document.clear();
     m_savedDocument = m_document;
@@ -1067,6 +1234,8 @@ void MapEditor::newMap()
 
 void MapEditor::setMode(Mode mode)
 {
+    finishPendingEdit();
+    ++m_historyGeneration;
     if (m_mode == mode) {
         return;
     }
@@ -1193,6 +1362,12 @@ QPointF MapEditor::snappedPosition(const QPoint &viewportPosition, bool disableS
 
 void MapEditor::mousePressEvent(QMouseEvent *event)
 {
+    if (event->button() == Qt::RightButton) {
+        finishPendingEdit();
+        beginEdit(m_mode == Mode::Draw ? "Draw geometry" : "Move selection");
+        m_mouseEdit = true;
+    }
+
     if (event->button() != Qt::LeftButton) clearSplitPreview();
     if (event->button() == Qt::MiddleButton) {
         m_panning = true;
@@ -1219,6 +1394,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
                 reportStatus("Outside Build map coordinate range");
             } else {
                 const bool disableSnapping = event->modifiers().testFlag(Qt::AltModifier);
+                m_editLabel = "Create sprite";
                 m_document.addSprite(snappedPosition(
                     event->position().toPoint(), disableSnapping));
                 rebuildScene();
@@ -1543,6 +1719,7 @@ void MapEditor::updateSplitPreview(const QPoint &position, bool disableSnapping)
 
 void MapEditor::mouseDoubleClickEvent(QMouseEvent *event)
 {
+    Edit edit(this, "Split line");
     if (m_mode == Mode::Vertices && event->button() == Qt::LeftButton) {
         updateSplitPreview(event->position().toPoint(), event->modifiers().testFlag(Qt::AltModifier));
         if (m_splitWall) {
@@ -1746,6 +1923,11 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
 
 void MapEditor::mouseReleaseEvent(QMouseEvent *event)
 {
+    const auto finish = [this, event](void *) {
+        if (event->button() == Qt::RightButton) finishPendingEdit();
+    };
+    std::unique_ptr<void, decltype(finish)> transaction(this, finish);
+
     if (event->button() == Qt::RightButton && m_draggingSprites) {
         const bool chooseTexture = !m_spriteDragMoved && !m_clickedPlayerStart;
         const MapDocument::SpriteId spriteId = m_clickedSprite;
@@ -1763,6 +1945,7 @@ void MapEditor::mouseReleaseEvent(QMouseEvent *event)
                 currentTexture >= 0 ? std::optional<int>(currentTexture)
                                     : std::nullopt);
             if (selection) {
+                m_editLabel = "Change sprite texture";
                 m_document.setSpriteTexture(spriteId, selection->tile);
                 m_spriteTextures.insert(selection->tile, selection->image);
                 rebuildScene();
@@ -1830,6 +2013,7 @@ bool MapEditor::canJoinSelectedSectors() const
 
 void MapEditor::joinSelectedSectors()
 {
+    Edit edit(this, "Join sectors");
     if (!isVisible() || !canJoinSelectedSectors()) { return; }
     const auto source = m_sectorSelectionOrder.front();
     QString error;
@@ -1848,6 +2032,7 @@ void MapEditor::joinSelectedSectors()
 
 void MapEditor::stickSelectedSpriteToWall()
 {
+    Edit edit(this, "Stick sprite to wall");
     if (!isVisible() || m_mode != Mode::Sprites || m_scene->selectedItems().size() != 1) {
         reportStatus("Select one sprite in 2D sprite mode first."); return;
     }
@@ -1867,6 +2052,8 @@ void MapEditor::stickSelectedSpriteToWall()
 
 void MapEditor::keyPressEvent(QKeyEvent *event)
 {
+    std::unique_ptr<Edit> edit;
+    if (event->key() == Qt::Key_Delete) edit = std::make_unique<Edit>(this, "Delete selection");
     if (event->key() == Qt::Key_Delete && m_mode == Mode::Vertices) {
         std::vector<MapDocument::VertexId> ids;
         for (auto *item : m_scene->selectedItems()) {
@@ -1992,6 +2179,7 @@ void MapEditor::addDrawingPoint(const QPointF &position)
 
 void MapEditor::finishDrawing(bool close)
 {
+    Edit edit(this, "Draw geometry");
     const bool sectorCreated = m_document.addPolyline(m_drawingPoints, close);
     m_drawingPoints.clear();
     rebuildScene();

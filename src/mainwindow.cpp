@@ -958,6 +958,25 @@ MainWindow::MainWindow(QWidget *parent)
     connect(quitAction, &QAction::triggered, this, &QWidget::close);
 
     auto *editMenu = menuBar()->addMenu("&Edit");
+    auto *undoAction = editMenu->addAction("Undo");
+    auto *redoAction = editMenu->addAction("Redo");
+    undoAction->setShortcuts(QKeySequence::Undo);
+    redoAction->setShortcuts({QKeySequence(Qt::CTRL | Qt::Key_Y),
+                              QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z)});
+    const auto updateHistory = [=] {
+        const auto *stack = editor->undoStack();
+        undoAction->setEnabled(stack->canUndo());
+        redoAction->setEnabled(stack->canRedo());
+        undoAction->setText(stack->canUndo() ? "Undo " + stack->undoText() : "Undo");
+        redoAction->setText(stack->canRedo() ? "Redo " + stack->redoText() : "Redo");
+    };
+    connect(editor->undoStack(), &QUndoStack::indexChanged, this, updateHistory);
+    connect(editor->undoStack(), &QUndoStack::undoTextChanged, this, updateHistory);
+    connect(editor->undoStack(), &QUndoStack::redoTextChanged, this, updateHistory);
+    connect(undoAction, &QAction::triggered, this, [editor] { if (editor->isVisible()) editor->setFocus(); editor->undo(); });
+    connect(redoAction, &QAction::triggered, this, [editor] { if (editor->isVisible()) editor->setFocus(); editor->redo(); });
+    updateHistory();
+    editMenu->addSeparator();
     auto *settingsAction = editMenu->addAction("&Settings");
     connect(settingsAction, &QAction::triggered, this, [this] {
         SettingsDialog dialog(this);
@@ -1157,6 +1176,13 @@ MainWindow::MainWindow(QWidget *parent)
         statusBar()->showMessage("2D mode");
     };
     view3D->leave3D = leave3D;
+    view3D->continuousEditChanged = [editor](const QString &key) { editor->continuousEditKey = key; };
+    editor->documentRestored = [=] {
+        if (view3D->isVisible() && !view3D->refreshDocument(editor->document())) {
+            leave3D();
+            statusBar()->showMessage("Map restored; returned to 2D because the 3D preview could not be rebuilt.", 5000);
+        }
+    };
     view3D->chooseTexture = [textureBrowserWindow](int current) -> std::optional<int> {
         const auto selection = textureBrowserWindow->chooseTexture(current);
         return selection ? std::optional<int>(selection->tile) : std::nullopt;

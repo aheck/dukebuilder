@@ -50,6 +50,22 @@ Run it:
 ./build/dukebuilder
 ```
 
+## Undo and redo
+
+Use **Ctrl+Z** to undo and **Ctrl+Y** or **Ctrl+Shift+Z** to redo in either
+2D or 3D. The Edit menu shows the operation that will be undone or redone.
+Drawing a completed shape, dragging a selection, deleting geometry, joining
+sectors, and changing properties or textures are undoable. Repeated 3D wheel
+or arrow edits are grouped while the target, operation and modifiers stay the
+same and successive edits are less than half a second apart.
+
+Undo restores map data and selection in the current editing mode without moving
+the camera or changing zoom. An active unfinished drawing is cancelled first.
+Opening or creating a map clears history; saving retains it and marks that state
+as saved. New edits after undo discard the redo branch. History retains at most
+100 operations, dropping older snapshots above an estimated 128 MiB budget
+(always keeping the latest operation). History is kept only for this session.
+
 ## 2D editor controls
 
 - **Left click:** place connected wall vertices. Lines can be drawn at any angle.

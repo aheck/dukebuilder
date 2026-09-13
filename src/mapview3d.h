@@ -15,6 +15,8 @@ public:
     ~MapView3D() override;
     bool start(const MapDocument &document, const QPointF &pointer, QString &error);
     void stop();
+    bool refreshDocument(const MapDocument &document);
+    std::function<void(const QString &)> continuousEditChanged;
     void stickSpriteToWall();
     void resetTextureScale() { editTexture(Qt::Key_R, false); }
     std::function<void()> leave3D;

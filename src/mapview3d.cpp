@@ -1,3 +1,4 @@
+#include <QScopeGuard>
 #include "mapview3d.h"
 #include "mapsave.h"
 #include "previewcamera.h"
@@ -239,6 +240,11 @@ void MapView3D::wheelEvent(QWheelEvent *event)
     const bool slopeEdit = hit.kind != DUKE_SURFACE_SPRITE
         && event->modifiers().testFlag(Qt::AltModifier);
     const int mode = (slopeEdit ? 2 : 0) + (fine ? 1 : 0);
+    if (continuousEditChanged) continuousEditChanged(QString("wheel:%1:%2:%3:%4")
+        .arg(int(hit.kind)).arg(hit.sector_index).arg(hit.sprite_index).arg(mode));
+    const auto clearEdit = qScopeGuard([this] {
+        if (continuousEditChanged) continuousEditChanged({});
+    });
     const qreal heightStep = fine ? 128.0 : 1024.0;
     if (mode != m_wheelMode || hit.kind != m_wheelTarget.kind
         || hit.sector_index != m_wheelTarget.sector_index
@@ -308,6 +314,14 @@ void MapView3D::wheelEvent(QWheelEvent *event)
     update();
 }
 
+bool MapView3D::refreshDocument(const MapDocument &document)
+{
+    if (!m_active) return true;
+    m_wheelRemainder = 0;
+    m_keys.clear();
+    return applySnapshot(document);
+}
+
 bool MapView3D::applySnapshot(MapDocument candidate)
 {
     // Validate and upload before committing either the view or editor document.
@@ -360,6 +374,14 @@ void MapView3D::editTexture(int key, bool scale)
     DukeSurfaceHit hit{};
     if (!duke_renderer_get_hovered_surface(m_renderer, &hit) || hit.sector_index < 0
         || std::size_t(hit.sector_index) >= m_snapshot.sectors().size()) { return; }
+    const bool arrow = key == Qt::Key_Left || key == Qt::Key_Right
+        || key == Qt::Key_Up || key == Qt::Key_Down;
+    if (continuousEditChanged) continuousEditChanged(arrow
+        ? QString("texture:%1:%2:%3:%4:%5:%6").arg(int(hit.kind)).arg(hit.sector_index)
+            .arg(hit.wall_index).arg(hit.sprite_index).arg(key).arg(scale) : QString{});
+    const auto clearEdit = qScopeGuard([this] {
+        if (continuousEditChanged) continuousEditChanged({});
+    });
     auto candidate = m_snapshot;
     auto sector = candidate.sectors()[hit.sector_index];
     const bool horizontal = key == Qt::Key_Left || key == Qt::Key_Right;

@@ -5,6 +5,7 @@
 #include "texturebrowserwindow.h"
 #include "texturebrowserwidget.h"
 #include <QApplication>
+#include <QGraphicsItem>
 #include <QSurfaceFormat>
 #include <QTemporaryDir>
 #include <QSettings>
@@ -55,6 +56,65 @@ int main(int argc, char **argv)
     require(saveBuildMap(room,path,error), "save fixture");
     require(editor->openMap(path,error), "load fixture");
     auto original = editor->document();
+    require(!editor->undoStack()->canUndo(), "opening clears history");
+    editor->setSectorHeight(0, true, 128);
+    const auto edited = editor->document();
+    require(editor->undoStack()->count() == 1 && editor->hasUnsavedChanges(), "height edit recorded");
+    editor->setSectorHeight(0, true, 128);
+    require(editor->undoStack()->count() == 1, "no-op does not enter history");
+    editor->undo();
+    require(editor->document() == original && !editor->hasUnsavedChanges(), "undo restores saved state");
+    editor->redo();
+    require(editor->document() == edited, "redo restores full snapshot");
+    require(editor->saveMap(settings.filePath("undo.map"), error), "save edited snapshot");
+    editor->undo();
+    require(editor->hasUnsavedChanges(), "undo away from save is dirty");
+    editor->redo();
+    require(!editor->hasUnsavedChanges() && editor->undoStack()->isClean(), "redo to save is clean");
+    editor->undo();
+    editor->setSectorHeight(0, true, 256);
+    require(!editor->undoStack()->canRedo(), "new edit discards redo branch");
+    require(editor->openMap(path,error), "reload original after history tests");
+    editor->continuousEditKey = "test:floor:height";
+    editor->setSectorHeight(0, true, 128);
+    editor->setSectorHeight(0, true, 256);
+    require(editor->undoStack()->count() == 1, "continuous edits merge");
+    editor->continuousEditKey.clear();
+    editor->undo();
+    require(editor->document() == original, "merged undo restores initial state");
+    require(editor->openMap(path,error), "reset history for preview tests");
+    editor->setMode(MapEditor::Mode::Vertices);
+    for (auto *item : editor->scene()->items()) {
+        if (item->data(Qt::UserRole).isValid() && item->data(Qt::UserRole).toULongLong() == 0)
+            item->setSelected(true);
+    }
+    QTest::keyClick(editor, Qt::Key_Delete);
+    require(editor->document().vertices().size() == 3, "delete vertex recorded");
+    editor->undo();
+    require(editor->document() == original && editor->scene()->selectedItems().size() == 1,
+            "undo restores topology and selection");
+    editor->redo();
+    require(editor->document().vertices().size() == 3, "redo topology deletion");
+    require(editor->openMap(path,error), "restore room after topology history test");
+    editor->setZoomPercent(50);
+    QPoint dragStart;
+    for (auto *item : editor->scene()->items()) {
+        if (item->data(Qt::UserRole).isValid() && item->data(Qt::UserRole).toULongLong() == 0) {
+            item->setSelected(true);
+            dragStart = editor->mapFromScene(item->pos());
+        }
+    }
+    QTest::mousePress(editor->viewport(), Qt::RightButton, Qt::NoModifier, dragStart);
+    QTest::mouseMove(editor->viewport(), dragStart + QPoint(20,20));
+    QTest::mouseMove(editor->viewport(), dragStart + QPoint(40,20));
+    QTest::mouseRelease(editor->viewport(), Qt::RightButton, Qt::NoModifier, dragStart + QPoint(40,20));
+    require(!(editor->document() == original) && editor->undoStack()->count() == 1,
+            "whole vertex drag is one operation");
+    editor->undo();
+    require(editor->document() == original, "drag undo restores original coordinates and repeats");
+    require(editor->openMap(path,error), "reset after drag test");
+    editor->setZoomPercent(100);
+    editor->setMode(MapEditor::Mode::Draw);
     for (int i=0;i<3;i++) {
         editor->setFocus();
         QCursor::setPos(editor->viewport()->mapToGlobal(editor->viewport()->rect().center()));
@@ -97,6 +157,14 @@ int main(int argc, char **argv)
     require(editor->document().sectors()[0].ceilingz == -33792, "wheel raises ceiling");
     require(editor->document().sectors()[0].floorz == 0, "ceiling edit leaves floor alone");
     require(editor->hasUnsavedChanges(), "3D edit marks document dirty");
+    const auto previewEdited = editor->document();
+    QTest::keyClick(view, Qt::Key_Z, Qt::ControlModifier);
+    require(editor->document() == original && view->isVisible(), "Ctrl Z restores map in active 3D");
+    QTest::keyClick(view, Qt::Key_Y, Qt::ControlModifier);
+    require(editor->document() == previewEdited && view->isVisible(), "Ctrl Y restores edited 3D snapshot");
+    require(editor->document().playerStart().position == original.playerStart().position
+            && editor->document().playerStart().z == original.playerStart().z,
+            "3D history never stores preview player position");
     wheel(0.9,60);
     require(editor->document().sectors()[0].floorz == 0, "partial wheel notch accumulates");
     wheel(0.9,60);
