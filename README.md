@@ -328,10 +328,16 @@ windows-stage/
 ```
 
 Put the executable at the root, not in `bin/`. Include the Windows dependencies
-of the actual release build: use Qt's `windeployqt --release` for a dynamic Qt
-build, then add any dependencies that it does not collect. For static Qt, ensure
+of the actual release build. The packaging script automatically runs
+`windeployqt --release --no-compiler-runtime` on a temporary copy of this folder,
+then includes the deployed Qt DLLs and plugins in the installer. Use the
+`windeployqt` from the **same Windows Qt installation used to build the app**;
+it is discovered on PATH or supplied with `--windeployqt PATH`. For static Qt, ensure
 the Windows platform plugin is linked into the executable. Supply compiler
-runtime dependencies as appropriate for the toolchain. Keep libduke and its
+runtime dependencies as appropriate for the toolchain: deployment deliberately
+does not copy the MSVC redistributable installer, since merely bundling it would
+not install it. Supply redistributable runtime DLLs in the staging folder or use
+a suitable static compiler runtime. Keep libduke and its
 renderer statically linked. The staging folder must not contain game archives,
 maps, EDuke32, debug symbols or development libraries. Users supply game data
 and configure EDuke32 separately after installation.
@@ -346,8 +352,15 @@ python scripts/build-windows-installer.py windows-stage
 Use `python3` on Linux if necessary. If NSIS is not on PATH, pass its compiler:
 
 ```powershell
-python scripts/build-windows-installer.py windows-stage --makensis "C:\Program Files (x86)\NSIS\makensis.exe"
+python scripts/build-windows-installer.py windows-stage --makensis "C:\Program Files (x86)\NSIS\makensis.exe" --windeployqt "C:\Qt\6.8.3\msvc2022_64\bin\windeployqt.exe"
 ```
+
+Automatic deployment requires a runnable Windows `windeployqt`. To package on
+Linux, first deploy the folder on Windows, then use `--skip-qt-deploy`. That option
+also supports static Qt builds. Missing tools or failed/incomplete Qt deployment
+stop packaging; there is no silent fallback. `--check-only` performs deployment
+and validation but does not compile an installer. The input folder is never
+modified, and temporary deployed files are removed after the command finishes.
 
 The output is `dist/DukeBuilder-0.1.0-x64-Setup.exe`. The version defaults to
 `meson.build`; `--version 0.1.0-beta.1` and `--output-dir PATH` override it.

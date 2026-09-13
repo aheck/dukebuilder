@@ -5,6 +5,8 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
+from unittest import mock
+import subprocess
 
 spec = importlib.util.spec_from_file_location('installer', Path(__file__).resolve().parents[1] / 'scripts/build-windows-installer.py')
 installer = importlib.util.module_from_spec(spec)
@@ -59,6 +61,53 @@ class InstallerTests(unittest.TestCase):
             write_pe(stage / 'DUKEBUILDER.EXE')
             with self.assertRaises(ValueError):
                 installer.payload_files(stage)
+
+    def test_automatic_deployment_manifest_and_source_preservation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            stage = root / 'source with spaces'
+            stage.mkdir()
+            write_pe(stage / 'dukebuilder.exe')
+            output = root / 'output'
+            calls = []
+
+            def run(command, check):
+                calls.append(command)
+                if command[0] == 'qt-tool':
+                    payload = Path(command[command.index('--dir') + 1])
+                    self.assertNotEqual(payload, stage)
+                    self.assertIn('--release', command)
+                    for name in ['Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'platforms/qwindows.dll']:
+                        target = payload / name
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        write_pe(target)
+                else:
+                    config_path = Path(next(arg.split('=', 1)[1] for arg in command if 'DCONFIG_FILE=' in arg))
+                    config = config_path.read_text()
+                    self.assertIn('Delete "$INSTDIR\\platforms\\qwindows.dll"', config)
+                    self.assertIn('Qt6Core.dll', config)
+                    (config_path.parent / 'DukeBuilder-0.1.0-x64-Setup.exe').write_bytes(b'test installer')
+
+            argv = ['packager', str(stage), '--version', '0.1.0', '--output-dir', str(output), '--windeployqt', 'qt-tool']
+            with mock.patch.object(installer.sys, 'argv', argv), mock.patch.object(installer.shutil, 'which', side_effect=lambda tool: tool), mock.patch.object(installer.subprocess, 'run', side_effect=run):
+                installer.main()
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(list(stage.iterdir()), [stage / 'dukebuilder.exe'])
+            self.assertTrue((output / 'DukeBuilder-0.1.0-x64-Setup.exe').is_file())
+
+    def test_deployment_failure_and_missing_plugin(self):
+        with tempfile.TemporaryDirectory() as temp:
+            stage = Path(temp)
+            write_pe(stage / 'dukebuilder.exe')
+            with mock.patch.object(installer.shutil, 'which', return_value=None):
+                with self.assertRaisesRegex(ValueError, 'windeployqt was not found'):
+                    installer.deploy_qt(stage, 'missing')
+            with mock.patch.object(installer.shutil, 'which', return_value='qt-tool'), mock.patch.object(installer.subprocess, 'run') as run:
+                with self.assertRaisesRegex(ValueError, 'Qt6Core.dll'):
+                    installer.deploy_qt(stage, 'qt-tool')
+                run.side_effect = subprocess.CalledProcessError(1, 'qt-tool')
+                with self.assertRaises(subprocess.CalledProcessError):
+                    installer.deploy_qt(stage, 'qt-tool')
 
     def test_escaping(self):
         self.assertEqual(installer.nsis_string('a$b"c'), '"a$$b$\\"c"')

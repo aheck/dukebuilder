@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package a prepared Windows x64 deployment directory with NSIS 3."""
+"""Deploy Qt and package a Windows x64 application directory with NSIS 3."""
 import argparse
 import os
 from pathlib import Path
@@ -91,13 +91,29 @@ def make_config(stage, files, version, output):
     return '\n'.join(lines + ['!macroend', ''])
 
 
+def deploy_qt(stage, tool):
+    """Deploy into a private copy; never modify the supplied Windows build."""
+    compiler = shutil.which(tool)
+    if not compiler:
+        raise ValueError('windeployqt was not found. Pass --windeployqt PATH from the Windows build\'s Qt installation, or --skip-qt-deploy for an already deployed/static Qt payload.')
+    subprocess.run([compiler, '--release', '--no-compiler-runtime',
+                    '--dir', str(stage), str(stage / 'dukebuilder.exe')], check=True)
+    # The platform plugin is loaded dynamically and cannot be inferred just by
+    # looking for linked Qt DLLs. Fail instead of distributing a broken GUI.
+    for required in ['Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'platforms/qwindows.dll']:
+        if not (stage / required).is_file():
+            raise ValueError(f'Qt deployment did not produce {required}. Use the matching dynamic Qt 6 Windows installation.')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('stage', type=Path, help='Prepared deployment folder containing dukebuilder.exe and runtime dependencies')
     parser.add_argument('--output-dir', type=Path, default=REPO / 'dist')
     parser.add_argument('--version', help='Defaults to the project version in meson.build')
     parser.add_argument('--makensis', default='makensis', help='NSIS 3 compiler executable or path')
-    parser.add_argument('--check-only', action='store_true', help='Validate payload without compiling an installer')
+    parser.add_argument('--windeployqt', default='windeployqt', help='Matching Windows Qt deployment tool (default: find on PATH)')
+    parser.add_argument('--skip-qt-deploy', action='store_true', help='Use an already deployed payload or a static Qt build')
+    parser.add_argument('--check-only', action='store_true', help='Deploy and validate payload without compiling an installer')
     args = parser.parse_args()
     stage = args.stage.resolve()
     files = payload_files(stage)
@@ -108,17 +124,24 @@ def main():
     if output_dir == stage or stage in output_dir.parents:
         raise ValueError('Output directory must be outside the staging directory.')
     config = make_config(stage, files, version, output_dir / 'unused.exe')
-    if args.check_only:
-        print(f'Validated {len(files)} payload files for version {version}. Dependency completeness still requires Windows testing.')
-        return
-    compiler = shutil.which(args.makensis)
-    if not compiler:
+    compiler = None if args.check_only else shutil.which(args.makensis)
+    if not args.check_only and not compiler:
         raise ValueError('NSIS 3 is required. Install makensis or pass --makensis PATH.')
     output_dir.mkdir(parents=True, exist_ok=True)
     name = f'DukeBuilder-{version}-x64-Setup.exe'
     with tempfile.TemporaryDirectory(prefix='.nsis-', dir=output_dir) as temporary:
         temp = Path(temporary)
-        config = make_config(stage, files, version, temp / name)
+        payload = temp / 'payload'
+        shutil.copytree(stage, payload)
+        if not args.skip_qt_deploy:
+            deploy_qt(payload, args.windeployqt)
+        # Include and validate the generated DLLs/plugins in both install and
+        # uninstall manifests, and reject incorrect architectures after deploy.
+        files = payload_files(payload)
+        if args.check_only:
+            print(f'Validated {len(files)} payload files for version {version}. Dependency completeness still requires Windows testing.')
+            return
+        config = make_config(payload, files, version, temp / name)
         config_path = temp / 'payload.nsh'
         config_path.write_text(config, encoding='utf-8')
         prefix = '/' if os.name == 'nt' else '-'
