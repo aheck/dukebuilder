@@ -129,6 +129,8 @@ public:
     [[nodiscard]] bool supportsTopologyEditing() const { return !m_complexTopology; }
     [[nodiscard]] bool supportsLineDeletion() const;
     [[nodiscard]] bool addPolyline(const std::vector<QPointF> &points, bool closed);
+    // Join a connected selection transactionally; the first ID supplies properties.
+    std::optional<SectorId> joinSectors(const std::vector<SectorId> &ids, QString &error);
     void removeWalls(const std::vector<WallId> &wallIds);
     // Split an edge in place, preserving sector order, loops and both wall sides.
     [[nodiscard]] std::optional<VertexId> splitWall(WallId wallId, const QPointF &position);

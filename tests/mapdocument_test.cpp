@@ -327,4 +327,47 @@ int main()
             && holes.sprites()[holeSprite].angle == 180 && holes.sprites()[holeSprite].sectorId == 0,
             "Stops at two-sided wall and faces back into owning sector");
 
+    MapDocument joining;
+    require(joining.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}},true), "Join first room");
+    require(joining.addPolyline({{1024,0},{2048,0},{2048,1024},{1024,1024}},true), "Join second room");
+    require(joining.addPolyline({{2048,0},{3072,0},{3072,1024},{2048,1024}},true), "Join third room");
+    auto donor = joining.sectors()[1];
+    donor.floorz = -1024; donor.ceilingz = -16384; donor.lotag = 15;
+    donor.floorTexture = 42; donor.floorpal = 3; donor.extra = 100;
+    joining.setSector(1, donor);
+    const auto sp = joining.addSprite({512,512});
+    auto assigned = joining.sprites()[sp]; assigned.sectorId = 0;
+    joining.setSprite(sp,assigned);
+    const auto disconnected = joining;
+    require(!joining.joinSectors({0,2},error) && joining == disconnected, "Disconnected join is transactional");
+    auto joinedId = joining.joinSectors({1,0},error);
+    require(joinedId && *joinedId == 0 && joining.sectors().size() == 2, "Join preserves first-selected higher-numbered source");
+    auto expected = donor;
+    expected.walls = joining.sectors()[0].walls;
+    expected.vertices = joining.sectors()[0].vertices;
+    expected.loopStarts = joining.sectors()[0].loopStarts;
+    require(joining.sectors()[0] == expected, "Join copies all source properties");
+    require(joining.sprites()[sp].sectorId == 0, "Join remaps sprite sector");
+    checkSideReferences(joining);
+    require(joining.joinSectors({0,1},error).has_value() && joining.sectors().size() == 1, "Join preserves external portal for later join");
+    checkSideReferences(joining);
+    require(holes.joinSectors({0,1},error).has_value() && holes.sectors().size() == 1
+            && holes.walls().size() == 4 && holes.vertices().size() == 4,
+            "Join inner sector removes hole boundary and orphan vertices");
+    checkSideReferences(holes);
+
+    MapDocument ringJoin;
+    require(ringJoin.addPolyline({{0,0},{4096,0},{4096,4096},{0,4096}},true), "Ring join outer");
+    require(ringJoin.addPolyline({{512,512},{1024,512},{1024,1024},{512,1024}},true), "Ring join first hole");
+    require(ringJoin.addPolyline({{2048,2048},{3072,2048},{3072,3072},{2048,3072}},true), "Ring join second hole");
+    auto sloped = ringJoin.sectors()[1];
+    sloped.floorstat = 2; sloped.floorheinum = 256;
+    ringJoin.setSector(1,sloped);
+    const auto beforeUnsafeJoin = ringJoin;
+    require(!ringJoin.joinSectors({1,0},error) && ringJoin == beforeUnsafeJoin,
+            "Reject deleting slope first wall transactionally");
+    require(ringJoin.joinSectors({0,1},error).has_value() && ringJoin.sectors().size() == 2
+            && ringJoin.sectors()[0].loopStarts.size() == 2, "Join retains unselected hole");
+    checkSideReferences(ringJoin);
+
 }

@@ -1059,6 +1059,17 @@ MainWindow::MainWindow(QWidget *parent)
     addModeAction("Sprites", QKeySequence(Qt::Key_T), MapEditor::Mode::Sprites);
 
     auto *toolsMenu = menuBar()->addMenu("&Tools");
+    auto *joinSectorsAction = toolsMenu->addAction("Join Sectors");
+    joinSectorsAction->setShortcut(QKeySequence(Qt::Key_J));
+    joinSectorsAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    joinSectorsAction->setAutoRepeat(false);
+    joinSectorsAction->setEnabled(false);
+    editor->addAction(joinSectorsAction);
+    editor->joinAvailabilityChanged = [joinSectorsAction](bool enabled) {
+        joinSectorsAction->setEnabled(enabled);
+    };
+    connect(joinSectorsAction, &QAction::triggered, editor, &MapEditor::joinSelectedSectors);
+
     auto *stickSpriteAction = toolsMenu->addAction("Stick Sprite to Wall");
     stickSpriteAction->setShortcut(QKeySequence(Qt::Key_O));
     stickSpriteAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);

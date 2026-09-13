@@ -393,3 +393,25 @@ releases**. Before distributing a real installer, test installation, 3D renderin
 upgrades, silent mode, and uninstall preservation of user files on Windows with
 no development tools installed. Release signing is a separate step and is not
 configured here.
+
+## Joining sectors
+
+In **Sectors mode**, select the sector whose properties you want to keep, then
+Shift-click additional adjacent sectors. Choose **Tools → Join Sectors** or press
+**J**. The selection must be connected through shared two-sided walls.
+
+Shared boundaries are removed; the resulting sector takes all sector properties
+from the first selected sector. Surviving boundary walls retain their own side
+properties, including links to unselected neighbors. Inner sectors can be joined
+into their surroundings; unselected holes remain. Sprite and player-start sector
+references are remapped without changing their positions. The resulting sector
+remains selected. Sector numbers after removed records may change.
+
+When several sectors are added in one selection-change event, sector number is
+the tie-breaker. Click the desired source first to make the property choice
+explicit. Disconnected or branching boundaries are rejected without changing the
+map. If the source first wall would disappear and is needed for a slope or
+relative texture alignment, choose a surviving outer first wall before joining.
+The source heights replace those of the other selected sectors; check player and
+sprite placement afterward. A source slope that crosses the opposite surface in
+the enlarged sector is rejected.

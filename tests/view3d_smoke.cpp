@@ -418,6 +418,29 @@ int main(int argc, char **argv)
     QTest::keyClick(view, Qt::Key_Q);
     require(editor->document().playerStart() == actualStart, "preview rebuild preserves actual player start");
     require(editor->saveMap(path,error), "save raised nested floor");
+    MapDocument joinRoom;
+    require(joinRoom.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}},true), "join UI room 0");
+    require(joinRoom.addPolyline({{1024,0},{2048,0},{2048,1024},{1024,1024}},true), "join UI room 1");
+    auto sourceProperties = joinRoom.sectors()[1];
+    sourceProperties.floorTexture = 42;
+    sourceProperties.lotag = 15;
+    joinRoom.setSector(1,sourceProperties);
+    joinRoom.setPlayerStartPosition({512,512});
+    require(saveBuildMap(joinRoom,path,error) && editor->openMap(path,error), "load join UI fixture");
+    editor->setMode(MapEditor::Mode::Sectors);
+    editor->centerOn(QPointF(1024,512));
+    QTest::mouseClick(editor->viewport(), Qt::LeftButton, Qt::NoModifier, editor->mapFromScene(QPointF(1536,512)));
+    QTest::mouseClick(editor->viewport(), Qt::LeftButton, Qt::ShiftModifier, editor->mapFromScene(QPointF(512,512)));
+    require(editor->canJoinSelectedSectors(), "join enabled for multiple sectors");
+    QTest::keyClick(editor,Qt::Key_J);
+    require(editor->document().sectors().size() == 1
+            && editor->document().sectors()[0].floorTexture == 42
+            && editor->document().sectors()[0].lotag == 15, "J uses chronological selection, not sector number");
+    require(!editor->canJoinSelectedSectors() && editor->hasUnsavedChanges(), "joined sector remains selected and dirty");
+    require(editor->saveMap(path,error), "save joined map");
+    MapDocument joinReload;
+    require(joinReload.openMap(path,error) && joinReload.sectors().size() == 1
+            && joinReload.sectors()[0].floorTexture == 42, "joined map reload preserves source properties");
     std::cout << "3D toggle, rendering, height and texture edits, validation and save persistence passed\n";
     return 0;
 }

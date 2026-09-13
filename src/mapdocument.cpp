@@ -8,6 +8,7 @@
 #include <functional>
 #include <tuple>
 #include <limits>
+#include <map>
 
 namespace {
 constexpr qreal coordinateEpsilon = 0.001;
@@ -252,6 +253,171 @@ std::optional<MapDocument::VertexId> MapDocument::splitWall(WallId wallId, const
         }
     }
     return vertexId;
+}
+
+std::optional<MapDocument::SectorId> MapDocument::joinSectors(
+    const std::vector<SectorId> &ids, QString &error)
+{
+    error.clear();
+    const auto fail = [&](const QString &message) -> std::optional<SectorId> {
+        error = message;
+        return std::nullopt;
+    };
+    const std::set<SectorId> selected(ids.begin(), ids.end());
+    if (selected.size() < 2 || *selected.rbegin() >= m_sectors.size()) {
+        return fail("Select at least two adjacent sectors to join.");
+    }
+    const SectorId donor = ids.front();
+    std::set<WallId> removed;
+    std::set<SectorId> connected{donor};
+    bool progress = true;
+    while (progress) {
+        progress = false;
+        for (WallId w = 0; w < m_walls.size(); ++w) {
+            const auto &wall = m_walls[w];
+            if (!wall.isTwoSided() || !selected.count(*wall.forwardSector)
+                || !selected.count(*wall.reverseSector)) { continue; }
+            removed.insert(w);
+            if (connected.count(*wall.forwardSector) || connected.count(*wall.reverseSector)) {
+                progress |= connected.insert(*wall.forwardSector).second;
+                progress |= connected.insert(*wall.reverseSector).second;
+            }
+        }
+    }
+    if (connected != selected) { return fail("Selected sectors must be connected by shared walls."); }
+
+    struct Edge { WallId wall; VertexId start, end; };
+    std::vector<Edge> edges;
+    std::map<VertexId, std::size_t> outgoing;
+    std::set<VertexId> incoming;
+    for (SectorId id : selected) {
+        const auto &sector = m_sectors[id];
+        for (std::size_t i = 0; i < sector.walls.size(); ++i) {
+            if (removed.count(sector.walls[i])) { continue; }
+            const auto a = sector.vertices[i], b = sector.vertices[sector.nextWallIndex(i)];
+            if (!outgoing.emplace(a, edges.size()).second || !incoming.insert(b).second) {
+                return fail("Joining would create a branching or touching boundary.");
+            }
+            edges.push_back({sector.walls[i], a, b});
+        }
+    }
+    std::vector<std::vector<std::size_t>> loops;
+    std::vector<bool> visited(edges.size());
+    std::optional<std::size_t> outer;
+    for (std::size_t start = 0; start < edges.size(); ++start) {
+        if (visited[start]) { continue; }
+        std::vector<std::size_t> loop;
+        double area = 0;
+        auto current = start;
+        do {
+            if (visited[current]) { return fail("Joining would create an invalid boundary loop."); }
+            visited[current] = true;
+            loop.push_back(current);
+            const auto &edge = edges[current];
+            const auto a = m_vertices[edge.start].position, b = m_vertices[edge.end].position;
+            area += a.x()*b.y() - a.y()*b.x();
+            const auto next = outgoing.find(edge.end);
+            if (next == outgoing.end()) { return fail("Joining would leave an open boundary."); }
+            current = next->second;
+        } while (current != start);
+        if (loop.size() < 3 || std::abs(area) < coordinateEpsilon) {
+            return fail("Joining would create a degenerate sector.");
+        }
+        if (area > 0) {
+            if (outer) { return fail("Joining must produce one connected outer boundary."); }
+            outer = loops.size();
+        }
+        loops.push_back(std::move(loop));
+    }
+    if (!outer) { return fail("Joining would remove the entire sector boundary."); }
+    std::swap(loops[0], loops[*outer]);
+    auto joined = m_sectors[donor];
+    const auto first = std::find_if(loops[0].begin(), loops[0].end(), [&](auto e) {
+        return edges[e].wall == joined.walls.front()
+            && edges[e].start == joined.vertices.front();
+    });
+    if (first != loops[0].end()) {
+        std::rotate(loops[0].begin(), first, loops[0].end());
+    } else if (((joined.floorstat & 2) && joined.floorheinum != 0)
+               || ((joined.ceilingstat & 2) && joined.ceilingheinum != 0)
+               || ((joined.floorstat | joined.ceilingstat) & 64)) {
+        return fail("The join would remove the source sector's first wall. Choose a surviving outer first wall before joining slopes or relatively aligned textures.");
+    }
+    joined.walls.clear();
+    joined.vertices.clear();
+    joined.loopStarts.clear();
+    for (const auto &loop : loops) {
+        if (loops.size() > 1) { joined.loopStarts.push_back(joined.walls.size()); }
+        for (auto e : loop) {
+            joined.walls.push_back(edges[e].wall);
+            joined.vertices.push_back(edges[e].start);
+        }
+    }
+
+    // A source slope may intersect the opposite surface in the enlarged room.
+    const auto a = m_vertices[joined.vertices[0]].position;
+    const auto d = m_vertices[joined.vertices[1]].position - a;
+    const auto surfaceZ = [&](VertexId v, bool floor) {
+        double z = floor ? joined.floorz : joined.ceilingz;
+        if ((floor ? joined.floorstat : joined.ceilingstat) & 2) {
+            const auto p = m_vertices[v].position - a;
+            z += (floor ? joined.floorheinum : joined.ceilingheinum)
+                * (d.x()*p.y() - d.y()*p.x()) / (std::hypot(d.x(), d.y())*256.0);
+        }
+        return z;
+    };
+    for (auto v : joined.vertices) {
+        if (surfaceZ(v, true) < surfaceZ(v, false)) {
+            return fail("The source sector's slope would put the floor above the ceiling in the joined sector.");
+        }
+    }
+
+    // Compact only removed wall/sector records. All surviving wall-side values
+    // remain intact, including portals to sectors outside the selection.
+    auto candidate = *this;
+    candidate.m_sectors.clear();
+    std::vector<SectorId> sectorMap(m_sectors.size());
+    for (SectorId s = 0; s < m_sectors.size(); ++s) {
+        if (selected.count(s) && s != donor) { continue; }
+        sectorMap[s] = candidate.m_sectors.size();
+        candidate.m_sectors.push_back(s == donor ? joined : m_sectors[s]);
+    }
+    for (SectorId s : selected) { sectorMap[s] = sectorMap[donor]; }
+    std::vector<WallId> wallMap(m_walls.size());
+    candidate.m_walls.clear();
+    for (WallId w = 0; w < m_walls.size(); ++w) {
+        if (removed.count(w)) { continue; }
+        wallMap[w] = candidate.m_walls.size();
+        auto wall = m_walls[w];
+        if (wall.forwardSector) { wall.forwardSector = sectorMap[*wall.forwardSector]; }
+        if (wall.reverseSector) { wall.reverseSector = sectorMap[*wall.reverseSector]; }
+        candidate.m_walls.push_back(wall);
+    }
+    for (auto &sector : candidate.m_sectors) {
+        for (auto &wall : sector.walls) { wall = wallMap[wall]; }
+    }
+    for (auto &sprite : candidate.m_sprites) {
+        if (sprite.sectorId) { sprite.sectorId = sectorMap[*sprite.sectorId]; }
+    }
+    if (candidate.m_playerStart.sectorId) {
+        candidate.m_playerStart.sectorId = sectorMap[*candidate.m_playerStart.sectorId];
+    }
+    std::vector<bool> used(candidate.m_vertices.size());
+    for (const auto &wall : candidate.m_walls) { used[wall.start] = used[wall.end] = true; }
+    std::vector<VertexId> vertexMap(candidate.m_vertices.size());
+    std::vector<Vertex> vertices;
+    for (VertexId v = 0; v < used.size(); ++v) {
+        if (used[v]) { vertexMap[v] = vertices.size(); vertices.push_back(candidate.m_vertices[v]); }
+    }
+    for (auto &wall : candidate.m_walls) {
+        wall.start = vertexMap[wall.start]; wall.end = vertexMap[wall.end];
+    }
+    for (auto &sector : candidate.m_sectors) {
+        for (auto &v : sector.vertices) { v = vertexMap[v]; }
+    }
+    candidate.m_vertices = std::move(vertices);
+    *this = std::move(candidate);
+    return sectorMap[donor];
 }
 
 void MapDocument::removeWalls(const std::vector<WallId> &wallIds)

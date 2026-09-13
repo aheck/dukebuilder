@@ -575,6 +575,23 @@ MapEditor::MapEditor(QWidget *parent)
 {
     setScene(m_scene);
     connect(m_scene, &QGraphicsScene::selectionChanged, this, [this] {
+        std::set<MapDocument::SectorId> selectedSectors;
+        if (m_mode == Mode::Sectors) {
+            for (auto *item : m_scene->selectedItems()) {
+                if (dynamic_cast<SectorItem *>(item)) {
+                    selectedSectors.insert(item->data(sectorIdRole).toULongLong());
+                }
+            }
+        }
+        m_sectorSelectionOrder.erase(std::remove_if(m_sectorSelectionOrder.begin(), m_sectorSelectionOrder.end(),
+            [&](auto id) { return !selectedSectors.count(id); }), m_sectorSelectionOrder.end());
+        // Simultaneous rubber-band additions use sector number as a stable tie-break.
+        for (auto id : selectedSectors) {
+            if (std::find(m_sectorSelectionOrder.begin(), m_sectorSelectionOrder.end(), id) == m_sectorSelectionOrder.end()) {
+                m_sectorSelectionOrder.push_back(id);
+            }
+        }
+        if (joinAvailabilityChanged) { joinAvailabilityChanged(canJoinSelectedSectors()); }
         if (m_mode != Mode::Sprites) {
             updateProperties();
             return;
@@ -1782,6 +1799,29 @@ void MapEditor::wheelEvent(QWheelEvent *event)
 void MapEditor::drawBackground(QPainter *painter, const QRectF &rect)
 {
     m_scene->paintBackground(painter, rect);
+}
+
+bool MapEditor::canJoinSelectedSectors() const
+{
+    return m_mode == Mode::Sectors && m_sectorSelectionOrder.size() >= 2;
+}
+
+void MapEditor::joinSelectedSectors()
+{
+    if (!isVisible() || !canJoinSelectedSectors()) { return; }
+    const auto source = m_sectorSelectionOrder.front();
+    QString error;
+    const auto joined = m_document.joinSectors(m_sectorSelectionOrder, error);
+    if (!joined) { reportStatus(error); return; }
+    rebuildScene();
+    for (auto *item : m_scene->items()) {
+        if (dynamic_cast<SectorItem *>(item) && item->data(sectorIdRole).toULongLong() == *joined) {
+            item->setSelected(true);
+            break;
+        }
+    }
+    updateProperties();
+    reportStatus(QString("Joined sectors using properties from sector %1.").arg(source));
 }
 
 void MapEditor::stickSelectedSpriteToWall()

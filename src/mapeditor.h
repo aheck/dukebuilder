@@ -145,6 +145,9 @@ public:
     void setSectorHeight(std::size_t sector, bool floor, qreal height);
     void resetSelectedWallTextureScale();
     void stickSelectedSpriteToWall();
+    bool canJoinSelectedSectors() const;
+    void joinSelectedSectors();
+    std::function<void(bool)> joinAvailabilityChanged;
     void setSpriteValues(std::size_t sprite, const MapDocument::Sprite &values);
     void newMap();
     [[nodiscard]] std::set<int> usedTextureTiles() const { return m_document.usedTextureTiles(); }
@@ -195,6 +198,7 @@ private:
     MapDocument m_savedDocument;
     MapDocument m_vertexDragDocument;
     MapScene *m_scene = nullptr;
+    std::vector<MapDocument::SectorId> m_sectorSelectionOrder;
     QGraphicsPathItem *m_previewItem = nullptr;
     QGraphicsEllipseItem *m_splitPreviewItem = nullptr;
     std::optional<MapDocument::WallId> m_splitWall;
