@@ -1,7 +1,8 @@
 # Duke Builder
 
-A basic Qt 6 desktop application built with Meson. Conan supplies Qt and emits
-the native file Meson uses to find it.
+An experimental level editor for Duke 3D built with Qt.
+
+![Duke Builder in 2D mode](./pics/DukeBuilder2D.png)
 
 ## Requirements
 
