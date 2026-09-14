@@ -1329,10 +1329,10 @@ MainWindow::MainWindow(QWidget *parent)
     connect(aboutAction, &QAction::triggered, this, [this] {
         QMessageBox::about(
             this,
-            "About Duke Builder",
-            "<h3>Duke Builder</h3>"
-            "<p>A level editor for Duke 3D powered by Qt 6.</p>"
-            "<p>Version " PROGRAM_VERSION "</p>");
+            "About " PROGRAM_NAME,
+            "<h3>" PROGRAM_NAME "</h3>"
+            "<p>" PROGRAM_DESCRIPTION "<br>" "Version: " PROGRAM_VERSION "</p>"
+            "<p>" PROGRAM_COPYRIGHT "<br/>" PROGRAM_TERMS "</p>");
     });
 
     auto *autosaveTimer = m_autosaveTimer = new QTimer(this);
