@@ -3,7 +3,8 @@ project(
   'cpp',
   version: '0.1.0',
   default_options: [
-    'b_sanitize=address',
+    # Sanitizers are opt-in; release artifacts must not require their runtimes.
+    'b_sanitize=none',
     'b_lundef=false',
     'cpp_std=c++17',
     'warning_level=3',

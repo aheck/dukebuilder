@@ -45,7 +45,7 @@ and shared Qt builds do not acquire an explicit `b2` dependency from this workar
 Configure and build the application:
 
 ```sh
-meson setup build --native-file conan/conan_meson_native.ini --buildtype debug
+meson setup build --native-file conan/conan_meson_native.ini --buildtype debug -Db_sanitize=address
 meson compile -C build
 ```
 
@@ -205,8 +205,21 @@ Back, labeled with its sector number. The tick on the selected line points
 toward the active side. Each side retains its own values; a one-sided wall
 shows only its available side.
 
-For a release build, use `Release` for Conan's `build_type`, use `release` for
-Meson's `--buildtype`, and configure a separate build directory.
+Sanitizers are disabled by default. The debug example above explicitly enables
+AddressSanitizer; omit that flag if your development toolchain does not support it.
+For a release build, use `Release` for Conan's `build_type` and a separate build
+directory, explicitly disabling sanitizers:
+
+```sh
+conan install . --output-folder=conan-release --build=missing -s build_type=Release
+meson setup build-release --native-file=conan-release/conan_meson_native.ini --buildtype=release -Db_sanitize=none
+meson compile -C build-release
+```
+
+Existing build directories retain their configured options. Before using an
+existing directory for a release, set `meson configure build-release
+--buildtype=release -Db_sanitize=none` and rebuild. Switching only `--buildtype`
+does not clear an explicitly enabled sanitizer.
 
 ## Opening and saving maps
 
@@ -342,7 +355,7 @@ and its renderer linked statically and the remaining redistributable runtime
 libraries collected by linuxdeploy. Game data and EDuke32 are not included.
 
 After configuring and building libduke with its renderer enabled, configure a
-separate release build (the normal development build enables AddressSanitizer):
+separate release build (the debug example above opts into AddressSanitizer):
 
 ```sh
 meson setup build-appimage --native-file=conan/conan_meson_native.ini \
