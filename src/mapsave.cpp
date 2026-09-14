@@ -77,7 +77,8 @@ int16_t containingSector(const DukeMapFile &map, int32_t x, int32_t y, const QSt
 }
 
 static bool buildMap(const MapDocument &document, QString &error,
-                  const std::function<bool(DukeMapFile &, QString &)> &consume, MapCheckResult *issue)
+                  const std::function<bool(DukeMapFile &, QString &)> &consume, MapCheckResult *issue,
+                  BuildMapValidation validation)
 {
     error.clear();
     using Target = MapCheckResult::Target;
@@ -221,8 +222,19 @@ static bool buildMap(const MapDocument &document, QString &error,
             }
             throw std::runtime_error(map.last_error);
         };
-        if (!duke_map_file_validate_vertical_sectors(&map)) libraryFailure();
-        if (!duke_map_file_validate_portals(&map)) libraryFailure();
+        if (validation == BuildMapValidation::Strict) {
+            if (!duke_map_file_validate_vertical_sectors(&map)) libraryFailure();
+            if (!duke_map_file_validate_portals(&map)) libraryFailure();
+        }
+        // Imported effect sprites may lie outside their sector's polygon. The
+        // renderer needs a valid sector index, not strict geometric membership.
+        const auto membership = [&](int32_t x, int32_t y, const QString &label,
+                                    std::optional<MapDocument::SectorId> preferred) {
+            if (validation == BuildMapValidation::Preview && preferred && *preferred < sectors.size()) {
+                return static_cast<int16_t>(*preferred);
+            }
+            return containingSector(map, x, y, label, preferred);
+        };
 
         for (std::size_t id = 0; id < spriteRecords.size(); ++id) {
             target(Target::Sprite, id);
@@ -234,7 +246,7 @@ static bool buildMap(const MapDocument &document, QString &error,
             out.z = number<int32_t>(source.z, label + " Z");
             out.ang = angle(source.angle, label);
             out.picnum = tile(source.texture, label + " texture");
-            out.sectnum = containingSector(map, out.x, out.y, label, source.sectorId);
+            out.sectnum = membership(out.x, out.y, label, source.sectorId);
             out.shade = number<decltype(out.shade)>(source.shade, label + " shade");
             out.pal = number<decltype(out.pal)>(source.palette, label + " palette");
             out.clipdist = number<decltype(out.clipdist)>(source.clipdist, label + " clipdist");
@@ -260,8 +272,12 @@ static bool buildMap(const MapDocument &document, QString &error,
         map.posy = number<int32_t>(start.position.y(), "Player start Y");
         map.posz = number<int32_t>(start.z, "Player start Z");
         map.ang = angle(start.angle, "Player start");
-        map.cursectnum = containingSector(map, map.posx, map.posy, "Player start", start.sectorId);
-        if (!duke_map_file_validate(&map)) libraryFailure();
+        map.cursectnum = membership(map.posx, map.posy, "Player start", start.sectorId);
+        if (validation == BuildMapValidation::Strict) {
+            if (!duke_map_file_validate(&map)) libraryFailure();
+        } else if (!duke_map_file_validate_references(&map)) {
+            libraryFailure();
+        }
 
         return consume(map, error);
     } catch (const std::exception &exception) {
@@ -271,15 +287,15 @@ static bool buildMap(const MapDocument &document, QString &error,
 }
 
 bool withBuildMap(const MapDocument &document, QString &error,
-                  const std::function<bool(DukeMapFile &, QString &)> &consume)
+                  const std::function<bool(DukeMapFile &, QString &)> &consume, BuildMapValidation validation)
 {
-    return buildMap(document, error, consume, nullptr);
+    return buildMap(document, error, consume, nullptr, validation);
 }
 
 MapCheckResult checkMap(const MapDocument &document)
 {
     MapCheckResult result;
-    result.valid = buildMap(document, result.message, [](DukeMapFile &, QString &) { return true; }, &result);
+    result.valid = buildMap(document, result.message, [](DukeMapFile &, QString &) { return true; }, &result, BuildMapValidation::Strict);
     if (result.valid) {
         result.target = MapCheckResult::Target::Map;
         result.message = "No errors found by Build map save validation.";

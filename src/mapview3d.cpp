@@ -109,7 +109,7 @@ bool MapView3D::start(const MapDocument &document, const QPointF &pointer, QStri
         }
         diagnostic = "Unable to load a renderable game archive: " + diagnostic;
         return false;
-    });
+    }, BuildMapValidation::Preview);
     doneCurrent();
     if (!ok) { return false; }
     m_snapshot = std::move(snapshot);
@@ -363,7 +363,7 @@ bool MapView3D::applySnapshot(MapDocument candidate)
         } else { diagnostic = QString::fromUtf8(grp->last_error); }
         duke_grp_free(grp);
         return replacement != nullptr;
-    });
+    }, BuildMapValidation::Preview);
     if (ok) {
         duke_renderer_destroy(m_renderer);
         m_renderer = replacement;

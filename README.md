@@ -77,6 +77,12 @@ have no object to select. A successful check confirms that save validation
 passes; it does not simulate gameplay or validate the behavior of tagged effects.
 Checking does not change map data or undo history.
 
+3D mode uses less restrictive preview validation: it retains field-range and
+reference checks but permits intersecting walls and imported effect geometry.
+Existing sprite sector membership is preserved for rendering. This lets maps
+such as the original E1L1 enter 3D mode even when strict geometry checks fail.
+Save and Check Map still apply the full validation rules.
+
 ## Autosave and recovery
 
 Duke Builder writes a recovery snapshot every minute while there are unsaved

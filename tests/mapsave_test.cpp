@@ -360,10 +360,42 @@ int main(int argc, char **argv)
                 "Empty map has map-wide diagnostic");
     }
 
+    {
+        const auto source = room();
+        const QString crossingPath = directory.filePath("crossing.map");
+        require(withBuildMap(source, error, [&](DukeMapFile &map, QString &) {
+            std::swap(map.walls[1]->x, map.walls[2]->x);
+            std::swap(map.walls[1]->y, map.walls[2]->y);
+            return duke_map_file_write_to_filename(&map, QFile::encodeName(crossingPath).constData());
+        }), error);
+        MapDocument crossing;
+        require(crossing.openMap(crossingPath, error), error);
+        const auto before = crossing;
+        require(!checkMap(crossing).valid, "Strict checks reject crossing walls");
+        bool consumed = false;
+        const auto consume = [&](DukeMapFile &map, QString &) {
+            consumed = true;
+            return duke_map_file_validate_references(&map);
+        };
+        require(withBuildMap(crossing, error, consume, BuildMapValidation::Preview) && consumed, error);
+        require(crossing == before, "Preview conversion does not mutate geometry");
+        require(!saveBuildMap(crossing, directory.filePath("invalid-export.map"), error),
+                "Saving remains strict after preview conversion");
+        auto badSector = crossing.sectors()[0];
+        badSector.walls[0] = crossing.walls().size();
+        crossing.setSector(0, badSector);
+        consumed = false;
+        require(!withBuildMap(crossing, error, consume, BuildMapValidation::Preview) && !consumed,
+                "Preview rejects invalid references before calling the renderer");
+    }
+
     // Optional local fixtures permit checking original maps without bundling
     // copyrighted game data in the repository.
     for (int i = 1; i < argc; ++i) {
         require(opened.openMap(QString::fromLocal8Bit(argv[i]), error), error);
+        require(withBuildMap(opened, error, [](DukeMapFile &map, QString &) {
+            return duke_map_file_validate_references(&map);
+        }, BuildMapValidation::Preview), error);
         std::cout << "Opened " << argv[i] << ": " << opened.sectors().size()
                   << " sectors, " << opened.sprites().size() << " sprites\n";
     }

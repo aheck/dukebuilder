@@ -22,7 +22,11 @@ bool saveBuildMap(const MapDocument &document, const QString &filename, QString 
 
 #include <functional>
 #include <libduke/map.h>
+// Preview retains reference/range checks but permits intersecting effect geometry
+// and uses existing sector membership. Save and Check Map always remain strict.
+enum class BuildMapValidation { Strict, Preview };
 // Supply a validated, borrowed in-memory snapshot for the duration of consume.
 // The consumer must not retain map pointers; it can report failures via error.
 bool withBuildMap(const MapDocument &document, QString &error,
-                  const std::function<bool(DukeMapFile &, QString &)> &consume);
+                  const std::function<bool(DukeMapFile &, QString &)> &consume,
+                  BuildMapValidation validation = BuildMapValidation::Strict);

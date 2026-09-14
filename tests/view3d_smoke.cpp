@@ -35,7 +35,7 @@ static void require(bool ok, const char *message)
 }
 int main(int argc, char **argv)
 {
-    if (argc != 2) { return 2; }
+    if (argc != 2 && argc != 3) { return 2; }
     QSurfaceFormat format;
     format.setVersion(4,1); format.setProfile(QSurfaceFormat::CoreProfile);
     format.setDepthBufferSize(24); format.setStencilBufferSize(8);
@@ -56,6 +56,22 @@ int main(int argc, char **argv)
         if (auto *v = dynamic_cast<MapView3D *>(widget)) { view = v; }
     }
     require(editor && view, "view widgets");
+    // Optional original-game fixture: exercise entry and subsequent mesh rebuilds.
+    if (argc == 3) {
+        MapDocument imported;
+        QString error;
+        require(imported.openMap(QString::fromLocal8Bit(argv[2]), error), error.toUtf8().constData());
+        view->show();
+        QTest::qWait(100);
+        require(view->start(imported, imported.playerStart().position, error), error.toUtf8().constData());
+        QTest::qWait(100);
+        require(!view->grabFramebuffer().isNull(), "original map renders a frame");
+        imported.setSectorFloorTexture(0, 1);
+        require(view->refreshDocument(imported), "original map supports 3D snapshot refresh");
+        view->stop();
+        std::cout << "Original map 3D entry and refresh passed\n";
+        return 0;
+    }
     MapDocument room;
     require(room.addPolyline({{-4096,-4096},{4096,-4096},{4096,4096},{-4096,4096}}, true), "room");
     room.setSectorCeilingZ(0,-32768);
