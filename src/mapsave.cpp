@@ -3,6 +3,7 @@
 #include <libduke/map.h>
 
 #include <QFile>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QTemporaryFile>
 #include <algorithm>
@@ -75,21 +76,28 @@ int16_t containingSector(const DukeMapFile &map, int32_t x, int32_t y, const QSt
 }
 }
 
-bool withBuildMap(const MapDocument &document, QString &error,
-                  const std::function<bool(DukeMapFile &, QString &)> &consume)
+static bool buildMap(const MapDocument &document, QString &error,
+                  const std::function<bool(DukeMapFile &, QString &)> &consume, MapCheckResult *issue)
 {
     error.clear();
+    using Target = MapCheckResult::Target;
+    const auto target = [issue](Target kind, std::size_t id = 0, bool reversed = false) {
+        if (issue) { issue->target = kind; issue->id = id; issue->reversed = reversed; }
+    };
     try {
         const auto &sectors = document.sectors();
         require(!sectors.empty(), "The map has no closed sectors.");
         require(sectors.size() <= MAPV7_MAXSECTORS, "Version 7 supports at most 1024 sectors.");
         require(document.sprites().size() <= MAPV7_MAXSPRITES, "Version 7 supports at most 4096 sprites.");
         std::size_t wallCount = 0;
-        for (const auto &sector : sectors) {
+        for (std::size_t id = 0; id < sectors.size(); ++id) {
+            target(Target::Sector, id);
+            const auto &sector = sectors[id];
             require(sector.walls.size() >= 3 && sector.walls.size() == sector.vertices.size(),
                     "A sector has an incomplete boundary.");
             wallCount += sector.walls.size();
         }
+        target(Target::Map);
         require(wallCount <= MAPV7_MAXWALLS, "Version 7 supports at most 8192 wall sides (shared lines count twice).");
 
         // Storage owns the records; libduke borrows the pointer arrays below.
@@ -115,6 +123,7 @@ bool withBuildMap(const MapDocument &document, QString &error,
         std::vector<int> wallOwners(wallCount, -1);
         int nextWall = 0;
         for (std::size_t id = 0; id < sectors.size(); ++id) {
+            target(Target::Sector, id);
             const auto &source = sectors[id];
             auto &out = sectorRecords[id];
             const QString label = QString("Sector %1").arg(id);
@@ -142,6 +151,7 @@ bool withBuildMap(const MapDocument &document, QString &error,
             out.ceilingpicnum = tile(source.ceilingTexture, label + " ceiling texture");
             out.floorpicnum = tile(source.floorTexture, label + " floor texture");
             for (std::size_t j = 0; j < source.walls.size(); ++j, ++nextWall) {
+                target(Target::Sector, id);
                 const auto wallId = source.walls[j];
                 const auto vertexId = source.vertices[j];
                 const auto endId = source.vertices[source.nextWallIndex(j)];
@@ -154,6 +164,7 @@ bool withBuildMap(const MapDocument &document, QString &error,
                 require(index < 0, label + ": a wall side belongs to multiple sectors.");
                 index = nextWall;
                 wallOwners[nextWall] = static_cast<int>(id);
+                target(Target::Wall, wallId, reversed);
                 const auto &side = reversed ? wall.reverseSide : wall.forwardSide;
                 auto &record = wallRecords[nextWall];
                 const QString wallLabel = QString("Line %1, sector %2").arg(wallId).arg(id);
@@ -177,6 +188,7 @@ bool withBuildMap(const MapDocument &document, QString &error,
             }
         }
         for (std::size_t id = 0; id < sideIndices.size(); ++id) {
+            target(Target::Wall, id);
             const auto &indices = sideIndices[id];
             require(indices[0] >= 0 || indices[1] >= 0,
                     QString("Line %1 is not part of a closed sector.").arg(id));
@@ -187,10 +199,33 @@ bool withBuildMap(const MapDocument &document, QString &error,
                 wall.nextsector = static_cast<int16_t>(wallOwners[indices[1 - side]]);
             }
         }
-        if (!duke_map_file_validate_vertical_sectors(&map)) throw std::runtime_error(map.last_error);
-        if (!duke_map_file_validate_portals(&map)) throw std::runtime_error(map.last_error);
+        // libduke exposes textual diagnostics. Translate exported wall numbers
+        // back to editor lines/sides here; never treat them as editor IDs.
+        const auto libraryFailure = [&] {
+            target(Target::Map);
+            const QString diagnostic = QString::fromUtf8(map.last_error);
+            if (diagnostic.startsWith("Starting ") || diagnostic.startsWith("Invalid starting ")) {
+                target(Target::PlayerStart);
+            } else {
+                const auto match = QRegularExpression("\\b(Sector|Wall(?:s| loop beginning at)?|Sprite|wall) ([0-9]+)\\b").match(diagnostic);
+                if (match.hasMatch()) {
+                    const auto id = match.captured(2).toULongLong();
+                    if (match.captured(1) == "Sector" && id < sectors.size()) target(Target::Sector, id);
+                    else if (match.captured(1) == "Sprite" && id < document.sprites().size()) target(Target::Sprite, id);
+                    else if ((match.captured(1).startsWith("Wall") || match.captured(1) == "wall") && id < wallCount) {
+                        for (std::size_t line = 0; line < sideIndices.size(); ++line)
+                            for (int side = 0; side < 2; ++side)
+                                if (sideIndices[line][side] == static_cast<int>(id)) target(Target::Wall, line, side != 0);
+                    }
+                }
+            }
+            throw std::runtime_error(map.last_error);
+        };
+        if (!duke_map_file_validate_vertical_sectors(&map)) libraryFailure();
+        if (!duke_map_file_validate_portals(&map)) libraryFailure();
 
         for (std::size_t id = 0; id < spriteRecords.size(); ++id) {
+            target(Target::Sprite, id);
             const auto &source = document.sprites()[id];
             auto &out = spriteRecords[id];
             const QString label = QString("Sprite %1").arg(id);
@@ -219,19 +254,37 @@ bool withBuildMap(const MapDocument &document, QString &error,
             out.hitag = bits(source.hitag, label + " hitag");
             require((source.cstat & 48) != 48, label + ": invalid sprite alignment.");
         }
+        target(Target::PlayerStart);
         const auto &start = document.playerStart();
         map.posx = number<int32_t>(start.position.x(), "Player start X");
         map.posy = number<int32_t>(start.position.y(), "Player start Y");
         map.posz = number<int32_t>(start.z, "Player start Z");
         map.ang = angle(start.angle, "Player start");
         map.cursectnum = containingSector(map, map.posx, map.posy, "Player start", start.sectorId);
-        if (!duke_map_file_validate(&map)) throw std::runtime_error(map.last_error);
+        if (!duke_map_file_validate(&map)) libraryFailure();
 
         return consume(map, error);
     } catch (const std::exception &exception) {
         error = QString::fromUtf8(exception.what());
         return false;
     }
+}
+
+bool withBuildMap(const MapDocument &document, QString &error,
+                  const std::function<bool(DukeMapFile &, QString &)> &consume)
+{
+    return buildMap(document, error, consume, nullptr);
+}
+
+MapCheckResult checkMap(const MapDocument &document)
+{
+    MapCheckResult result;
+    result.valid = buildMap(document, result.message, [](DukeMapFile &, QString &) { return true; }, &result);
+    if (result.valid) {
+        result.target = MapCheckResult::Target::Map;
+        result.message = "No errors found by Build map save validation.";
+    }
+    return result;
 }
 
 bool saveBuildMap(const MapDocument &document, const QString &filename, QString &error)

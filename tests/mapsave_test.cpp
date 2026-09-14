@@ -308,6 +308,58 @@ int main(int argc, char **argv)
             "Continue drawing after another reload");
     require(saveBuildMap(reopenedHole, copiedPath, error), error);
 
+    {
+        auto checked = room();
+        const auto before = checked;
+        auto result = checkMap(checked);
+        require(result.valid && checked == before, "Check Map accepts valid document without mutation");
+        checked.setPlayerStartZ(1000);
+        result = checkMap(checked);
+        require(!result.valid && result.target == MapCheckResult::Target::PlayerStart,
+                "Check Map locates player Z error from libduke");
+        checked = before;
+        checked.setSectorFloorZ(0,-16384);
+        result = checkMap(checked);
+        require(!result.valid && result.target == MapCheckResult::Target::Sector && result.id == 0,
+                "Check Map locates inverted sector");
+        checked = before;
+        const auto sprite = checked.addSprite({0,0});
+        result = checkMap(checked);
+        require(!result.valid && result.target == MapCheckResult::Target::Sprite && result.id == sprite,
+                "Check Map locates untextured sprite");
+        QString saveError;
+        require(!saveBuildMap(checked,directory.filePath("check-invalid.map"),saveError)
+                && saveError == result.message, "Check Map and save report the same error");
+        checked = before;
+        require(checked.addPolyline({{1024,-1024},{2048,-1024},{2048,1024},{1024,1024}},true), "Check Map adjacent fixture");
+        std::size_t shared = 0;
+        while (shared < checked.walls().size() && !checked.walls()[shared].isTwoSided()) ++shared;
+        require(shared < checked.walls().size(), "Shared line exists");
+        auto side = checked.walls()[shared].reverseSide;
+        side.texture = -1;
+        checked.setWallSide(shared,true,side);
+        result = checkMap(checked);
+        require(!result.valid && result.target == MapCheckResult::Target::Wall
+                && result.id == shared && result.reversed, "Check Map identifies correct portal side");
+        checked.setWallSide(shared,true,before.walls()[shared].reverseSide);
+        const auto wall = checked.walls()[shared];
+        checked.setVertexPositions({{wall.end, checked.vertices()[wall.start].position}});
+        result = checkMap(checked);
+        require(!result.valid, "Check Map rejects collapsed geometry");
+        checked = before;
+        auto rotated = checked.sectors()[0];
+        std::rotate(rotated.walls.begin(),rotated.walls.begin()+2,rotated.walls.end());
+        std::rotate(rotated.vertices.begin(),rotated.vertices.begin()+2,rotated.vertices.end());
+        checked.setSector(0,rotated);
+        checked.setVertexPositions({{1,checked.vertices()[0].position + QPointF(0.4,0)}});
+        result = checkMap(checked);
+        require(!result.valid && result.target == MapCheckResult::Target::Wall && result.id == 3,
+                QString("Map library wall index is translated to editor line after first-wall rotation: %1 (target %2, id %3)").arg(result.message).arg(int(result.target)).arg(result.id));
+        result = checkMap(MapDocument{});
+        require(!result.valid && result.target == MapCheckResult::Target::Map,
+                "Empty map has map-wide diagnostic");
+    }
+
     // Optional local fixtures permit checking original maps without bundling
     // copyrighted game data in the repository.
     for (int i = 1; i < argc; ++i) {

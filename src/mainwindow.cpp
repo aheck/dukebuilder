@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "recovery.h"
+#include "mapsave.h"
 #include <QTimer>
 #include "mapeditor.h"
 #include "mapview3d.h"
@@ -1072,6 +1073,7 @@ MainWindow::MainWindow(QWidget *parent)
                                    bool checked = false) {
         auto *action = modeMenu->addAction(name);
         action->setActionGroup(modeGroup);
+        action->setData(static_cast<int>(mode));
         action->setCheckable(true);
         action->setChecked(checked);
         action->setShortcut(shortcut);
@@ -1187,6 +1189,42 @@ MainWindow::MainWindow(QWidget *parent)
         statusBar()->showMessage("2D mode");
     };
     view3D->leave3D = leave3D;
+    auto *checkMapAction = toolsMenu->addAction("Check Map");
+    checkMapAction->setObjectName("checkMapAction");
+    checkMapAction->setShortcut(QKeySequence(Qt::Key_F4));
+    checkMapAction->setAutoRepeat(false);
+    connect(checkMapAction, &QAction::triggered, this, [=] {
+        if (editor->isVisible()) editor->setFocus(); // Commit property cell edits.
+        MapCheckResult result;
+        if (!editor->canAutosave()) {
+            result.message = "Finish the current drag before checking the map.";
+        } else if (!editor->drawingPoints().empty()) {
+            result.target = MapCheckResult::Target::Drawing;
+            result.message = "Finish or cancel the current drawing before checking the map.";
+        } else result = checkMap(editor->document());
+        QMessageBox dialog(result.valid ? QMessageBox::Information : QMessageBox::Warning,
+            "Check Map", result.message, QMessageBox::Close, this);
+        dialog.setTextFormat(Qt::PlainText);
+        QPushButton *show = nullptr;
+        if (!result.valid) {
+            dialog.setInformativeText("Checking stops at the first error. Fix it, then run Check Map again (F4).");
+            if (result.target != MapCheckResult::Target::Map)
+                show = dialog.addButton("Show in Map", QMessageBox::ActionRole);
+        }
+        view3D->runModal([&] { dialog.exec(); });
+        if (show && dialog.clickedButton() == show) {
+            if (view3D->isVisible()) leave3D();
+            using Target = MapCheckResult::Target;
+            const auto mode = result.target == Target::Drawing ? MapEditor::Mode::Draw
+                : result.target == Target::Sector ? MapEditor::Mode::Sectors
+                : result.target == Target::Wall ? MapEditor::Mode::Lines : MapEditor::Mode::Sprites;
+            if (result.target != Target::Drawing) {
+                for (auto *action : modeGroup->actions())
+                    if (action->data().toInt() == static_cast<int>(mode)) { action->trigger(); break; }
+            }
+            editor->showMapIssue(result);
+        }
+    });
     view3D->continuousEditChanged = [editor](const QString &key) { editor->continuousEditKey = key; };
     editor->documentRestored = [=] {
         if (view3D->isVisible() && !view3D->refreshDocument(editor->document())) {

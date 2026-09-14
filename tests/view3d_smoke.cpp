@@ -127,6 +127,21 @@ int main(int argc, char **argv)
         QTest::keyClick(editor, Qt::Key_Q);
         QTest::qWait(300);
         require(view->isVisible() && !editor->isVisible(), "Q enters 3D");
+        if (i == 0) {
+            bool checked3D = false;
+            QTimer responder;
+            QObject::connect(&responder, &QTimer::timeout, &window, [&] {
+                auto *dialog = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+                if (dialog && dialog->windowTitle() == "Check Map") {
+                    checked3D = true; dialog->button(QMessageBox::Close)->click();
+                }
+            });
+            responder.start(10);
+            QTest::keyClick(view,Qt::Key_F4);
+            responder.stop();
+            require(checked3D && view->isVisible() && editor->document() == original,
+                    "Check Map works in 3D without leaving preview or changing document");
+        }
         auto pixels = view->grabFramebuffer();
         require(!pixels.isNull(), "3D framebuffer");
         bool varied = false;
@@ -557,6 +572,41 @@ int main(int argc, char **argv)
     require(editor->saveMap(path,error), "save deleted vertex");
     MapDocument vertexReload;
     require(vertexReload.openMap(path,error) && vertexReload.walls().size() == 4, "Vertex deletion survives reload");
+    auto checkFixture = editor->document();
+    const auto invalidSprite = checkFixture.addSprite({1024,1024});
+    editor->recoverDocument(checkFixture,{});
+    const auto historyCount = editor->undoStack()->count();
+    bool checkPromptSeen = false;
+    bool showIssue = true;
+    QTimer checkResponder;
+    QObject::connect(&checkResponder, &QTimer::timeout, &window, [&] {
+        auto *dialog = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+        if (!dialog || dialog->windowTitle() != "Check Map") return;
+        checkPromptSeen = true;
+        if (showIssue) {
+            for (auto *button : dialog->buttons()) {
+                if (button->text() == "Show in Map") { button->click(); return; }
+            }
+        }
+        dialog->button(QMessageBox::Close)->click();
+    });
+    checkResponder.start(10);
+    editor->setFocus();
+    QTest::keyClick(editor,Qt::Key_F4);
+    require(checkPromptSeen && editor->scene()->selectedItems().size() == 1
+            && editor->scene()->selectedItems().front()->data(Qt::UserRole+3).toULongLong() == invalidSprite,
+            "F4 Check Map selects invalid sprite");
+    require(editor->document() == checkFixture && editor->undoStack()->count() == historyCount,
+            "Check Map leaves map and history unchanged");
+    auto repaired = editor->document().sprites()[invalidSprite];
+    repaired.texture = 0;
+    editor->setSpriteValues(invalidSprite,repaired);
+    showIssue = false;
+    checkPromptSeen = false;
+    QTest::keyClick(editor,Qt::Key_F4);
+    require(checkPromptSeen && checkMap(editor->document()).valid, "Check Map succeeds after repair");
+    checkResponder.stop();
+
     // Exercise timer writes and startup recovery without terminating this test process.
     // Destroying a window without closeEvent models an interrupted session.
     auto session = std::make_unique<MainWindow>();

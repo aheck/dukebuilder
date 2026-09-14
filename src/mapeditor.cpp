@@ -1235,6 +1235,36 @@ void MapEditor::recoverDocument(const MapDocument &document, const std::vector<Q
     centerOn(document.playerStart().position);
 }
 
+void MapEditor::showMapIssue(const MapCheckResult &issue)
+{
+    using Target = MapCheckResult::Target;
+    if (issue.valid || issue.target == Target::Map) return;
+    if (issue.target == Target::Drawing) {
+        if (!m_drawingPoints.empty()) centerOn(m_drawingPoints.back());
+        setFocus();
+        return;
+    }
+    const auto mode = issue.target == Target::Sector ? Mode::Sectors
+        : issue.target == Target::Wall ? Mode::Lines : Mode::Sprites;
+    setMode(mode);
+    m_scene->clearSelection();
+    for (auto *item : m_scene->items()) {
+        const int role = issue.target == Target::Sector ? sectorIdRole
+            : issue.target == Target::Wall ? wallIdRole : spriteIdRole;
+        const bool matches = issue.target == Target::PlayerStart
+            ? dynamic_cast<PlayerStartItem *>(item) != nullptr
+            : item->data(role).isValid() && item->data(role).toULongLong() == issue.id;
+        if (matches) {
+            item->setSelected(true);
+            if (issue.target == Target::Wall) m_wallSideReversed = issue.reversed;
+            centerOn(item->sceneBoundingRect().center());
+            updateProperties();
+            break;
+        }
+    }
+    setFocus();
+}
+
 void MapEditor::newMap()
 {
     finishPendingEdit();

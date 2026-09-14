@@ -15,6 +15,7 @@ public:
     ~MapView3D() override;
     bool start(const MapDocument &document, const QPointF &pointer, QString &error);
     void stop();
+    void runModal(const std::function<void()> &show);
     bool refreshDocument(const MapDocument &document);
     std::function<void(const QString &)> continuousEditChanged;
     void stickSpriteToWall();

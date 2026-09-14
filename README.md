@@ -50,6 +50,20 @@ Run it:
 ./build/dukebuilder
 ```
 
+## Checking a map
+
+Use **Tools → Check Map** (**F4**) to run the same validation used by Save,
+without writing a file. It checks exported geometry, references, field ranges,
+format limits, sprite placement, and the player start. Finish or cancel any
+unfinished drawing before checking.
+
+Checking stops at the first blocking error. Choose **Show in Map** to select
+and center the affected sector, line side, sprite, or player start in 2D with
+its properties visible. Fix the problem and press F4 again. Map-wide errors
+have no object to select. A successful check confirms that save validation
+passes; it does not simulate gameplay or validate the behavior of tagged effects.
+Checking does not change map data or undo history.
+
 ## Autosave and recovery
 
 Duke Builder writes a recovery snapshot every minute while there are unsaved

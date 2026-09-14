@@ -314,6 +314,21 @@ void MapView3D::wheelEvent(QWheelEvent *event)
     update();
 }
 
+void MapView3D::runModal(const std::function<void()> &show)
+{
+    const bool captured = m_captured;
+    const bool running = m_timer.isActive();
+    m_timer.stop();
+    releaseLook();
+    show();
+    if (m_active) {
+        setFocus();
+        if (captured) captureLook();
+        m_clock.restart();
+        if (running) m_timer.start();
+    }
+}
+
 bool MapView3D::refreshDocument(const MapDocument &document)
 {
     if (!m_active) return true;

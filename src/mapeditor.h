@@ -18,6 +18,7 @@
 class QGraphicsPathItem;
 class QGraphicsEllipseItem;
 class QGraphicsSimpleTextItem;
+struct MapCheckResult;
 class QKeyEvent;
 class QMouseEvent;
 class QWheelEvent;
@@ -160,6 +161,7 @@ public:
     bool canAutosave() const { return !m_mouseEdit && m_editDepth == 0; }
     const std::vector<QPointF> &drawingPoints() const { return m_drawingPoints; }
     void recoverDocument(const MapDocument &document, const std::vector<QPointF> &points);
+    void showMapIssue(const MapCheckResult &issue);
     void newMap();
     [[nodiscard]] std::set<int> usedTextureTiles() const { return m_document.usedTextureTiles(); }
     bool saveMap(const QString &filename, QString &error);
