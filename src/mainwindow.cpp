@@ -1154,8 +1154,20 @@ MainWindow::MainWindow(QWidget *parent)
         const QFileInfo binaryFile(binary);
         QProcess process;
         process.setWorkingDirectory(binaryFile.absolutePath());
+#ifdef Q_OS_WIN
+        // Windows resolves relative programs against the parent's directory,
+        // not QProcess's working directory. Let Qt quote the absolute executable
+        // and individual arguments for CreateProcess, including paths with spaces.
+        process.setProgram(QDir::toNativeSeparators(binaryFile.absoluteFilePath()));
+#else
         process.setProgram("./" + binaryFile.fileName());
+#endif
         process.setArguments({"-usecwd", "-nosetup", "-j", mapFile.absolutePath(), "-map", mapFile.fileName()});
+#ifdef Q_OS_WIN
+        qInfo() << "Launching eDuke32:" << process.program()
+                << "arguments:" << process.arguments()
+                << "working directory:" << process.workingDirectory();
+#else
         const auto shellQuote = [](QString value) {
             value.replace("'", "'\\''");
             return "'" + value + "'";
@@ -1164,6 +1176,7 @@ MainWindow::MainWindow(QWidget *parent)
         for (const auto &argument : process.arguments()) command.append(shellQuote(argument));
         qInfo().noquote() << "Launching eDuke32: cd"
                           << shellQuote(process.workingDirectory()) << "&&" << command.join(' ');
+#endif
         if (!process.startDetached()) {
             QMessageBox::warning(this, "Unable to run eDuke32", process.errorString());
             return;
