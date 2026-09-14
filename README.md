@@ -50,6 +50,33 @@ Run it:
 ./build/dukebuilder
 ```
 
+## Autosave and recovery
+
+Duke Builder writes a recovery snapshot every minute while there are unsaved
+changes. These snapshots are separate from your `.map` files and do not change
+the saved/unsaved state. They preserve unfinished drawings, untextured sprites,
+and other work that cannot yet be exported as a valid Build map. Active drags
+are skipped until the next interval. Both 2D and 3D edits are included; the 3D
+preview's temporary player position is never stored.
+
+After an interrupted session, startup offers **Recover**, **Discard**, or
+**Later**. Recovery opens the work as an unsaved map and requires **Save As**;
+it never overwrites the original automatically. Later leaves the snapshot for
+a future launch. If multiple interrupted sessions exist, the newest is offered
+first; recovering one leaves the others available on a subsequent launch.
+Undo history and camera/selection state are not recovered.
+
+Successful saves, successful New/Open operations, and an accepted normal close
+remove the current session's recovery snapshot. Cancelling a close or failing
+a save keeps it. Each running instance has its own locked snapshot, replaced
+atomically. Invalid or unsupported snapshots are reported and left on disk.
+Autosave write errors appear in the status bar.
+
+Snapshots are stored in the `recovery` subdirectory of Qt's application-local
+data directory (normally `$XDG_DATA_HOME/Duke Builder/Duke Builder` on Linux,
+falling back to `~/.local/share/Duke Builder/Duke Builder`, and beneath
+`%LOCALAPPDATA%` on Windows). No game artwork is copied into recovery files.
+
 ## Undo and redo
 
 Use **Ctrl+Z** to undo and **Ctrl+Y** or **Ctrl+Shift+Z** to redo in either

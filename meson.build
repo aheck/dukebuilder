@@ -72,6 +72,7 @@ if host_machine.system() == 'linux'
 endif
 
 app_sources = [
+    'src/recovery.cpp',
     'src/mapview3d.cpp',
     'src/previewcamera.cpp',
     'src/mainwindow.cpp',
@@ -121,3 +122,9 @@ executable('view3d-smoke',
   cpp_args: app_cpp_args,
   include_directories: [include_directories('src'), libduke_inc],
   dependencies: app_dependencies + renderer_dependencies + [qt_test])
+
+recovery_test = executable('recovery-test',
+  ['tests/recovery_test.cpp', 'src/recovery.cpp', 'src/mapdocument.cpp'],
+  include_directories: include_directories('src'),
+  dependencies: [qt6, libb2])
+test('recovery', recovery_test)

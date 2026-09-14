@@ -157,6 +157,9 @@ public:
     std::function<void()> documentRestored;
     // Set only for the duration of a continuous 3D edit callback.
     QString continuousEditKey;
+    bool canAutosave() const { return !m_mouseEdit && m_editDepth == 0; }
+    const std::vector<QPointF> &drawingPoints() const { return m_drawingPoints; }
+    void recoverDocument(const MapDocument &document, const std::vector<QPointF> &points);
     void newMap();
     [[nodiscard]] std::set<int> usedTextureTiles() const { return m_document.usedTextureTiles(); }
     bool saveMap(const QString &filename, QString &error);
@@ -224,6 +227,7 @@ private:
 
     MapDocument m_document;
     MapDocument m_savedDocument;
+    bool m_recoveredDirty = false;
     MapDocument m_vertexDragDocument;
     MapScene *m_scene = nullptr;
     std::vector<MapDocument::SectorId> m_sectorSelectionOrder;

@@ -1173,7 +1173,7 @@ void MapEditor::setSectorHeight(std::size_t sector, bool floor, qreal height)
 
 bool MapEditor::hasUnsavedChanges() const
 {
-    return !m_drawingPoints.empty() || !(m_document == m_savedDocument);
+    return m_recoveredDirty || !m_drawingPoints.empty() || !(m_document == m_savedDocument);
 }
 
 bool MapEditor::saveMap(const QString &filename, QString &error)
@@ -1185,6 +1185,7 @@ bool MapEditor::saveMap(const QString &filename, QString &error)
     }
     if (!saveBuildMap(m_document, filename, error)) return false;
     m_savedDocument = m_document;
+    m_recoveredDirty = false;
     m_undoStack.setClean();
     return true;
 }
@@ -1205,6 +1206,7 @@ bool MapEditor::openMap(const QString &filename, QString &error)
     m_undoStack.clear();
     m_document = std::move(loaded);
     m_savedDocument = m_document;
+    m_recoveredDirty = false;
     m_spriteTextures.clear();
     for (const auto &sprite : m_document.sprites()) {
         if (m_textureResolver && sprite.texture >= 0 && !m_spriteTextures.contains(sprite.texture))
@@ -1221,6 +1223,18 @@ bool MapEditor::openMap(const QString &filename, QString &error)
     return true;
 }
 
+void MapEditor::recoverDocument(const MapDocument &document, const std::vector<QPointF> &points)
+{
+    finishPendingEdit();
+    m_undoStack.clear();
+    setMode(Mode::Draw);
+    restore(Snapshot{document, Selection{{}, {}, Mode::Draw, false}});
+    m_recoveredDirty = true;
+    m_drawingPoints = points;
+    if (!points.empty()) updatePreview(points.back());
+    centerOn(document.playerStart().position);
+}
+
 void MapEditor::newMap()
 {
     finishPendingEdit();
@@ -1228,6 +1242,7 @@ void MapEditor::newMap()
     cancelDrawing();
     m_document.clear();
     m_savedDocument = m_document;
+    m_recoveredDirty = false;
     rebuildScene();
     reportStatus("New map");
 }

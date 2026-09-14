@@ -168,6 +168,7 @@ public:
     [[nodiscard]] const PlayerStart &playerStart() const { return m_playerStart; }
 
 private:
+    friend class RecoveryCodec;
     VertexId findOrAddVertex(const QPointF &position);
     std::vector<bool> voidWallSides() const;
     void rebuildSectors(std::vector<bool> voidSides = {});

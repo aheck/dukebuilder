@@ -1,4 +1,9 @@
 #include "mainwindow.h"
+#include "recovery.h"
+#include <QMessageBox>
+#include <QAbstractButton>
+#include <QFileInfo>
+#include <QFile>
 #include "mapeditor.h"
 #include "mapview3d.h"
 #include "mapsave.h"
@@ -37,6 +42,7 @@ int main(int argc, char **argv)
     QTemporaryDir settings;
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
+    qputenv("XDG_DATA_HOME", settings.path().toUtf8());
     app.setOrganizationName("DukeBuilderSmoke"); app.setApplicationName("Preview");
     QSettings().setValue("gameData/grpFiles", QStringList{QString::fromLocal8Bit(argv[1])});
     MainWindow window;
@@ -551,6 +557,58 @@ int main(int argc, char **argv)
     require(editor->saveMap(path,error), "save deleted vertex");
     MapDocument vertexReload;
     require(vertexReload.openMap(path,error) && vertexReload.walls().size() == 4, "Vertex deletion survives reload");
+    // Exercise timer writes and startup recovery without terminating this test process.
+    // Destroying a window without closeEvent models an interrupted session.
+    auto session = std::make_unique<MainWindow>();
+    session->show();
+    QTest::qWait(50);
+    const auto findEditor = [](MainWindow *window) {
+        for (auto *widget : window->findChildren<QWidget *>())
+            if (auto *candidate = dynamic_cast<MapEditor *>(widget)) return candidate;
+        return static_cast<MapEditor *>(nullptr);
+    };
+    auto *sessionEditor = findEditor(session.get());
+    require(sessionEditor && sessionEditor->openMap(path,error), "load autosave fixture");
+    sessionEditor->setSectorHeight(0,true,128);
+    const auto unsaved = sessionEditor->document();
+    auto *timer = session->findChild<QTimer *>("autosaveTimer");
+    require(timer && timer->interval() == 60000, "autosave every minute");
+    require(QMetaObject::invokeMethod(timer,"timeout",Qt::DirectConnection), "trigger autosave timer");
+    QString abandonedPath;
+    for (const auto &candidate : RecoveryFile::candidates(RecoveryFile::directory())) {
+        QFile file(candidate);
+        if (!file.open(QIODevice::ReadOnly)) continue;
+        RecoverySnapshot snapshot;
+        if (RecoveryCodec::decode(file.readAll(),snapshot,error) && snapshot.document == unsaved)
+            abandonedPath = candidate;
+    }
+    require(!abandonedPath.isEmpty(), "timer persists unsaved document");
+    session.reset();
+    require(QFile::exists(abandonedPath), "interrupted session leaves recovery file");
+    QTimer answerPrompt;
+    QString expectedTitle = "Recover interrupted work";
+    QMessageBox::StandardButton answer = QMessageBox::Yes;
+    QObject::connect(&answerPrompt, &QTimer::timeout, &window, [&] {
+        auto *prompt = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+        if (prompt && prompt->windowTitle() == expectedTitle) prompt->button(answer)->click();
+    });
+    answerPrompt.start(10);
+    session = std::make_unique<MainWindow>();
+    session->show();
+    QTest::qWait(150);
+    sessionEditor = findEditor(session.get());
+    require(sessionEditor && sessionEditor->document() == unsaved && sessionEditor->hasUnsavedChanges(),
+            "startup recovers work as unsaved");
+    require(session->windowFilePath().isEmpty(), "recovered map requires Save As");
+    require(!QFile::exists(abandonedPath), "recovery transfers snapshot to current session");
+    expectedTitle = "Unsaved changes";
+    answer = QMessageBox::Cancel;
+    require(!session->close(), "cancel close retains recovered work");
+    require(!RecoveryFile::candidates(RecoveryFile::directory()).empty(), "cancel close retains recovery snapshot");
+    answer = QMessageBox::Discard;
+    require(session->close(), "discard recovered work closes session");
+    answerPrompt.stop();
+    session.reset();
     std::cout << "3D toggle, rendering, height and texture edits, validation and save persistence passed\n";
     return 0;
 }

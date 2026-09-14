@@ -1,4 +1,6 @@
 #include "mainwindow.h"
+#include "recovery.h"
+#include <QTimer>
 #include "mapeditor.h"
 #include "mapview3d.h"
 #include <QStackedWidget>
@@ -382,6 +384,7 @@ private:
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
+    m_recovery = std::make_unique<RecoveryFile>(RecoveryFile::newPath(RecoveryFile::directory()));
     setWindowTitle("Duke Builder");
     resize(1280, 800);
 
@@ -851,6 +854,8 @@ MainWindow::MainWindow(QWidget *parent)
             QMessageBox::warning(this, "Unable to save map", error);
             return false;
         }
+        m_recovery->remove();
+        m_recoveryOrigin.clear();
         m_mapFilename = filename;
         rememberMap(filename);
         setWindowFilePath(filename);
@@ -879,6 +884,8 @@ MainWindow::MainWindow(QWidget *parent)
     newMapAction->setShortcut(QKeySequence::New);
     connect(newMapAction, &QAction::triggered, this, [this, editor, confirmMapReplacement] {
         if (!confirmMapReplacement()) return;
+        m_recovery->remove();
+        m_recoveryOrigin.clear();
         editor->newMap();
         m_mapFilename.clear();
         setWindowFilePath({});
@@ -893,6 +900,8 @@ MainWindow::MainWindow(QWidget *parent)
             QMessageBox::warning(this, "Unable to open map", error);
             return;
         }
+        m_recovery->remove();
+        m_recoveryOrigin.clear();
         m_mapFilename = filename;
         rememberMap(filename);
         setWindowFilePath(filename);
@@ -1254,8 +1263,61 @@ MainWindow::MainWindow(QWidget *parent)
             "<p>Version " PROGRAM_VERSION "</p>");
     });
 
+    auto *autosaveTimer = m_autosaveTimer = new QTimer(this);
+    autosaveTimer->setObjectName("autosaveTimer");
+    autosaveTimer->setInterval(60000);
+    connect(autosaveTimer, &QTimer::timeout, this, [this, editor] {
+        if (!editor->canAutosave()) return;
+        if (!editor->hasUnsavedChanges()) { m_recovery->remove(); return; }
+        RecoverySnapshot snapshot{editor->document(), editor->drawingPoints(),
+            m_mapFilename.isEmpty() ? m_recoveryOrigin : m_mapFilename, QDateTime::currentDateTimeUtc()};
+        QString error;
+        if (!m_recovery->write(snapshot, error))
+            statusBar()->showMessage("Autosave failed: " + error, 10000);
+    });
+    autosaveTimer->start();
+    // Delay recovery prompts until the main window and its callbacks are ready.
+    QTimer::singleShot(0, this, [this, editor] {
+        for (const auto &path : RecoveryFile::candidates(RecoveryFile::directory())) {
+            RecoveryFile previous(path);
+            if (!previous.locked()) continue; // Another editor instance is using it.
+            RecoverySnapshot snapshot;
+            QString error;
+            if (!previous.read(snapshot, error)) {
+                QMessageBox::warning(this, "Unable to read recovery", error + "\n\nSnapshot kept at:\n" + path);
+                continue;
+            }
+            const QString name = snapshot.sourceFilename.isEmpty() ? "Untitled map" : snapshot.sourceFilename;
+            QMessageBox prompt(QMessageBox::Question, "Recover interrupted work",
+                "An earlier session left unsaved work.\n\n" + name + "\n" +
+                snapshot.timestamp.toLocalTime().toString("yyyy-MM-dd HH:mm:ss"),
+                QMessageBox::Yes | QMessageBox::Discard | QMessageBox::Cancel, this);
+            prompt.button(QMessageBox::Yes)->setText("Recover");
+            prompt.button(QMessageBox::Cancel)->setText("Later");
+            prompt.setDefaultButton(QMessageBox::Yes);
+            const auto answer = prompt.exec();
+            if (answer == QMessageBox::Discard) { previous.remove(); continue; }
+            if (answer != QMessageBox::Yes) break;
+            // Transfer durably before retiring the old session's only copy.
+            if (!m_recovery->write(snapshot, error)) {
+                QMessageBox::warning(this, "Unable to recover work", error);
+                break;
+            }
+            editor->recoverDocument(snapshot.document, snapshot.drawingPoints);
+            m_recoveryOrigin = snapshot.sourceFilename;
+            m_mapFilename.clear(); // Save As protects the original map on disk.
+            setWindowFilePath({});
+            setWindowTitle("Recovered map - Duke Builder");
+            previous.remove();
+            statusBar()->showMessage("Recovered unsaved work. Use Save As to save it as a map.", 10000);
+            break;
+        }
+    });
+
     statusBar()->showMessage("Ready");
 }
+
+MainWindow::~MainWindow() = default;
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
@@ -1264,4 +1326,8 @@ void MainWindow::closeEvent(QCloseEvent *event)
         return;
     }
     QMainWindow::closeEvent(event);
+    if (event->isAccepted()) {
+        m_autosaveTimer->stop();
+        m_recovery->remove();
+    }
 }
