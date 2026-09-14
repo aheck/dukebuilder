@@ -70,6 +70,7 @@ class InstallerTests(unittest.TestCase):
             write_pe(stage / 'dukebuilder.exe')
             output = root / 'output'
             calls = []
+            write_pe(root / 'vc_redist.x64.exe')
 
             def run(command, check):
                 calls.append(command)
@@ -86,9 +87,11 @@ class InstallerTests(unittest.TestCase):
                     config = config_path.read_text()
                     self.assertIn('Delete "$INSTDIR\\platforms\\qwindows.dll"', config)
                     self.assertIn('Qt6Core.dll', config)
+                    self.assertIn('!define VC_REDIST', config)
+                    self.assertEqual((config_path.parent / 'vc_redist.x64.exe').read_bytes(), (root / 'vc_redist.x64.exe').read_bytes())
                     (config_path.parent / 'DukeBuilder-0.1.0-x64-Setup.exe').write_bytes(b'test installer')
 
-            argv = ['packager', str(stage), '--version', '0.1.0', '--output-dir', str(output), '--windeployqt', 'qt-tool']
+            argv = ['packager', str(stage), '--version', '0.1.0', '--output-dir', str(output), '--windeployqt', 'qt-tool', '--vc-redist', str(root / 'vc_redist.x64.exe')]
             with mock.patch.object(installer.sys, 'argv', argv), mock.patch.object(installer.shutil, 'which', side_effect=lambda tool: tool), mock.patch.object(installer.subprocess, 'run', side_effect=run):
                 installer.main()
             self.assertEqual(len(calls), 2)
@@ -108,6 +111,36 @@ class InstallerTests(unittest.TestCase):
                 run.side_effect = subprocess.CalledProcessError(1, 'qt-tool')
                 with self.assertRaises(subprocess.CalledProcessError):
                     installer.deploy_qt(stage, 'qt-tool')
+
+    def test_redistributable_bootstrapper_validation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            redist = Path(temp) / 'vc_redist.x64.exe'
+            write_pe(redist)
+            installer.check_redist(redist)
+            # The x64 runtime installer may itself be a 32-bit executable.
+            data = bytearray(redist.read_bytes())
+            struct.pack_into('<H', data, 68, 0x14c)
+            struct.pack_into('<H', data, 88, 0x10b)
+            redist.write_bytes(data)
+            installer.check_redist(redist)
+            redist.write_bytes(b'not an executable')
+            with self.assertRaises(ValueError):
+                installer.check_redist(redist)
+            with self.assertRaises(ValueError):
+                installer.check_redist(Path(temp) / 'vc_redist.x86.exe')
+
+    def test_explicit_runtime_opt_out(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            stage = root / 'stage'
+            stage.mkdir()
+            write_pe(stage / 'dukebuilder.exe')
+            argv = ['packager', str(stage), '--output-dir', str(root / 'out'),
+                    '--skip-qt-deploy', '--skip-vc-redist', '--check-only']
+            with mock.patch.object(installer.sys, 'argv', argv):
+                installer.main()
+            config = installer.make_config(stage, installer.payload_files(stage), '0.1.0', root / 'setup.exe')
+            self.assertNotIn('!define VC_REDIST', config)
 
     def test_escaping(self):
         self.assertEqual(installer.nsis_string('a$b"c'), '"a$$b$\\"c"')

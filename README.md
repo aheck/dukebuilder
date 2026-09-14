@@ -416,11 +416,20 @@ of the actual release build. The packaging script automatically runs
 then includes the deployed Qt DLLs and plugins in the installer. Use the
 `windeployqt` from the **same Windows Qt installation used to build the app**;
 it is discovered on PATH or supplied with `--windeployqt PATH`. For static Qt, ensure
-the Windows platform plugin is linked into the executable. Supply compiler
-runtime dependencies as appropriate for the toolchain: deployment deliberately
-does not copy the MSVC redistributable installer, since merely bundling it would
-not install it. Supply redistributable runtime DLLs in the staging folder or use
-a suitable static compiler runtime. Keep libduke and its
+the Windows platform plugin is linked into the executable. Pass
+`--vc-redist PATH` with Microsoft's `vc_redist.x64.exe`; the installer embeds
+this package and runs it before installing or upgrading Duke Builder. Obtain it
+from [Microsoft's redistributable downloads](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)
+and use a version at least as new as the MSVC toolchain used for the application
+and its dependencies. The package is supplied separately from the staging folder;
+no download is needed on the user's machine. Header checks do not authenticate
+its publisher: use the original Microsoft-signed package.
+
+For a build whose application and dependencies do not require the shared MSVC
+runtime (such as an entirely static runtime or MinGW build), explicitly use
+`--skip-vc-redist` instead and supply any other toolchain runtime DLLs yourself.
+This is independent of `--skip-qt-deploy`: static Qt alone does not imply a static
+MSVC runtime. Keep libduke and its
 renderer statically linked. The staging folder must not contain game archives,
 maps, EDuke32, debug symbols or development libraries. Users supply game data
 and configure EDuke32 separately after installation.
@@ -428,14 +437,14 @@ and configure EDuke32 separately after installation.
 From the repository root on either operating system:
 
 ```sh
-python scripts/build-windows-installer.py windows-stage --check-only
-python scripts/build-windows-installer.py windows-stage
+python scripts/build-windows-installer.py windows-stage --vc-redist C:/redist/vc_redist.x64.exe --check-only
+python scripts/build-windows-installer.py windows-stage --vc-redist C:/redist/vc_redist.x64.exe
 ```
 
 Use `python3` on Linux if necessary. If NSIS is not on PATH, pass its compiler:
 
 ```powershell
-python scripts/build-windows-installer.py windows-stage --makensis "C:\Program Files (x86)\NSIS\makensis.exe" --windeployqt "C:\Qt\6.8.3\msvc2022_64\bin\windeployqt.exe"
+python scripts/build-windows-installer.py windows-stage --vc-redist C:/redist/vc_redist.x64.exe --makensis "C:\Program Files (x86)\NSIS\makensis.exe" --windeployqt "C:\Qt\6.8.3\msvc2022_64\bin\windeployqt.exe"
 ```
 
 Automatic deployment requires a runnable Windows `windeployqt`. To package on
@@ -457,7 +466,15 @@ application runs correctly on Windows.
 Installer behavior:
 
 - Current-user installation in `%LOCALAPPDATA%\Programs\Duke Builder` by default,
-  with a selectable destination and no administrator prompt.
+  with a selectable destination. The bundled Microsoft runtime requests
+  administrator approval for its machine-wide installation; Duke Builder stays
+  installed for the original user.
+- Runtime installation failures or cancellation stop setup before removing the
+  previous application. An already installed newer runtime is accepted. A required
+  restart is reported without forcing a reboot; successful setup returns code
+  `3010` when a restart is needed (including in silent mode). Silent mode does not
+  bypass Windows elevation requirements.
+- The shared MSVC runtime is left installed when Duke Builder is uninstalled.
 - Windows 10 or newer, 64-bit; the application's OpenGL 4.1 requirement remains.
 - Start Menu shortcuts, an optional desktop shortcut, and an entry in Windows'
   installed-apps list.

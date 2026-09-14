@@ -59,7 +59,7 @@ def payload_files(stage):
     return files
 
 
-def make_config(stage, files, version, output):
+def make_config(stage, files, version, output, vc_redist=None):
     numeric = version.split('-')[0].split('+')[0].split('.')
     if len(numeric) != 3 or any(int(x) > 65535 for x in numeric):
         raise ValueError('Version must have three numeric components, each at most 65535.')
@@ -88,7 +88,10 @@ def make_config(stage, files, version, output):
     for rel in sorted(directories, key=lambda p: (-len(p.parts), str(p))):
         target = str(rel).replace('\\', '/').replace('/', '\\').replace('$', '$$')
         lines.append(f'  RMDir "$INSTDIR\\{target}"')
-    return '\n'.join(lines + ['!macroend', ''])
+    lines += ['!macroend']
+    if vc_redist is not None:
+        lines.append(f'!define VC_REDIST {nsis_string(vc_redist)}')
+    return '\n'.join(lines + [''])
 
 
 def deploy_qt(stage, tool):
@@ -105,6 +108,21 @@ def deploy_qt(stage, tool):
             raise ValueError(f'Qt deployment did not produce {required}. Use the matching dynamic Qt 6 Windows installation.')
 
 
+
+def check_redist(path):
+    """Allow Microsoft's x86 bootstrapper for the x64 runtime package."""
+    if path.name.lower() != 'vc_redist.x64.exe':
+        raise ValueError('Supply the Microsoft x64 package named vc_redist.x64.exe.')
+    with path.open('rb') as stream:
+        header = stream.read(64)
+        if len(header) != 64 or header[:2] != b'MZ':
+            raise ValueError('The MSVC redistributable must be a Windows executable.')
+        stream.seek(struct.unpack_from('<I', header, 60)[0])
+        pe = stream.read(26)
+        if len(pe) != 26 or pe[:4] != b'PE\0\0' or (struct.unpack_from('<H', pe, 4)[0], struct.unpack_from('<H', pe, 24)[0]) not in {(0x14c, 0x10b), (0x8664, 0x20b)}:
+            raise ValueError('Invalid MSVC redistributable PE header.')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('stage', type=Path, help='Prepared deployment folder containing dukebuilder.exe and runtime dependencies')
@@ -113,8 +131,14 @@ def main():
     parser.add_argument('--makensis', default='makensis', help='NSIS 3 compiler executable or path')
     parser.add_argument('--windeployqt', default='windeployqt', help='Matching Windows Qt deployment tool (default: find on PATH)')
     parser.add_argument('--skip-qt-deploy', action='store_true', help='Use an already deployed payload or a static Qt build')
+    runtime = parser.add_mutually_exclusive_group(required=True)
+    runtime.add_argument('--vc-redist', type=Path, help='Microsoft vc_redist.x64.exe to embed and install (at least as new as the build toolchain)')
+    runtime.add_argument('--skip-vc-redist', action='store_true', help='Only for builds whose dependencies do not require the shared MSVC runtime')
     parser.add_argument('--check-only', action='store_true', help='Deploy and validate payload without compiling an installer')
     args = parser.parse_args()
+    vc_redist = args.vc_redist.resolve() if args.vc_redist else None
+    if vc_redist is not None:
+        check_redist(vc_redist)
     stage = args.stage.resolve()
     files = payload_files(stage)
     version = args.version or re.search(r"version:\s*'([^']+)'", (REPO / 'meson.build').read_text())[1]
@@ -141,7 +165,12 @@ def main():
         if args.check_only:
             print(f'Validated {len(files)} payload files for version {version}. Dependency completeness still requires Windows testing.')
             return
-        config = make_config(payload, files, version, temp / name)
+        if vc_redist is not None:
+            bundled_redist = temp / 'vc_redist.x64.exe'
+            shutil.copyfile(vc_redist, bundled_redist)
+        else:
+            bundled_redist = None
+        config = make_config(payload, files, version, temp / name, bundled_redist)
         config_path = temp / 'payload.nsh'
         config_path.write_text(config, encoding='utf-8')
         prefix = '/' if os.name == 'nt' else '-'

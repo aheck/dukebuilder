@@ -27,6 +27,7 @@ VIAddVersionKey /LANG=1033 "LegalCopyright" "Duke Builder contributors"
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
+!define MUI_FINISHPAGE_NOREBOOTSUPPORT
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -43,6 +44,49 @@ Function .onInit
   ${EndIf}
   SetRegView 64
   SetShellVarContext current
+FunctionEnd
+
+; The Microsoft bootstrapper requests elevation for the machine-wide runtime.
+; Keep Duke Builder itself per-user, including when other admin credentials are used.
+!ifdef VC_REDIST
+Section "Microsoft Visual C++ runtime (required)" RuntimeSection
+  SectionIn RO
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR"
+  File /oname=vc_redist.x64.exe ${VC_REDIST}
+  ClearErrors
+  ExecWait '"$PLUGINSDIR\vc_redist.x64.exe" /install /quiet /norestart' $0
+  ${If} ${Errors}
+    StrCpy $0 "launch failed"
+    Goto runtime_failed
+  ${EndIf}
+  ; Burn can return either Win32 status or HRESULT for an existing newer version.
+  ${If} $0 == 3010
+    SetRebootFlag true
+  ${ElseIf} $0 == 0
+  ${ElseIf} $0 == 1638
+  ${ElseIf} $0 == -2147023258
+  ${Else}
+    Goto runtime_failed
+  ${EndIf}
+  Delete "$PLUGINSDIR\vc_redist.x64.exe"
+  Goto runtime_done
+  runtime_failed:
+  Delete "$PLUGINSDIR\vc_redist.x64.exe"
+  IfSilent +2
+  MessageBox MB_OK|MB_ICONSTOP "Microsoft Visual C++ runtime installation failed ($0). Duke Builder has not been changed. Approve the runtime's administrator prompt and try again."
+  SetErrorLevel 1
+  Quit
+  runtime_done:
+SectionEnd
+!endif
+
+Function .onInstSuccess
+  ${If} ${RebootFlag}
+    IfSilent +2
+    MessageBox MB_OK|MB_ICONINFORMATION "The Microsoft Visual C++ runtime requires a restart. Restart Windows before running Duke Builder."
+    SetErrorLevel 3010
+  ${EndIf}
 FunctionEnd
 
 Section "Duke Builder (required)" MainSection
