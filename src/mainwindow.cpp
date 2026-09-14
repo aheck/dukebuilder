@@ -1,4 +1,6 @@
 #include "mainwindow.h"
+#include "shortcuthelp.h"
+#include <QDialog>
 #include "recovery.h"
 #include "mapsave.h"
 #include <QTimer>
@@ -1291,6 +1293,25 @@ MainWindow::MainWindow(QWidget *parent)
             propertyEditorAction, &QAction::setChecked);
 
     auto *helpMenu = menuBar()->addMenu("&Help");
+    auto *help2D = createShortcutHelp(this, false);
+    auto *help3D = createShortcutHelp(this, true);
+    const auto showShortcuts = [view3D](QDialog *dialog) {
+        view3D->releaseMouseLook();
+        dialog->show();
+        dialog->raise();
+        dialog->activateWindow();
+    };
+    auto *currentHelpAction = helpMenu->addAction("Current Mode Shortcuts");
+    currentHelpAction->setShortcut(QKeySequence(Qt::Key_F1));
+    currentHelpAction->setAutoRepeat(false);
+    connect(currentHelpAction, &QAction::triggered, this, [=] {
+        showShortcuts(view3D->isVisible() ? help3D : help2D);
+    });
+    auto *help2DAction = helpMenu->addAction("2D Mode Shortcuts");
+    auto *help3DAction = helpMenu->addAction("3D Mode Shortcuts");
+    connect(help2DAction, &QAction::triggered, this, [=] { showShortcuts(help2D); });
+    connect(help3DAction, &QAction::triggered, this, [=] { showShortcuts(help3D); });
+    helpMenu->addSeparator();
     auto *aboutAction = helpMenu->addAction("&About");
     connect(aboutAction, &QAction::triggered, this, [this] {
         QMessageBox::about(

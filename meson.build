@@ -72,6 +72,7 @@ if host_machine.system() == 'linux'
 endif
 
 app_sources = [
+    'src/shortcuthelp.cpp',
     'src/recovery.cpp',
     'src/mapview3d.cpp',
     'src/previewcamera.cpp',

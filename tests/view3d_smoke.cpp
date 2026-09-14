@@ -1,4 +1,6 @@
 #include "mainwindow.h"
+#include <QDialog>
+#include <QTextBrowser>
 #include "recovery.h"
 #include <QMessageBox>
 #include <QAbstractButton>
@@ -62,6 +64,22 @@ int main(int argc, char **argv)
     require(saveBuildMap(room,path,error), "save fixture");
     require(editor->openMap(path,error), "load fixture");
     auto original = editor->document();
+    auto *help2D = window.findChild<QDialog *>("shortcuts2D");
+    auto *help3D = window.findChild<QDialog *>("shortcuts3D");
+    require(help2D && help3D, "mode shortcut windows exist");
+    editor->setFocus();
+    QTest::keyClick(editor, Qt::Key_F1);
+    QTest::qWait(50);
+    require(help2D->isVisible() && !help2D->isModal() && !help3D->isVisible(), "F1 opens modeless 2D help");
+    require(help2D->findChild<QTextBrowser *>()->toPlainText().contains("F11"), "2D shortcut reference contains grid controls");
+    for (auto *action : window.findChildren<QAction *>())
+        if (action->text() == "2D Mode Shortcuts") action->trigger();
+    require(window.findChildren<QDialog *>("shortcuts2D").size() == 1, "help window reused");
+    help2D->close();
+    window.activateWindow();
+    editor->setFocus();
+    QTest::qWait(50);
+
     require(!editor->undoStack()->canUndo(), "opening clears history");
     editor->setSectorHeight(0, true, 128);
     const auto edited = editor->document();
@@ -128,6 +146,19 @@ int main(int argc, char **argv)
         QTest::qWait(300);
         require(view->isVisible() && !editor->isVisible(), "Q enters 3D");
         if (i == 0) {
+            QTest::keyClick(view, Qt::Key_F1);
+            QTest::qWait(50);
+            require(help3D->isVisible() && !help3D->isModal() && QWidget::mouseGrabber() != view,
+                    "3D F1 opens modeless help and releases mouse");
+            require(help3D->findChild<QTextBrowser *>()->toPlainText().contains("Shift + Alt + wheel"),
+                    "3D help includes fine slope modifier");
+            help3D->close();
+            window.activateWindow();
+            QTest::qWait(50);
+            require(QWidget::mouseGrabber() != view, "closing help does not recapture mouse");
+            QTest::mouseClick(view,Qt::LeftButton,Qt::NoModifier,view->rect().center());
+            require(QWidget::mouseGrabber() == view && editor->document() == original,
+                    "viewport click resumes 3D after help without map changes");
             bool checked3D = false;
             QTimer responder;
             QObject::connect(&responder, &QTimer::timeout, &window, [&] {

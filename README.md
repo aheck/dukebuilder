@@ -50,6 +50,14 @@ Run it:
 ./build/dukebuilder
 ```
 
+## Shortcut help
+
+**Help → 2D Mode Shortcuts** and **Help → 3D Mode Shortcuts** open resizable,
+scrollable rich-text references. **F1** opens the reference for the current mode.
+The windows can stay open while you edit; reopening one brings the same window
+forward. Opening help releases the mouse in 3D. Click the viewport to resume
+mouse navigation afterward.
+
 ## Checking a map
 
 Use **Tools → Check Map** (**F4**) to run the same validation used by Save,
