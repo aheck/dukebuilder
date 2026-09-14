@@ -31,17 +31,50 @@ elif host_machine.system() == 'darwin'
   renderer_dependencies += dependency('appleframeworks', modules: ['OpenGL'])
 endif
 
-# Qt's static Conan package uses the system BLAKE2 implementation, but its
-# generated pkg-config metadata does not currently propagate this dependency.
-libb2 = cpp.find_library('b2', required: true)
-app_dependencies = [qt6, libb2, libduke]
+qt_dependencies = [qt6]
+# Some Linux static Qt packages omit BLAKE2 from their dependency metadata.
+# Probe the actual Qt configuration and link interface rather than requiring a
+# system library on Windows, shared Qt, or correctly packaged static Qt builds.
+if host_machine.system() == 'linux'
+  qt_is_static = cpp.compiles('''
+    #include <QtCore/qglobal.h>
+    #ifndef QT_STATIC
+    #error Qt is not static
+    #endif
+    int main() { return 0; }
+  ''', dependencies: qt6, name: 'Qt is statically built')
+  if qt_is_static
+    qt_hash_probe = '''
+      #include <QtCore/QCryptographicHash>
+      #include <QtCore/QByteArray>
+      int main() {
+        return QCryptographicHash::hash(QByteArray("probe"),
+            QCryptographicHash::Blake2b_512).isEmpty();
+      }
+    '''
+    if not cpp.links(qt_hash_probe, dependencies: qt_dependencies,
+                     name: 'Qt hashing links with declared dependencies')
+      libb2 = cpp.find_library('b2', required: false)
+      if not libb2.found()
+        error('Static Qt hashing cannot link. Check Qt dependency metadata; this Linux Qt package may require the libb2 development package.')
+      endif
+      if not cpp.links(qt_hash_probe, dependencies: qt_dependencies + [libb2],
+                       name: 'Qt hashing links with libb2 workaround')
+        error('Static Qt hashing still cannot link with libb2. Check Qt dependency metadata and meson-logs/meson-log.txt for the missing dependencies.')
+      endif
+      qt_dependencies += [libb2]
+      message('Applying Linux static Qt libb2 dependency workaround')
+    endif
+  endif
+endif
+app_dependencies = qt_dependencies + [libduke]
 app_cpp_args = []
 
 mapdocument_test = executable(
   'mapdocument-test',
   ['tests/mapdocument_test.cpp', 'src/mapdocument.cpp'],
   include_directories: include_directories('src'),
-  dependencies: [qt6, libb2],
+  dependencies: qt_dependencies,
 )
 test('mapdocument', mapdocument_test)
 
@@ -57,7 +90,7 @@ texturecatalog_test = executable(
   'texturecatalog-test',
   ['tests/texturecatalog_test.cpp', 'src/texturecatalog.cpp', 'src/mapdocument.cpp'],
   include_directories: include_directories('src'),
-  dependencies: [qt6, libb2],
+  dependencies: qt_dependencies,
 )
 test('texturecatalog', texturecatalog_test)
 
@@ -113,7 +146,7 @@ install_data('packaging/dukebuilder.svg',
 previewcamera_test = executable('previewcamera-test',
   ['tests/previewcamera_test.cpp', 'src/previewcamera.cpp', 'src/mapdocument.cpp', 'src/mapsave.cpp'],
   include_directories: [include_directories('src'), libduke_inc],
-  dependencies: [qt6, libb2, libduke])
+  dependencies: qt_dependencies + [libduke])
 test('previewcamera', previewcamera_test)
 
 # Optional manual GPU smoke test: pass a DUKE3D.GRP path on a desktop display.
@@ -127,5 +160,5 @@ executable('view3d-smoke',
 recovery_test = executable('recovery-test',
   ['tests/recovery_test.cpp', 'src/recovery.cpp', 'src/mapdocument.cpp'],
   include_directories: include_directories('src'),
-  dependencies: [qt6, libb2])
+  dependencies: qt_dependencies)
 test('recovery', recovery_test)

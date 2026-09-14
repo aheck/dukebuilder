@@ -37,6 +37,11 @@ Duke Builder statically links libduke and libduke-render from `../libduke/build-
 Both archives are required; no libduke shared libraries are needed at runtime.
 Qt's OpenGLWidgets module hosts the renderer; no Sokol window or event loop is used.
 
+For static Qt on Linux, configuration checks whether Qt's declared dependencies
+can link its hashing implementation. Only if that fails and adding `libb2` fixes
+it does the build add the workaround for incomplete Qt package metadata. Windows
+and shared Qt builds do not acquire an explicit `b2` dependency from this workaround.
+
 Configure and build the application:
 
 ```sh
