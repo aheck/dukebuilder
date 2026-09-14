@@ -17,12 +17,12 @@ cpp = meson.get_compiler('cpp')
 libduke_root = meson.current_source_dir() / '..' / 'libduke'
 libduke = cpp.find_library(
   'duke',
-  dirs: libduke_root / 'build-render',
+  dirs: libduke_root / 'build',
   static: true,
   required: true,
 )
 libduke_inc = include_directories('../libduke/include', '../libduke/third_party/sokol')
-libduke_render = cpp.find_library('duke-render', dirs: libduke_root / 'build-render', static: true, required: true)
+libduke_render = cpp.find_library('duke-render', dirs: libduke_root / 'build', static: true, required: true)
 renderer_dependencies = [libduke_render, libduke, dependency('threads')]
 if host_machine.system() == 'linux'
   renderer_dependencies += [dependency('gl'), cpp.find_library('dl')]
