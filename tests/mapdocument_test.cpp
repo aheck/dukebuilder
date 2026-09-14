@@ -1,6 +1,7 @@
 #include "mapdocument.h"
 
 #include <algorithm>
+#include <QPainterPath>
 #include <cstdlib>
 #include <iostream>
 
@@ -11,6 +12,22 @@ void require(bool condition, const char *message)
         std::cerr << message << '\n';
         std::exit(EXIT_FAILURE);
     }
+}
+
+bool occupied(const MapDocument &document, QPointF point)
+{
+    for (const auto &sector : document.sectors()) {
+        QPainterPath path;
+        path.setFillRule(Qt::OddEvenFill);
+        for (std::size_t i = 0; i < sector.vertices.size(); ++i) {
+            const auto p = document.vertices()[sector.vertices[i]].position;
+            if (i == 0 || std::find(sector.loopStarts.begin(), sector.loopStarts.end(), i) != sector.loopStarts.end()) path.moveTo(p);
+            else path.lineTo(p);
+            if (sector.nextWallIndex(i) <= i) path.closeSubpath();
+        }
+        if (path.contains(point)) return true;
+    }
+    return false;
 }
 
 void checkSideReferences(const MapDocument &document)
@@ -388,7 +405,39 @@ int main()
     require(deletion.sectors()[0].floorz == outerBefore.floorz, "Deletion retains outer properties");
     require(std::none_of(deletion.walls().begin(),deletion.walls().end(),[](const auto &w){return w.isTwoSided();}), "Hole walls are solid");
     checkSideReferences(deletion);
-    require(!deletion.supportsTopologyEditing(), "Void loop cannot be filled accidentally by face rebuilding");
+    require(deletion.supportsTopologyEditing(), "Void loops remain editable");
+    const auto holeMap = deletion;
+    auto editable = holeMap;
+    require(editable.addPolyline({{4096,0},{5120,0},{5120,4096},{4096,4096}},true), "Add neighboring room beside map with void");
+    require(editable.sectors().size() == 2 && !occupied(editable,{2048,2048}), "Neighbor does not fill void");
+    require(editable.addPolyline({{128,128},{384,128},{384,384},{128,384}},true), "Add nested platform beside void");
+    require(!occupied(editable,{2048,2048}) && editable.sectors()[0].loopStarts.size() == 3, "Platform and void have separate loops");
+    require(editable.addPolyline({{1536,1536},{2560,1536},{2560,2560},{1536,2560}},true), "Add isolated room inside void");
+    require(occupied(editable,{2048,2048}) && !occupied(editable,{1200,1200}), "Island inside void leaves surrounding void empty");
+    require(editable.sectors()[0].loopStarts.size() == 3, "Island does not add redundant surrounding-sector hole");
+    checkSideReferences(editable);
+    auto splitHole = holeMap;
+    require(splitHole.addPolyline({{4096,0},{3500,2048},{4096,4096}},false), "Split surrounding room without crossing void");
+    require(splitHole.sectors().size() == 2 && !occupied(splitHole,{2048,2048}), "Split retains void");
+    checkSideReferences(splitHole);
+    auto dividedRing = holeMap;
+    require(dividedRing.addPolyline({{0,0},{1024,1024}},false) == false, "Single bridge does not create sector");
+    require(dividedRing == holeMap, "Rejected bridge restores complete topology and sprite membership");
+    require(dividedRing.addPolyline({{0,0},{1024,1024},{3072,1024},{4096,0}},false), "Split ring using hole boundary");
+    require(dividedRing.sectors().size() == 2 && !occupied(dividedRing,{2048,2048}), "Divided ring retains empty face");
+    require(dividedRing.addPolyline({{6000,0},{7000,0},{7000,1000},{6000,1000}},true), "Draw again after void is shared by sectors");
+    require(!occupied(dividedRing,{2048,2048}), "Shared void survives subsequent rebuild");
+    checkSideReferences(dividedRing);
+    auto movedHole = holeMap;
+    movedHole.setVertexPositions({{4,{900,1024}}});
+    require(movedHole.sectors().size() == 1 && !occupied(movedHole,{2048,2048}), "Moving hole vertex keeps void empty");
+    checkSideReferences(movedHole);
+    auto deletedEdge = holeMap;
+    deletedEdge.removeWalls({4});
+    require(deletedEdge.walls().size() == 7 && deletedEdge.sectors().size() == 1,
+            "Collapse hole edge without creating a sector");
+    require(!occupied(deletedEdge,{1500,2500}), "Collapsed hole remains empty");
+    checkSideReferences(deletedEdge);
     const auto deletionBefore = deletion;
     require(!deletion.removeSectors({99},error) && deletion == deletionBefore, "Invalid deletion does not mutate map");
     require(deletion.removeSectors({0},error) && deletion.sectors().empty()

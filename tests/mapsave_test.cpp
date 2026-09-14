@@ -286,13 +286,27 @@ int main(int argc, char **argv)
     require(opened.openMap(ringPath, error), error);
     require(opened.sectors().size() == 1 && opened.sectors()[0].loopStarts == std::vector<std::size_t>({0, 4}),
             "Keep outer and inner loops");
-    require(!opened.supportsTopologyEditing(), "Complex imported topology must be protected from face rebuilding");
+    require(opened.supportsTopologyEditing(), "Imported void loops remain editable");
     require(saveBuildMap(opened, copiedPath, error) && read(copiedPath) == read(ringPath),
             "Hole and reserved bytes survive open/save unchanged");
     opened.setVertexPositions({{0, {-1100, -1024}}});
     opened.setSectorFloorTexture(0, 80);
     require(opened.sectors()[0].loopStarts.size() == 2 && saveBuildMap(opened, copiedPath, error),
             "Vertex and property edits preserve imported holes");
+
+    require(opened.addPolyline({{1024,-1024},{2048,-1024},{2048,1024},{1024,1024}},true),
+            "Draw neighbor after loading a map with a void");
+    require(opened.sectors().size() == 2 && opened.sectors()[0].loopStarts.size() == 2,
+            "Imported void remains a hole after drawing");
+    require(saveBuildMap(opened, copiedPath, error), error);
+    MapDocument reopenedHole;
+    require(reopenedHole.openMap(copiedPath, error), error);
+    require(reopenedHole.supportsTopologyEditing() && reopenedHole.sectors().size() == 2
+            && reopenedHole.sectors()[0].loopStarts.size() == 2,
+            "Edited void survives save and reload and remains editable");
+    require(reopenedHole.addPolyline({{3000,0},{4000,0},{4000,1000},{3000,1000}},true),
+            "Continue drawing after another reload");
+    require(saveBuildMap(reopenedHole, copiedPath, error), error);
 
     // Optional local fixtures permit checking original maps without bundling
     // copyrighted game data in the repository.

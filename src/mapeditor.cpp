@@ -2093,7 +2093,7 @@ void MapEditor::keyPressEvent(QKeyEvent *event)
 
     if (event->key() == Qt::Key_Delete && m_mode == Mode::Lines) {
         if (!m_document.supportsLineDeletion()) {
-            reportStatus("Line deletion is not yet supported for this imported map's void loops or effect sectors.");
+            reportStatus("Line deletion is not yet supported for this imported map's complex effect geometry.");
             event->accept();
             return;
         }
@@ -2161,7 +2161,7 @@ void MapEditor::keyPressEvent(QKeyEvent *event)
 void MapEditor::addDrawingPoint(const QPointF &position)
 {
     if (!m_document.supportsTopologyEditing()) {
-        reportStatus("Adding lines is not yet supported for imported maps with holes or overlapping geometry.");
+        reportStatus("Adding lines is not yet supported for imported maps with overlapping or complex effect geometry.");
         return;
     }
     if (!m_drawingPoints.empty() && position == m_drawingPoints.back()) {

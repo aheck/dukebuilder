@@ -158,8 +158,8 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed)
         return false;
     }
 
-    const std::size_t originalVertexCount = m_vertices.size();
-    const std::size_t originalWallCount = m_walls.size();
+    const auto original = *this;
+    auto voidSides = voidWallSides();
     const std::size_t originalSectorCount = m_sectors.size();
 
     std::vector<VertexId> vertexIds;
@@ -192,14 +192,13 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed)
         m_walls.back().reverseSide.xrepeat = density;
     }
 
-    rebuildSectors();
+    voidSides.resize(m_walls.size() * 2, false);
+    rebuildSectors(std::move(voidSides));
     if (m_sectors.size() > originalSectorCount) {
         return true;
     }
 
-    m_vertices.resize(originalVertexCount);
-    m_walls.resize(originalWallCount);
-    rebuildSectors();
+    *this = original;
     return false;
 }
 
@@ -509,8 +508,8 @@ bool MapDocument::removeSectors(const std::vector<SectorId> &ids, QString &error
     for (auto &sector : candidate.m_sectors) {
         for (auto &v : sector.vertices) { v = vertexMap[v]; }
     }
-    // The general face builder would fill an empty hole back in. Detect that
-    // situation without replacing the deliberately preserved sector loops.
+    // Check that planar reconstruction preserves the remaining boundaries.
+    // Empty inner faces are retained as voids by the face builder.
     if (candidate.m_sectors.empty() && candidate.m_walls.empty()) { candidate.m_complexTopology = false; }
     if (!candidate.m_complexTopology) {
         auto rebuilt = candidate;
@@ -639,6 +638,8 @@ void MapDocument::removeWalls(const std::vector<WallId> &wallIds)
     }
     if (!changed) return;
 
+    const auto oldVoidSides = voidWallSides();
+
     // Hole loops are derived from the surrounding wall graph during rebuilding.
     // Match surviving properties against each sector's outer boundary only.
     for (auto &sector : m_sectors) {
@@ -686,6 +687,15 @@ void MapDocument::removeWalls(const std::vector<WallId> &wallIds)
         }
     }
 
+    std::vector<bool> remainingVoidSides(remainingWalls.size() * 2, false);
+    for (WallId id = 0; id < m_walls.size(); ++id) {
+        if (wallMapping[id] == removed) continue;
+        const auto mapped = wallMapping[id];
+        const bool flipped = roots[m_walls[id].start] != remainingWalls[mapped].start;
+        for (int side = 0; side < 2; ++side)
+            if (oldVoidSides[id * 2 + side]) remainingVoidSides[mapped * 2 + (side ^ flipped)] = true;
+    }
+
     // Shorten each old boundary before matching rebuilt faces, preserving
     // properties and sector order even when one of its edges was collapsed.
     for (Sector &sector : m_sectors) {
@@ -722,9 +732,12 @@ void MapDocument::removeWalls(const std::vector<WallId> &wallIds)
     // into one line. Remove that remnant unless another sector still uses it.
     m_walls.clear();
     std::vector<WallId> compactedWalls(remainingWalls.size());
+    std::vector<bool> compactedVoidSides;
     for (WallId id = 0; id < remainingWalls.size(); ++id) {
         if (collapsedBoundary[id] && !survivingBoundary[id]) continue;
         compactedWalls[id] = m_walls.size();
+        compactedVoidSides.push_back(remainingVoidSides[id * 2]);
+        compactedVoidSides.push_back(remainingVoidSides[id * 2 + 1]);
         m_walls.push_back(std::move(remainingWalls[id]));
     }
     for (Sector &sector : m_sectors) {
@@ -751,7 +764,7 @@ void MapDocument::removeWalls(const std::vector<WallId> &wallIds)
     }
     m_vertices = std::move(remainingVertices);
     if (!m_complexTopology) {
-        rebuildSectors();
+        rebuildSectors(std::move(compactedVoidSides));
     } else {
         // Imported overlapping rooms retain their existing sector boundaries.
         // Collapsing edges does not require planar face reconstruction.
@@ -939,8 +952,54 @@ void MapDocument::setPlayerStartAngle(qreal angle)
     m_playerStart.angle = angle;
 }
 
-void MapDocument::rebuildSectors()
+std::vector<bool> MapDocument::voidWallSides() const
 {
+    // Walk the existing graph's empty faces. Bounded empty faces are holes;
+    // the unbounded exterior remains available for neighboring rooms. Looking
+    // at directed faces also handles holes shared by several surrounding sectors.
+    std::vector<bool> result(m_walls.size() * 2, false), visited(result.size(), false);
+    std::vector<std::vector<std::size_t>> outgoing(m_vertices.size());
+    const auto from = [this](std::size_t edge) {
+        const auto &wall = m_walls[edge / 2];
+        return edge % 2 ? wall.end : wall.start;
+    };
+    for (std::size_t edge = 0; edge < result.size(); ++edge) outgoing[from(edge)].push_back(edge);
+    for (auto &edges : outgoing) {
+        std::sort(edges.begin(), edges.end(), [&](auto a, auto b) {
+            const auto da = m_vertices[from(a ^ 1)].position - m_vertices[from(a)].position;
+            const auto db = m_vertices[from(b ^ 1)].position - m_vertices[from(b)].position;
+            return std::atan2(da.y(), da.x()) < std::atan2(db.y(), db.x());
+        });
+    }
+    for (std::size_t first = 0; first < result.size(); ++first) {
+        if (visited[first]) continue;
+        std::vector<std::size_t> face;
+        auto edge = first;
+        qreal area = 0;
+        bool empty = true;
+        do {
+            if (visited[edge]) { empty = false; break; }
+            visited[edge] = true;
+            face.push_back(edge);
+            const auto &wall = m_walls[edge / 2];
+            if (edge % 2 ? wall.reverseSector.has_value() : wall.forwardSector.has_value()) empty = false;
+            const auto a = m_vertices[from(edge)].position;
+            const auto b = m_vertices[from(edge ^ 1)].position;
+            area += a.x() * b.y() - b.x() * a.y();
+            const auto &edges = outgoing[from(edge ^ 1)];
+            const auto reverse = std::find(edges.begin(), edges.end(), edge ^ 1) - edges.begin();
+            edge = edges[(reverse + edges.size() - 1) % edges.size()];
+        } while (edge != first);
+        if (empty && area > coordinateEpsilon) {
+            for (auto side : face) result[side] = true;
+        }
+    }
+    return result;
+}
+
+void MapDocument::rebuildSectors(std::vector<bool> voidSides)
+{
+    if (voidSides.empty()) voidSides = voidWallSides();
     // Rebuilt faces can change indices. Imported memberships are hints only.
     m_playerStart.sectorId.reset();
     for (auto &sprite : m_sprites) sprite.sectorId.reset();
@@ -1082,6 +1141,16 @@ void MapDocument::rebuildSectors()
         path.closeSubpath();
         return path;
     };
+    std::vector<bool> voidFaces;
+    for (const auto &sector : m_sectors) {
+        bool empty = false;
+        for (std::size_t i = 0; i < sector.walls.size(); ++i) {
+            const auto wall = sector.walls[i];
+            const auto side = wall * 2 + (m_walls[wall].start != sector.vertices[i]);
+            empty = empty || (side < voidSides.size() && voidSides[side]);
+        }
+        voidFaces.push_back(empty);
+    }
     std::vector<QPainterPath> outlines;
     std::vector<qreal> areas;
     for (const auto &sector : m_sectors) {
@@ -1135,6 +1204,15 @@ void MapDocument::rebuildSectors()
         sector.walls.insert(sector.walls.end(), hole.walls.begin(), hole.walls.end());
         sector.vertices.insert(sector.vertices.end(), hole.vertices.begin(), hole.vertices.end());
     }
+
+    // Keep empty faces during containment analysis: an island inside a void
+    // must not punch an additional hole in the surrounding playable room.
+    // Only now discard the empty faces and compact the sector indices.
+    std::vector<Sector> occupied;
+    for (SectorId id = 0; id < m_sectors.size(); ++id) {
+        if (!voidFaces[id]) occupied.push_back(std::move(m_sectors[id]));
+    }
+    m_sectors = std::move(occupied);
 
     // Side references must use the final ordering, not face discovery order.
     for (SectorId sectorId = 0; sectorId < m_sectors.size(); ++sectorId) {

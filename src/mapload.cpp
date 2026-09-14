@@ -158,8 +158,8 @@ bool MapDocument::openMap(const QString &filename, QString &error)
             }
         }
         if (!loaded.m_complexTopology) {
-            // A hole enclosing a connected sector is now supported. Other
-            // imported loops (e.g. empty voids) must not gain sectors on edit.
+            // Ordinary occupied and empty inner loops survive reconstruction.
+            // Keep restrictions for topology the planar builder cannot reproduce.
             auto rebuilt = loaded;
             rebuilt.rebuildSectors();
             if (rebuilt.m_sectors.size() != loaded.m_sectors.size()) {

@@ -135,8 +135,8 @@ complete boundary edge, or finish an open chain between existing vertices with
 Enter. Boundaries shared by two sectors automatically become two-sided walls
 and appear red; outer boundaries remain light gray. Shared vertices move both
 sides together. Hover and selection highlighting still apply to either kind of
-wall. Joining partway along an existing edge requires splitting that edge, which
-is not yet supported.
+wall. To join partway along an existing edge, first split it by inserting a vertex
+in Vertices mode.
 
 Drawing a closed sector entirely inside another sector creates an inner loop
 in the surrounding room and two-sided walls connecting the sectors. Raise the
@@ -170,7 +170,7 @@ the same unsaved-changes prompt as Open.
 Imported maps retain sector loops, independent portal-side properties, sprites,
 and player start information. Connected inner sectors remain editable after
 reopening. Overlapping single-loop sectors support line deletion without
-rebuilding their faces; adding lines remains restricted. Imported void loops
+rebuilding their faces; adding lines remains restricted. Empty inner loops remain editable without filling their interiors. Overlapping
 and effect sectors still restrict structural edits. Saving applies the validation rules
 below; some original effect geometry may be opened but cannot yet be saved.
 
@@ -442,11 +442,11 @@ therefore leaves a void hole in its surrounding sector; it does not fill the hol
 or merge the two sectors. The result saves and reloads as a sector with inner loops.
 
 The player-start marker is retained. If its sector was deleted, move it into a
-remaining sector before saving. Maps containing void holes currently share the
-existing imported-void restrictions on drawing new sectors and deleting lines;
-property editing, vertex insertion/movement, sector joining and sector deletion
-remain available. These restrictions prevent the face builder from recreating
-the deleted interior.
+remaining sector before saving. Maps containing void holes remain editable: continue drawing rooms and platforms,
+splitting surrounding sectors, or editing and deleting boundary edges. Empty
+interiors remain empty through these edits and through saving and reopening.
+You can also draw a separate room inside a void without filling the space around
+it. Restrictions on overlapping or effect geometry still apply.
 
 In **Vertices mode**, **Delete** removes selected vertices and reconnects their
 neighboring walls, including both sides of a shared wall midpoint. Each surviving

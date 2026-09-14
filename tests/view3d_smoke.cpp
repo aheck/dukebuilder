@@ -520,6 +520,22 @@ int main(int argc, char **argv)
     QTest::keyClick(editor,Qt::Key_Delete);
     require(editor->document().sectors().size() == 1 && editor->hasUnsavedChanges(), "Delete removes selected inner sector");
     require(editor->saveMap(path,error), "save sector with void hole");
+    const auto emptyHole = editor->document();
+    editor->setMode(MapEditor::Mode::Draw);
+    editor->setZoomPercent(25);
+    editor->centerOn(2048,2048);
+    for (QPointF point : {QPointF(4096,0), QPointF(5120,0), QPointF(5120,4096),
+                         QPointF(4096,4096), QPointF(4096,0)}) {
+        QTest::mouseClick(editor->viewport(), Qt::LeftButton, Qt::NoModifier, editor->mapFromScene(point));
+    }
+    require(editor->document().sectors().size() == 2
+            && editor->document().sectors()[0].loopStarts.size() == 2,
+            "Draw room after deleting inner sector through editor");
+    editor->undo();
+    require(editor->document() == emptyHole, "Undo drawing preserves deleted interior");
+    editor->redo();
+    require(editor->document().sectors().size() == 2, "Redo drawing beside void");
+    editor->undo();
     MapDocument holeReload;
     require(holeReload.openMap(path,error) && holeReload.sectors().size() == 1
             && holeReload.sectors()[0].loopStarts.size() == 2, "Void hole persists after reload");

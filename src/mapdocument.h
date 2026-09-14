@@ -169,7 +169,8 @@ public:
 
 private:
     VertexId findOrAddVertex(const QPointF &position);
-    void rebuildSectors();
+    std::vector<bool> voidWallSides() const;
+    void rebuildSectors(std::vector<bool> voidSides = {});
 
     std::vector<Vertex> m_vertices;
     std::vector<Wall> m_walls;
