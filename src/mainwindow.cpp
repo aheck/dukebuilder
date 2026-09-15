@@ -12,6 +12,7 @@
 #include "texturebrowserwindow.h"
 
 #include "info.h"
+#include "tags.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -139,81 +140,6 @@ QIcon toolbarIcon(ToolbarSymbol symbol)
     return QIcon(new ToolbarIconEngine(symbol));
 }
 
-// Classic Duke Nukem 3D / Atomic Edition Sector Effector lotags (tile 1).
-// https://wiki.eduke32.com/wiki/Sector_Effector_Reference_Guide
-constexpr const char *sectorEffectorLotags[] = {
-    "Sector rotation",
-    "Rotation pivot",
-    "Earthquake",
-    "Shot-triggered flicker",
-    "Flickering lights",
-    "Boss sector (unfinished)",
-    "Subway engine",
-    "Teleport",
-    "Door lighting: up",
-    "Door lighting: down",
-    "Automatic door closing",
-    "Swinging door",
-    "Switched lighting",
-    "Explosive sector",
-    "Subway carriage",
-    "Sliding door",
-    "Reactor rotation (unfinished)",
-    "Transport elevator",
-    "Incremental vertical movement",
-    "Explosion-triggered ceiling drop",
-    "Stretching bridge",
-    "Dropping floor",
-    "Teeth-door component",
-    "One-way teleport exit",
-    "Conveyor / current",
-    "Piston ceiling",
-    "Escalator (unfinished)",
-    "Demo viewpoint",
-    "Lightning generator",
-    "Waves",
-    "Shuttle train",
-    "Moving floor",
-    "Moving ceiling",
-    "Quake debris",
-    "Alternate conveyor (undocumented)",
-    "Drill (unfinished)",
-    "Projectile emitter",
-};
-
-// Sector tags are distinct from Sector Effector sprite tags.
-// https://wiki.eduke32.com/wiki/Sector_Tag_Reference_Guide
-constexpr struct {
-    int tag;
-    const char *meaning;
-} sectorLotags[] = {
-    {0, "Normal sector"},
-    {1, "Water surface"},
-    {2, "Submerged area"},
-    {3, "Cycloid Emperor movement area"},
-    {9, "Star Trek sliding doors"},
-    {15, "Transport elevator"},
-    {16, "Descending platform"},
-    {17, "Ascending platform"},
-    {18, "Descending elevator"},
-    {19, "Ascending elevator"},
-    {20, "Door in ceiling"},
-    {21, "Door in floor"},
-    {22, "Vertically splitting door"},
-    {23, "Hinged door"},
-    {25, "Door sliding sideways"},
-    {26, "Star Trek split door"},
-    {27, "Stretching bridge"},
-    {28, "Dropping floor / ceiling"},
-    {29, "Teeth-door component"},
-    {30, "Bridge rotation and elevation"},
-    {31, "Shuttle train"},
-    {10000, "Play sound 0 once (10000 + sound ID)"},
-    {32767, "Secret area"},
-    {65534, "Level exit with message"},
-    {65535, "Immediate level exit"},
-};
-
 class TexturePropertyEditor final : public QWidget
 {
 public:
@@ -284,10 +210,8 @@ public:
             } else {
                 editor->setToolTip("Sector Effector (tile 1) meanings. Other sprites use "
                                "lotags differently. Enter -32768 to 32767, or 65535 as an alias for -1.");
-                int tag = 0;
-                for (const char *meaning : sectorEffectorLotags) {
-                    editor->addItem(QString::number(tag) + " - " + meaning, tag);
-                    ++tag;
+                for (const auto &entry : sectorEffectorLotags) {
+                    editor->addItem(QString::number(entry.tag) + " - " + entry.meaning, entry.tag);
                 }
             }
             const auto commit = [this, editor, index = QPersistentModelIndex(index)] {
