@@ -28,14 +28,19 @@ conan install . --output-folder=conan --build=missing -s build_type=Debug
 Build the libduke renderer (after its Conan dependency setup):
 
 ```sh
-meson setup ../libduke/build-render ../libduke \
+meson setup ../libduke/build ../libduke \
   --native-file ../libduke/build/conan_meson_native.ini \
   -Drenderer=enabled
-meson compile -C ../libduke/build-render
+meson compile -C ../libduke/build
 ```
 
-Duke Builder statically links libduke and libduke-render from `../libduke/build-render`.
+Duke Builder statically links libduke and libduke-render from `../libduke/build`.
 Both archives are required; no libduke shared libraries are needed at runtime.
+On Windows, the build explicitly selects `libduke.a` and `libduke-render.a` when
+present, instead of assuming MSVC-style `.lib` filenames. Otherwise it uses the
+compiler's normal static-library lookup. Build both projects for the same target
+architecture with compatible toolchains; renaming an archive does not make
+incompatible object files compatible.
 Qt's OpenGLWidgets module hosts the renderer; no Sokol window or event loop is used.
 
 For static Qt on Linux, configuration checks whether Qt's declared dependencies

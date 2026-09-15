@@ -15,14 +15,24 @@ qt6 = dependency('qt6', modules: ['Core', 'Widgets', 'OpenGLWidgets'])
 cpp = meson.get_compiler('cpp')
 
 libduke_root = meson.current_source_dir() / '..' / 'libduke'
-libduke = cpp.find_library(
-  'duke',
-  dirs: libduke_root / 'build',
-  static: true,
-  required: true,
-)
+fs = import('fs')
+libduke_libraries = []
+foreach name : ['duke', 'duke-render']
+  archive = libduke_root / 'build' / ('lib' + name + '.a')
+  if host_machine.system() == 'windows' and fs.is_file(archive)
+    # Meson can produce .a static archives alongside .lib DLL import libraries
+    # on Windows. Pass the archive explicitly: MSVC's library-name lookup uses
+    # .lib, and picking the import library would silently enable dynamic linking.
+    libduke_libraries += declare_dependency(link_args: [archive])
+    message('Linking static libduke archive: ' + archive)
+  else
+    libduke_libraries += cpp.find_library(name,
+      dirs: libduke_root / 'build', static: true, required: true)
+  endif
+endforeach
+libduke = libduke_libraries[0]
+libduke_render = libduke_libraries[1]
 libduke_inc = include_directories('../libduke/include', '../libduke/third_party/sokol')
-libduke_render = cpp.find_library('duke-render', dirs: libduke_root / 'build', static: true, required: true)
 renderer_dependencies = [libduke_render, libduke, dependency('threads')]
 if host_machine.system() == 'linux'
   renderer_dependencies += [dependency('gl'), cpp.find_library('dl')]
