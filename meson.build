@@ -139,11 +139,19 @@ app_sources = [
     'src/texturebrowserwindow.h',
   ]
 
+# Qt supplies the Windows GUI entry point that forwards to main(). Keep this
+# dependency on the application only; test executables retain their consoles.
+gui_entrypoint = []
+if host_machine.system() == 'windows'
+  gui_entrypoint += dependency('qt6', modules: ['Core'], main: true)
+endif
+
 executable(
   'dukebuilder',
   ['src/main.cpp'] + app_sources,
   cpp_args: app_cpp_args,
-  dependencies: app_dependencies + renderer_dependencies,
+  dependencies: app_dependencies + renderer_dependencies + gui_entrypoint,
+  win_subsystem: 'windows',
   include_directories: libduke_inc,
   install: true,
   install_tag: 'runtime',
