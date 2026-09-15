@@ -52,6 +52,14 @@ class InstallerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 installer.payload_files(stage)
 
+    def test_scope_metadata_is_reserved(self):
+        with tempfile.TemporaryDirectory() as temp:
+            stage = Path(temp)
+            write_pe(stage / 'dukebuilder.exe')
+            (stage / 'INSTALL-SCOPE.INI').write_text('[Installation]\nScope=AllUsers\n')
+            with self.assertRaisesRegex(ValueError, 'reserved files'):
+                installer.payload_files(stage)
+
     def test_case_collision(self):
         if os.name == 'nt':
             self.skipTest('Case-sensitive staging fixture requires POSIX')

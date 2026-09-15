@@ -51,7 +51,7 @@ def payload_files(stage):
         names.add(key)
         if not path.is_file():
             continue
-        if path.suffix.lower() in {'.grp', '.map', '.art', '.pdb', '.lib', '.a', '.so'} or path.name.lower() in {'uninstall.exe', 'eduke32.exe'}:
+        if path.suffix.lower() in {'.grp', '.map', '.art', '.pdb', '.lib', '.a', '.so'} or path.name.lower() in {'uninstall.exe', 'eduke32.exe', 'install-scope.ini'}:
             raise ValueError(f'Remove game data, build files or reserved files from staging: {rel}')
         if path.suffix.lower() in {'.exe', '.dll'}:
             check_pe(path)

@@ -8,11 +8,23 @@ Unicode true
 
 !define APP_KEY "Software\DukeBuilderInstaller"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\DukeBuilder"
+; Highest allows standard users to install per-user, and administrators to
+; choose either scope. MultiUser owns the execution-level manifest.
+!define MULTIUSER_EXECUTIONLEVEL Highest
+!define MULTIUSER_NOUNINSTALL ; un.onInit restores scope from the installed metadata.
+!define MULTIUSER_MUI
+!define MULTIUSER_USE_PROGRAMFILES64
+!define MULTIUSER_INSTALLMODE_DEFAULT_CURRENTUSER
+!define MULTIUSER_INIT_FUNCTIONQUIT InstallationModeFailed
+!define MULTIUSER_INSTALLMODE_COMMANDLINE
+!define MULTIUSER_INSTALLMODE_INSTDIR "Duke Builder"
+!define MULTIUSER_INSTALLMODE_INSTDIR_REGISTRY_KEY "${APP_KEY}"
+!define MULTIUSER_INSTALLMODE_INSTDIR_REGISTRY_VALUENAME "InstallDir"
+!include "MultiUser.nsh"
+
 Name "Duke Builder"
 OutFile "${OUTPUT_FILE}"
 InstallDir "$LOCALAPPDATA\Programs\Duke Builder"
-InstallDirRegKey HKCU "${APP_KEY}" "InstallDir"
-RequestExecutionLevel user
 SetCompressor /SOLID lzma
 SetOverwrite on
 VIProductVersion "${NUMERIC_VERSION}"
@@ -24,6 +36,7 @@ VIAddVersionKey /LANG=1033 "LegalCopyright" "Duke Builder contributors"
 
 !define MUI_ABORTWARNING
 !insertmacro MUI_PAGE_WELCOME
+!insertmacro MULTIUSER_PAGE_INSTALLMODE
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -32,6 +45,11 @@ VIAddVersionKey /LANG=1033 "LegalCopyright" "Duke Builder contributors"
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
+
+Function InstallationModeFailed
+  SetErrorLevel 1
+  Quit
+FunctionEnd
 
 Function .onInit
   ${IfNot} ${RunningX64}
@@ -43,11 +61,41 @@ Function .onInit
     Abort
   ${EndIf}
   SetRegView 64
-  SetShellVarContext current
+  !insertmacro MULTIUSER_INIT
 FunctionEnd
 
+; Validate before running prerequisites or uninstalling an existing version.
+Section -CheckScope
+  ReadINIStr $0 "$INSTDIR\install-scope.ini" "Installation" "Scope"
+  ${If} $0 != ""
+  ${AndIf} $0 != $MultiUser.InstallMode
+    Goto scope_conflict
+  ${EndIf}
+  ; Older per-user releases have no scope file. Also protect a registered
+  ; installation in the opposite scope from a manually chosen directory.
+  ${If} $MultiUser.InstallMode == "AllUsers"
+    ReadRegStr $0 HKCU "${APP_KEY}" "InstallDir"
+  ${Else}
+    ReadRegStr $0 HKLM "${APP_KEY}" "InstallDir"
+  ${EndIf}
+  ${If} $0 != ""
+    GetFullPathName $0 "$0"
+    GetFullPathName $1 "$INSTDIR"
+    ${If} $0 == $1
+      Goto scope_conflict
+    ${EndIf}
+  ${EndIf}
+  Goto scope_ok
+  scope_conflict:
+  IfSilent +2
+  MessageBox MB_OK|MB_ICONSTOP "This folder belongs to an installation with a different scope. Choose a different folder or uninstall that installation first."
+  SetErrorLevel 1
+  Quit
+  scope_ok:
+SectionEnd
+
 ; The Microsoft bootstrapper requests elevation for the machine-wide runtime.
-; Keep Duke Builder itself per-user, including when other admin credentials are used.
+; The application scope is independent of this shared runtime.
 !ifdef VC_REDIST
 Section "Microsoft Visual C++ runtime (required)" RuntimeSection
   SectionIn RO
@@ -93,11 +141,11 @@ Section "Duke Builder (required)" MainSection
   SectionIn RO
   ; Remove a previous payload with its own file list, including obsolete DLLs.
   ; User settings and files are deliberately outside the installer registry key.
-  ReadRegStr $0 HKCU "${APP_KEY}" "InstallDir"
+  ReadRegStr $0 SHCTX "${APP_KEY}" "InstallDir"
   ${If} $0 != ""
     IfFileExists "$0\Uninstall.exe" 0 missing_uninstaller
     ClearErrors
-    ExecWait '"$0\Uninstall.exe" /S _?=$0' $1
+    ExecWait '"$0\Uninstall.exe" /S /$MultiUser.InstallMode _?=$0' $1
     ${If} ${Errors}
       MessageBox MB_OK|MB_ICONSTOP "Unable to uninstall the previous version. Close Duke Builder and try again."
       Abort
@@ -117,20 +165,28 @@ Section "Duke Builder (required)" MainSection
   SetOutPath "$INSTDIR"
   !insertmacro InstallPayload
   SetOutPath "$INSTDIR"
+  ; Persist scope beside the uninstaller, so direct launches cannot default
+  ; to a different installation's registry entries or shortcuts.
+  ClearErrors
+  WriteINIStr "$INSTDIR\install-scope.ini" "Installation" "Scope" "$MultiUser.InstallMode"
+  ${If} ${Errors}
+    SetErrorLevel 1
+    Abort "Unable to record installation scope."
+  ${EndIf}
   WriteUninstaller "$INSTDIR\Uninstall.exe"
-  WriteRegStr HKCU "${APP_KEY}" "InstallDir" "$INSTDIR"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "Duke Builder"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${APP_VERSION}"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\dukebuilder.exe"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
-  WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoModify" 1
-  WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
-  WriteRegDWORD HKCU "${UNINSTALL_KEY}" "EstimatedSize" ${INSTALLED_KIB}
+  WriteRegStr SHCTX "${APP_KEY}" "InstallDir" "$INSTDIR"
+  WriteRegStr SHCTX "${UNINSTALL_KEY}" "DisplayName" "Duke Builder"
+  WriteRegStr SHCTX "${UNINSTALL_KEY}" "DisplayVersion" "${APP_VERSION}"
+  WriteRegStr SHCTX "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
+  WriteRegStr SHCTX "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\dukebuilder.exe"
+  WriteRegStr SHCTX "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe" /$MultiUser.InstallMode'
+  WriteRegStr SHCTX "${UNINSTALL_KEY}" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S /$MultiUser.InstallMode'
+  WriteRegDWORD SHCTX "${UNINSTALL_KEY}" "NoModify" 1
+  WriteRegDWORD SHCTX "${UNINSTALL_KEY}" "NoRepair" 1
+  WriteRegDWORD SHCTX "${UNINSTALL_KEY}" "EstimatedSize" ${INSTALLED_KIB}
   CreateDirectory "$SMPROGRAMS\Duke Builder"
   CreateShortcut "$SMPROGRAMS\Duke Builder\Duke Builder.lnk" "$INSTDIR\dukebuilder.exe"
-  CreateShortcut "$SMPROGRAMS\Duke Builder\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
+  CreateShortcut "$SMPROGRAMS\Duke Builder\Uninstall.lnk" "$INSTDIR\Uninstall.exe" "/$MultiUser.InstallMode"
 SectionEnd
 
 Section /o "Desktop shortcut" DesktopSection
@@ -139,7 +195,26 @@ SectionEnd
 
 Function un.onInit
   SetRegView 64
-  SetShellVarContext current
+  ; Read the installed scope, not a guessed default or the caller's arguments.
+  ReadINIStr $MultiUser.InstallMode "$INSTDIR\install-scope.ini" "Installation" "Scope"
+  ${If} $MultiUser.InstallMode == "AllUsers"
+    UserInfo::GetAccountType
+    Pop $0
+    ${If} $0 != "Admin"
+      IfSilent +2
+      MessageBox MB_OK|MB_ICONSTOP "Run this uninstaller as administrator to remove the all-users installation."
+      SetErrorLevel 1
+      Quit
+    ${EndIf}
+    SetShellVarContext all
+  ${ElseIf} $MultiUser.InstallMode == "CurrentUser"
+    SetShellVarContext current
+  ${Else}
+    IfSilent +2
+    MessageBox MB_OK|MB_ICONSTOP "Installation scope metadata is missing or invalid. Repair this installation before uninstalling."
+    SetErrorLevel 1
+    Quit
+  ${EndIf}
 FunctionEnd
 
 Section "Uninstall"
@@ -157,8 +232,9 @@ Section "Uninstall"
   Delete "$SMPROGRAMS\Duke Builder\Duke Builder.lnk"
   Delete "$SMPROGRAMS\Duke Builder\Uninstall.lnk"
   RMDir "$SMPROGRAMS\Duke Builder"
-  DeleteRegKey HKCU "${UNINSTALL_KEY}"
-  DeleteRegKey HKCU "${APP_KEY}"
+  DeleteRegKey SHCTX "${UNINSTALL_KEY}"
+  DeleteRegKey SHCTX "${APP_KEY}"
+  Delete "$INSTDIR\install-scope.ini"
   Delete "$INSTDIR\Uninstall.exe"
   ; Never recursively delete the installation directory: it may contain maps.
   RMDir "$INSTDIR"

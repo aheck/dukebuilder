@@ -479,10 +479,16 @@ application runs correctly on Windows.
 
 Installer behavior:
 
-- Current-user installation in `%LOCALAPPDATA%\Programs\Duke Builder` by default,
-  with a selectable destination. The bundled Microsoft runtime requests
-  administrator approval for its machine-wide installation; Duke Builder stays
-  installed for the original user.
+- Choose **current user** (the default) or **all users** on the installation-mode
+  page. Defaults are `%LOCALAPPDATA%\Programs\Duke Builder` and
+  `%ProgramFiles%\Duke Builder`, respectively. Shortcuts and installed-apps
+  registration follow the selected scope.
+- Setup requests the highest available privileges: administrators see a UAC
+  prompt at startup, even when choosing current-user installation. Standard users
+  install for themselves; to select all users, start setup with **Run as
+  administrator**. When supplying another account's credentials, current-user
+  installation refers to that account. The shared MSVC runtime may separately
+  require administrator approval.
 - Runtime installation failures or cancellation stop setup before removing the
   previous application. An already installed newer runtime is accepted. A required
   restart is reported without forcing a reboot; successful setup returns code
@@ -492,12 +498,17 @@ Installer behavior:
 - Windows 10 or newer, 64-bit; the application's OpenGL 4.1 requirement remains.
 - Start Menu shortcuts, an optional desktop shortcut, and an entry in Windows'
   installed-apps list.
-- Upgrades invoke the previous uninstaller first so obsolete packaged DLLs are
-  removed. Close Duke Builder before installing or uninstalling.
+- Upgrades replace the previous installation in the selected scope, including
+  older current-user releases. Current-user and all-users installations can
+  coexist in separate directories; setup refuses to reuse the other scope's
+  folder. Close Duke Builder before installing or uninstalling.
 - Uninstall removes only explicitly packaged files and empty directories. It
   preserves user maps, game data and Qt application settings. Installer metadata
   uses a separate registry key from those settings.
-- Silent installation/uninstallation uses `/S`. No `.map` file association is
+- Silent setup supports `/S /CurrentUser` and `/S /AllUsers` (the latter requires
+  elevation). Uninstallation supports `/S` and restores its scope from installed
+  metadata, including when `Uninstall.exe` is launched directly. Do not remove
+  `install-scope.ini` from the installation folder. No `.map` file association is
   registered because command-line map opening is not yet implemented.
 
 `python3 tests/windows_installer_test.py` checks payload validation and manifest
