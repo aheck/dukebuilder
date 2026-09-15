@@ -43,7 +43,7 @@ class InstallerTests(unittest.TestCase):
             (stage / 'licenses').mkdir()
             (stage / 'licenses/notice.txt').write_text('notice')
             files = installer.payload_files(stage)
-            config = installer.make_config(stage, files, '0.1.0', stage / 'setup.exe')
+            config = installer.make_config(stage, files, '0.2.0', stage / 'setup.exe')
             self.assertIn('Delete "$INSTDIR\\platforms\\qwindows.dll"', config)
             self.assertIn('RMDir "$INSTDIR\\platforms"', config)
             self.assertNotIn('RMDir /r', config)
@@ -97,14 +97,14 @@ class InstallerTests(unittest.TestCase):
                     self.assertIn('Qt6Core.dll', config)
                     self.assertIn('!define VC_REDIST', config)
                     self.assertEqual((config_path.parent / 'vc_redist.x64.exe').read_bytes(), (root / 'vc_redist.x64.exe').read_bytes())
-                    (config_path.parent / 'DukeBuilder-0.1.0-x64-Setup.exe').write_bytes(b'test installer')
+                    (config_path.parent / 'DukeBuilder-0.2.0-x64-Setup.exe').write_bytes(b'test installer')
 
-            argv = ['packager', str(stage), '--version', '0.1.0', '--output-dir', str(output), '--windeployqt', 'qt-tool', '--vc-redist', str(root / 'vc_redist.x64.exe')]
+            argv = ['packager', str(stage), '--version', '0.2.0', '--output-dir', str(output), '--windeployqt', 'qt-tool', '--vc-redist', str(root / 'vc_redist.x64.exe')]
             with mock.patch.object(installer.sys, 'argv', argv), mock.patch.object(installer.shutil, 'which', side_effect=lambda tool: tool), mock.patch.object(installer.subprocess, 'run', side_effect=run):
                 installer.main()
             self.assertEqual(len(calls), 2)
             self.assertEqual(list(stage.iterdir()), [stage / 'dukebuilder.exe'])
-            self.assertTrue((output / 'DukeBuilder-0.1.0-x64-Setup.exe').is_file())
+            self.assertTrue((output / 'DukeBuilder-0.2.0-x64-Setup.exe').is_file())
 
     def test_deployment_failure_and_missing_plugin(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -147,7 +147,7 @@ class InstallerTests(unittest.TestCase):
                     '--skip-qt-deploy', '--skip-vc-redist', '--check-only']
             with mock.patch.object(installer.sys, 'argv', argv):
                 installer.main()
-            config = installer.make_config(stage, installer.payload_files(stage), '0.1.0', root / 'setup.exe')
+            config = installer.make_config(stage, installer.payload_files(stage), '0.2.0', root / 'setup.exe')
             self.assertNotIn('!define VC_REDIST', config)
 
     def test_escaping(self):
