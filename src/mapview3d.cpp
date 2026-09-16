@@ -188,6 +188,8 @@ void MapView3D::keyPressEvent(QKeyEvent *event)
     } else if (event->key() == Qt::Key_R) {
         resetTextureScale();
     } else if (event->key() == Qt::Key_Escape) {
+        duke_renderer_set_selected_surface(m_renderer, nullptr);
+        m_wheelRemainder = 0;
         releaseLook();
     } else if (event->key() == Qt::Key_H && !event->isAutoRepeat()) {
         m_hover = !m_hover;
@@ -206,7 +208,26 @@ void MapView3D::keyReleaseEvent(QKeyEvent *event)
 }
 void MapView3D::mousePressEvent(QMouseEvent *event)
 {
-    if (event->button() == Qt::LeftButton) { setFocus(); captureLook(); }
+    if (event->button() == Qt::LeftButton) {
+        if (m_active && m_renderer) {
+            // Resolve the clicked object before capture moves the pointer.
+            repaint();
+            DukeSurfaceHit hit{};
+            duke_renderer_get_hovered_surface(m_renderer, &hit);
+            DukeSurfaceHit selected{};
+            const bool sameObject = duke_renderer_get_selected_surface(m_renderer, &selected)
+                && hit.kind == selected.kind
+                && (hit.kind == DUKE_SURFACE_SPRITE
+                    ? hit.sprite_index == selected.sprite_index
+                    : hit.sector_index == selected.sector_index
+                        && hit.wall_index == selected.wall_index);
+            duke_renderer_set_selected_surface(m_renderer, sameObject ? nullptr : &hit);
+            m_wheelRemainder = 0;
+        }
+        setFocus();
+        captureLook();
+        event->accept();
+    }
     if (event->button() == Qt::RightButton) { editTexture(0, false); event->accept(); }
 }
 void MapView3D::mouseMoveEvent(QMouseEvent *event)
@@ -225,11 +246,12 @@ void MapView3D::resizeEvent(QResizeEvent *event)
 void MapView3D::wheelEvent(QWheelEvent *event)
 {
     event->accept();
-    if (!m_active || !m_renderer || !m_hover) { m_wheelRemainder = 0; return; }
+    if (!m_active || !m_renderer) { m_wheelRemainder = 0; return; }
     // Pick using the current camera and pointer rather than a previous frame.
     repaint();
     DukeSurfaceHit hit{};
-    if (!duke_renderer_get_hovered_surface(m_renderer, &hit)
+    if ((!duke_renderer_get_selected_surface(m_renderer, &hit)
+         && !duke_renderer_get_hovered_surface(m_renderer, &hit))
         || (hit.kind != DUKE_SURFACE_FLOOR && hit.kind != DUKE_SURFACE_CEILING
             && hit.kind != DUKE_SURFACE_SPRITE)) {
         m_wheelRemainder = 0;
@@ -365,6 +387,10 @@ bool MapView3D::applySnapshot(MapDocument candidate)
         return replacement != nullptr;
     }, BuildMapValidation::Preview);
     if (ok) {
+        DukeSurfaceHit selection{};
+        if (duke_renderer_get_selected_surface(m_renderer, &selection)) {
+            duke_renderer_set_selected_surface(replacement, &selection);
+        }
         duke_renderer_destroy(m_renderer);
         m_renderer = replacement;
         duke_renderer_set_hover_enabled(m_renderer, m_hover);

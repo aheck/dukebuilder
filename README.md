@@ -288,7 +288,9 @@ Run geometry and map open/save regression tests with `meson test -C build`.
 ## 3D preview
 
 Configure a game archive containing ART tiles and PALETTE.DAT (normally
-DUKE3D.GRP) in **Settings → Game Data**. Press **Q** over the map to enter 3D,
+DUKE3D.GRP) in **Settings → Game Data**. Left-click a highlighted surface or sprite to select it in orange; click it again to deselect.
+Mouse-wheel edits keep targeting the selection when you look away. Escape clears
+the selection and releases the mouse. Press **Q** over the map to enter 3D,
 and **Q** again to return to the same 2D view. **View → 3D Mode** also switches
 views; when the pointer is outside the viewport it uses the 2D view's center.
 

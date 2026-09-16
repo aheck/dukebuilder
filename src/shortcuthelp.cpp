@@ -28,13 +28,13 @@ QString content(bool threeD)
             {"W / S", "Fly forward/backward along the viewing direction, including pitch."},
             {"A / D", "Strafe left/right."}, {"Shift", "Move faster."},
             {"Mouse", "Look around while the mouse is captured."},
-            {"Escape", "Release the mouse."}, {"Left click in viewport", "Capture the mouse and resume navigation, including after closing help."},
+            {"Escape", "Clear the selection and release the mouse."}, {"Left click in viewport", "Select the highlighted surface or sprite and capture the mouse. Click it again or click empty space to clear selection."},
             {"Q", "Return to 2D mode."}, {"H", "Toggle surface and sprite highlighting."}
         });
         html += section("Heights and slopes", {
-            {"Mouse wheel", "Raise/lower the highlighted floor, ceiling, or sprite by 1024 Z units per notch. Wheel-up raises it."},
+            {"Mouse wheel", "Raise/lower the selected (or otherwise highlighted) floor, ceiling, or sprite by 1024 Z units per notch. Wheel-up raises it."},
             {"Shift + wheel", "Raise/lower by a finer 128 Z units per notch."},
-            {"Alt + wheel", "Change the highlighted floor/ceiling slope by 256 per notch."},
+            {"Alt + wheel", "Change the selected (or otherwise highlighted) floor/ceiling slope by 256 per notch."},
             {"Shift + Alt + wheel", "Change slope by a finer 16 per notch."},
             {"First wall (2D properties)", "Choose the slope axis in 2D. A nonzero slope enables the slope flag; returning to zero clears it."}
         });
@@ -46,7 +46,7 @@ QString content(bool threeD)
             {"R", "Reset the highlighted wall side to the default texture scale."},
             {"O", "Stick the highlighted sprite to the nearest wall of its sector. Position and alignment change; height and tags are retained."}
         });
-        html += "<p>Editing requires highlighting to be enabled and a suitable object under the pointer. "
+        html += "<p>Wheel edits keep targeting the orange selection when you look away. Other edits target the highlight. "
                 "This is a free-flight preview without collision or game simulation.</p>";
     } else {
         html += section("Modes and view", {

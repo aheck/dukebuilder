@@ -221,6 +221,22 @@ int main(int argc, char **argv)
         QApplication::sendEvent(view, &event);
         QTest::qWait(100);
     };
+    const auto selectAt = [&](double y) {
+        QPoint point(view->width()/2, int(view->height()*y));
+        QCursor::setPos(view->mapToGlobal(point));
+        QTest::qWait(50);
+        QTest::mouseClick(view, Qt::LeftButton, Qt::NoModifier, point);
+        view->releaseMouseLook();
+    };
+    selectAt(0.9);
+    wheel(0.1,120);
+    wheel(0.1,120);
+    require(editor->document().sectors()[0].floorz == -2048
+            && editor->document().sectors()[0].ceilingz == -32768,
+            "selected floor survives rebuilds and wheel over ceiling");
+    wheel(0.1,-240);
+    require(editor->document() == original, "selected floor restores original height");
+    selectAt(0.9); // Clicking the selected floor restores hover-based wheel edits.
     wheel(0.1,120);
     require(editor->document().sectors()[0].ceilingz == -33792, "wheel raises ceiling");
     require(editor->document().sectors()[0].floorz == 0, "ceiling edit leaves floor alone");
@@ -539,6 +555,14 @@ int main(int argc, char **argv)
     // Restore the opaque tile used by the height and wall-placement fixture.
     editor->undo();
     const auto beforeWheel = editor->document().sprites()[targetId];
+    QTest::keyClick(view, Qt::Key_Escape);
+    const auto beforeSelectedSprite = editor->document();
+    selectAt(0.5);
+    wheel(0.1,240);
+    require(editor->document().sprites()[targetId].z == -8192
+            && editor->document().sectors() == beforeSelectedSprite.sectors(),
+            "selected sprite moves while pointer targets ceiling");
+    wheel(0.1,-240);
     QTest::keyClick(view, Qt::Key_Escape);
     wheel(0.5,60);
     require(editor->document().sprites()[targetId].z == -6144, "sprite partial wheel notch");
