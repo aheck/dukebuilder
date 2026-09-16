@@ -503,6 +503,32 @@ int main(int argc, char **argv)
         require(editor->document().sprites()[spriteId].lotag == (enter ? -1 : -12345),
                 "sprite custom lotag commits on Enter and focus loss");
     }
+    // Changing the selected sprite's tile rebuilds the lotag suggestions without
+    // changing its custom value. Unknown tiles still accept arbitrary numbers.
+    for (int tile : {2000, 21, 2, 5, 6, 10, 1405, 6000, 1}) {
+        editor->setSelectedProperty(MapEditor::Property::Texture, tile);
+        QComboBox *tagEditor = nullptr;
+        for (int i = 0; i < properties->topLevelItemCount(); ++i) {
+            auto *row = properties->topLevelItem(i);
+            if (row->text(0) == "Lotag") {
+                tagEditor = qobject_cast<QComboBox *>(properties->itemWidget(row, 1));
+            }
+        }
+        require(tagEditor && tagEditor->isEditable(), "sprite lotag editor refreshes with texture");
+        require(tagEditor->currentText() == "-1"
+                && editor->document().sprites()[spriteId].lotag == -1,
+                "changing tag family preserves custom lotag");
+        if (tile == 2000 || tile == 21) {
+            require(tagEditor->count() == 5 && tagEditor->itemText(2).contains("Let's Rock"),
+                    "enemy and pickup properties show difficulty choices");
+        } else if (tile == 1) {
+            require(tagEditor->itemText(0).contains("Sector rotation"), "SE retains effect presets");
+        } else if (tile == 6 || tile == 1405) {
+            require(tagEditor->count() == (tile == 6 ? 1 : 2), "special sprite choices");
+        } else {
+            require(tagEditor->count() == 0, "numeric sprite tags do not show SE choices");
+        }
+    }
     editor->setFocus();
     QTest::keyClick(editor, Qt::Key_O);
     require(editor->document().sprites()[spriteId].position == QPointF(4095,512)

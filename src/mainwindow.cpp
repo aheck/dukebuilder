@@ -13,6 +13,7 @@
 
 #include "info.h"
 #include "tags.h"
+#include "spritelotags.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -209,9 +210,13 @@ public:
                                     entry.tag);
                 }
             } else {
-                editor->setToolTip("Sector Effector (tile 1) meanings. Other sprites use "
-                               "lotags differently. Enter -32768 to 32767, or 65535 as an alias for -1.");
-                for (const auto &entry : sectorEffectorLotags) {
+                const auto tile = index.siblingAtColumn(0).data(Qt::UserRole + 2);
+                const auto tags = spriteLotags(tile.isValid() ? tile.toInt() : -1);
+                editor->setToolTip(QString::fromUtf8(tags.description)
+                    + " Standard Duke 3D / Atomic meanings; mods may redefine them. "
+                      "Enter -32768 to 32767, or 65535 as an alias for -1.");
+                editor->lineEdit()->setPlaceholderText("Enter lotag");
+                for (const auto &entry : tags.presets) {
                     editor->addItem(QString::number(entry.tag) + " - " + entry.meaning, entry.tag);
                 }
             }
@@ -675,12 +680,12 @@ MainWindow::MainWindow(QWidget *parent)
                             MapEditor::Property::Hitag);
             }
             if (properties->lotag) {
-                addProperty("Lotag", QString::number(*properties->lotag),
-                            MapEditor::Property::Lotag);
-                propertiesControl->openPersistentEditor(
-                    propertiesControl->topLevelItem(
-                        propertiesControl->topLevelItemCount() - 1),
-                    1);
+                auto *row = addProperty("Lotag", QString::number(*properties->lotag),
+                                        MapEditor::Property::Lotag);
+                const int tile = properties->texture.value_or(-1);
+                row->setData(0, Qt::UserRole + 2, tile);
+                row->setToolTip(0, QString::fromUtf8(spriteLotags(tile).description));
+                propertiesControl->openPersistentEditor(row, 1);
             }
             if (properties->sprite) {
                 const auto &sprite = *properties->sprite;

@@ -217,6 +217,14 @@ Back, labeled with its sector number. The tick on the selected line points
 toward the active side. Each side retains its own values; a one-sided wall
 shows only its available side.
 
+Sprite lotag suggestions follow the selected tile: Sector Effectors show effects,
+standard enemies and supported pickups show minimum difficulty, and player
+sprites show multiplayer start types. Other recognized special sprites explain
+channels, sounds, waypoints, lighting phase, or speed in the lotag tooltip.
+Unknown tiles keep a numeric editor. All types accept custom numeric tags;
+these suggestions assume standard Duke 3D / Atomic tile definitions, which mods
+can change. Changing a sprite texture refreshes suggestions without altering tags.
+
 Sanitizers are disabled by default. The debug example above explicitly enables
 AddressSanitizer; omit that flag if your development toolchain does not support it.
 For a release build, use `Release` for Conan's `build_type` and a separate build

@@ -181,3 +181,7 @@ recovery_test = executable('recovery-test',
   include_directories: include_directories('src'),
   dependencies: qt_dependencies)
 test('recovery', recovery_test)
+
+spritelotags_test = executable('spritelotags-test', 'tests/spritelotags_test.cpp',
+  include_directories: include_directories('src'))
+test('spritelotags', spritelotags_test)
