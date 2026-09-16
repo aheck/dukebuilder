@@ -46,6 +46,7 @@
 #include <QToolBar>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+#include <QWindow>
 
 #include <algorithm>
 #include <cmath>
@@ -1272,8 +1273,15 @@ MainWindow::MainWindow(QWidget *parent)
             statusBar()->showMessage("Autosave failed: " + error, 10000);
     });
     autosaveTimer->start();
-    // Delay recovery prompts until the main window and its callbacks are ready.
-    QTimer::singleShot(0, this, [this, editor] {
+    // Wait for the native window to be mapped before creating a modal child.
+    // A zero-delay callback can run before exposure, leaving the recovery
+    // prompt behind the newly shown editor while it blocks all editor input.
+    auto *recoveryTimer = new QTimer(this);
+    recoveryTimer->setInterval(50);
+    connect(recoveryTimer, &QTimer::timeout, this, [this, editor, recoveryTimer] {
+        if (!isVisible() || !windowHandle() || !windowHandle()->isExposed()) return;
+        recoveryTimer->stop();
+        recoveryTimer->deleteLater();
         for (const auto &path : RecoveryFile::candidates(RecoveryFile::directory())) {
             RecoveryFile previous(path);
             if (!previous.locked()) continue; // Another editor instance is using it.
@@ -1291,6 +1299,9 @@ MainWindow::MainWindow(QWidget *parent)
             prompt.button(QMessageBox::Yes)->setText("Recover");
             prompt.button(QMessageBox::Cancel)->setText("Later");
             prompt.setDefaultButton(QMessageBox::Yes);
+            prompt.show();
+            prompt.raise();
+            prompt.activateWindow();
             const auto answer = prompt.exec();
             if (answer == QMessageBox::Discard) { previous.remove(); continue; }
             if (answer != QMessageBox::Yes) break;
@@ -1309,6 +1320,7 @@ MainWindow::MainWindow(QWidget *parent)
             break;
         }
     });
+    recoveryTimer->start();
 
     statusBar()->showMessage("Ready");
 }

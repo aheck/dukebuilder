@@ -39,7 +39,7 @@ QString content(bool threeD)
             {"First wall (2D properties)", "Choose the slope axis in 2D. A nonzero slope enables the slope flag; returning to zero clears it."}
         });
         html += section("Textures and sprites", {
-            {"Right click", "Choose a texture for the highlighted wall, floor, or ceiling."},
+            {"Right click", "Choose a texture for the highlighted sprite, wall, floor, or ceiling."},
             {"Arrow keys", "Pan the highlighted wall, floor, or ceiling texture."},
             {"Shift + arrows", "Resize its texture. Right/Up enlarges; Left/Down shrinks. Floors and ceilings support two uniform sizes."},
             {"Ctrl+C / Ctrl+V", "Copy/paste the highlighted wall, floor, or ceiling texture tile. Other properties stay unchanged."},

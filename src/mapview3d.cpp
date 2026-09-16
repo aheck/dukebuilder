@@ -418,7 +418,17 @@ void MapView3D::editTexture(int key, bool scale)
         }
         return selection;
     };
-    if (hit.kind == DUKE_SURFACE_WALL) {
+    if (hit.kind == DUKE_SURFACE_SPRITE) {
+        if (key != 0 || hit.sprite_index < 0
+            || std::size_t(hit.sprite_index) >= candidate.sprites().size()) { return; }
+        auto sprite = candidate.sprites()[hit.sprite_index];
+        const auto selection = selectTile(sprite.texture);
+        if (!selection || !m_active || *selection == sprite.texture) { return; }
+        sprite.texture = *selection;
+        candidate.setSprite(hit.sprite_index, sprite);
+        if (!applySnapshot(std::move(candidate))) { return; }
+        if (spriteChanged) { spriteChanged(hit.sprite_index, sprite); }
+    } else if (hit.kind == DUKE_SURFACE_WALL) {
         // Export emits each sector's wall sides consecutively in boundary order.
         int local = hit.wall_index;
         for (int i = 0; i < hit.sector_index; ++i) {

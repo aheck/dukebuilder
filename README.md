@@ -318,7 +318,7 @@ it can render with; it does not combine multiple archives.
 - **Ctrl+C / Ctrl+V:** copy/paste the highlighted surface's texture tile between
   walls, floors and ceilings. Offsets, scale and other properties are preserved.
   The copied tile remains available when switching between 2D and 3D.
-- **Right click:** choose a texture for the highlighted wall, floor or ceiling.
+- **Right click:** choose a texture for the highlighted sprite, wall, floor or ceiling.
   Cancel leaves the map unchanged; mouse look resumes if it was captured.
 - **Arrow keys:** pan the highlighted wall, floor or ceiling in texture X/Y
   coordinates, one offset unit per press (wrapping from 0 to 255).

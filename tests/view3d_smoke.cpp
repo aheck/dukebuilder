@@ -314,8 +314,12 @@ int main(int argc, char **argv)
         }
     }
     require(changedSides == 1, "wall panning and vertical scaling affect one side only");
-    const auto choose = [&](double y, int tile) {
+    const auto choose = [&](double y, int tile, bool captured = false) {
         aim(y);
+        if (captured) {
+            QTest::mouseClick(view, Qt::LeftButton, Qt::NoModifier, view->rect().center());
+            require(QWidget::mouseGrabber() == view, "3D mouse look captures input");
+        }
         QTimer closer;
         closer.setInterval(50);
         bool opened = false;
@@ -324,6 +328,7 @@ int main(int argc, char **argv)
                 auto *dialog = dynamic_cast<TextureBrowserWindow *>(widget);
                 if (!dialog || !dialog->isVisible()) { continue; }
                 opened = true;
+                require(QWidget::mouseGrabber() != view, "texture browser releases 3D mouse capture");
                 if (tile < 0) { dialog->reject(); return; }
                 for (auto *child : dialog->findChildren<QWidget *>()) {
                     if (auto *browser = dynamic_cast<TextureBrowserWidget *>(child)) {
@@ -339,6 +344,11 @@ int main(int argc, char **argv)
         QTest::mouseClick(view, Qt::RightButton, Qt::NoModifier, view->mapFromGlobal(QCursor::pos()));
         closer.stop();
         require(opened, "right click opens existing chooser");
+        if (captured) {
+            require(QWidget::mouseGrabber() == view, "closing chooser restores mouse look");
+            QTest::keyClick(view, Qt::Key_Escape);
+            require(QWidget::mouseGrabber() == nullptr, "Escape releases mouse for menu access");
+        }
     };
     aim(0.1);
     const auto beforeEmptyPaste = editor->document();
@@ -504,6 +514,30 @@ int main(int argc, char **argv)
     QTest::keyClick(editor, Qt::Key_Q);
     QTest::qWait(200);
     require(view->isVisible(), "enter 3D to select sprite");
+    QTest::keyClick(view, Qt::Key_Escape);
+    const auto beforeSpriteTexture = editor->document();
+    const auto spriteHistoryCount = editor->undoStack()->count();
+    choose(0.5, -1, true);
+    choose(0.5, -1);
+    choose(0.5, copyTile);
+    require(editor->document() == beforeSpriteTexture
+            && editor->undoStack()->count() == spriteHistoryCount,
+            "cancel and unchanged sprite texture preserve map and history");
+    choose(0.5, 0);
+    auto expectedSpriteTexture = beforeSpriteTexture;
+    expectedSpriteTexture.setSpriteTexture(targetId, 0);
+    require(editor->document() == expectedSpriteTexture,
+            "right click changes only the highlighted sprite texture");
+    editor->undo();
+    require(editor->document() == beforeSpriteTexture, "undo sprite texture in 3D");
+    editor->redo();
+    require(editor->document() == expectedSpriteTexture, "redo sprite texture in 3D");
+    require(editor->saveMap(path,error), "save sprite texture");
+    MapDocument textureReload;
+    require(textureReload.openMap(path,error) && textureReload.sprites()[targetId].texture == 0,
+            "chosen sprite texture survives save and reload");
+    // Restore the opaque tile used by the height and wall-placement fixture.
+    editor->undo();
     const auto beforeWheel = editor->document().sprites()[targetId];
     QTest::keyClick(view, Qt::Key_Escape);
     wheel(0.5,60);
@@ -685,11 +719,32 @@ int main(int argc, char **argv)
     QTimer answerPrompt;
     QString expectedTitle = "Recover interrupted work";
     QMessageBox::StandardButton answer = QMessageBox::Yes;
+    bool deferRecovery = true;
+    bool recoveryPromptSeen = false;
     QObject::connect(&answerPrompt, &QTimer::timeout, &window, [&] {
         auto *prompt = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
-        if (prompt && prompt->windowTitle() == expectedTitle) prompt->button(answer)->click();
+        if (!prompt || prompt->windowTitle() != expectedTitle) return;
+        if (expectedTitle == "Recover interrupted work") {
+            recoveryPromptSeen = true;
+            require(session->isVisible() && prompt->isVisible(), "recovery prompt shown over visible editor");
+            if (deferRecovery) { QTest::keyClick(prompt, Qt::Key_Escape); return; }
+        }
+        prompt->button(answer)->click();
     });
     answerPrompt.start(10);
+    session = std::make_unique<MainWindow>();
+    QTest::qWait(100);
+    require(QFile::exists(abandonedPath)
+            && !findEditor(session.get())->hasUnsavedChanges()
+            && QApplication::activeModalWidget() == nullptr,
+            "startup recovery waits until the editor window is displayed");
+    session->show();
+    QTest::qWait(150);
+    require(recoveryPromptSeen && QApplication::activeModalWidget() == nullptr
+            && QFile::exists(abandonedPath) && !findEditor(session.get())->hasUnsavedChanges(),
+            "Escape defers recovery without blocking editor or deleting snapshot");
+    session.reset();
+    deferRecovery = false;
     session = std::make_unique<MainWindow>();
     session->show();
     QTest::qWait(150);
