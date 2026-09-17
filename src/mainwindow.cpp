@@ -1115,6 +1115,15 @@ MainWindow::MainWindow(QWidget *parent)
     });
 
     auto *viewMenu = menuBar()->addMenu("&View");
+    auto *spritesAction = viewMenu->addAction("&Sprites");
+    spritesAction->setCheckable(true);
+    spritesAction->setChecked(true);
+    spritesAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_T));
+    spritesAction->setAutoRepeat(false);
+    spritesAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    spritesAction->setToolTip("Show sprites in 2D; sprites are always visible in Sprites mode");
+    editor->addAction(spritesAction);
+    connect(spritesAction, &QAction::toggled, editor, &MapEditor::setSpritesVisible);
     auto *toggle3D = viewMenu->addAction("3D Mode");
     toggle3D->setCheckable(true);
     toggle3D->setShortcut(QKeySequence(Qt::Key_Q));

@@ -1303,11 +1303,22 @@ void MapEditor::setMode(Mode mode)
             sector->setInteractive(mode == Mode::Sectors);
         } else if (auto *sprite = dynamic_cast<SpriteItem *>(item)) {
             sprite->setInteractive(mode == Mode::Sprites);
+            sprite->setVisible(m_spritesVisible || mode == Mode::Sprites);
         } else if (auto *playerStart = dynamic_cast<PlayerStartItem *>(item)) {
             playerStart->setInteractive(mode == Mode::Sprites);
         }
     }
     updateProperties();
+}
+
+void MapEditor::setSpritesVisible(bool visible)
+{
+    m_spritesVisible = visible;
+    for (QGraphicsItem *item : m_scene->items()) {
+        if (auto *sprite = dynamic_cast<SpriteItem *>(item)) {
+            sprite->setVisible(visible || m_mode == Mode::Sprites);
+        }
+    }
 }
 
 void MapEditor::setGridSize(qreal size)
@@ -2355,6 +2366,7 @@ void MapEditor::rebuildScene()
         const MapDocument::Sprite &sprite = m_document.sprites()[spriteId];
         auto *item = new SpriteItem(m_spriteTextures.value(sprite.texture), sprite.angle);
         item->setInteractive(m_mode == Mode::Sprites);
+        item->setVisible(m_spritesVisible || m_mode == Mode::Sprites);
         item->setData(spriteIdRole, static_cast<qulonglong>(spriteId));
         m_scene->addItem(item);
         item->setPos(sprite.position);

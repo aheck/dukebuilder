@@ -168,6 +168,7 @@ public:
     [[nodiscard]] bool hasUnsavedChanges() const;
     bool openMap(const QString &filename, QString &error);
     void setMode(Mode mode);
+    void setSpritesVisible(bool visible);
     void setGridSize(qreal size);
     void reorientGridToSelectedLine();
     void resetGridOrientation();
@@ -257,6 +258,7 @@ private:
     bool m_draggingPlayerStart = false;
     bool m_clickedPlayerStart = false;
     Mode m_mode = Mode::Draw;
+    bool m_spritesVisible = true;
     bool m_wallSideReversed = false;
     SectorFill m_sectorFill = SectorFill::Plain;
     std::function<void(const QString &)> m_statusCallback;

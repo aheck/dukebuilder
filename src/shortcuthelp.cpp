@@ -52,6 +52,7 @@ QString content(bool threeD)
         html += section("Modes and view", {
             {"Ctrl+D", "Draw mode."}, {"L", "Lines mode."}, {"V", "Vertices mode."},
             {"S", "Sectors mode."}, {"T", "Sprites mode."},
+            {"Shift+T", "Show/hide sprites in 2D. Sprites mode always shows sprites."},
             {"Q", "Enter 3D near the pointer (or the viewport center when the pointer is outside)."},
             {"Middle-mouse drag", "Pan the map."}, {"Mouse wheel", "Zoom around the pointer."},
             {"G", "Show/hide the grid."}, {"[ / ]", "Decrease/increase grid spacing."},
