@@ -355,6 +355,7 @@ public:
     explicit SpriteItem(const QImage &texture, qreal angle)
         : QGraphicsRectItem(-22.0, -18.0, 44.0, 36.0)
         , m_texture(texture)
+        , m_monochromeTexture(texture.convertToFormat(QImage::Format_Grayscale8))
         , m_angle(angle)
     {
         setFlag(QGraphicsItem::ItemIgnoresTransformations);
@@ -363,6 +364,7 @@ public:
 
     void setInteractive(bool interactive)
     {
+        m_interactive = interactive;
         setFlag(QGraphicsItem::ItemIsSelectable, interactive);
         setAcceptHoverEvents(interactive);
         setCursor(interactive ? Qt::PointingHandCursor : Qt::ArrowCursor);
@@ -400,8 +402,9 @@ protected:
         rounded.addRoundedRect(body, 8.0, 8.0);
         painter->setClipPath(rounded);
         painter->fillRect(body, QColor(42, 46, 54));
-        if (!m_texture.isNull()) {
-            painter->drawImage(body.adjusted(4.0, 4.0, -4.0, -4.0), m_texture);
+        const QImage &texture = m_interactive ? m_texture : m_monochromeTexture;
+        if (!texture.isNull()) {
+            painter->drawImage(body.adjusted(4.0, 4.0, -4.0, -4.0), texture);
         }
         painter->setClipping(false);
         painter->setBrush(Qt::NoBrush);
@@ -428,8 +431,10 @@ protected:
 
 private:
     QImage m_texture;
+    QImage m_monochromeTexture;
     qreal m_angle = 0;
     bool m_hovered = false;
+    bool m_interactive = false;
 };
 
 class PlayerStartItem final : public QGraphicsPathItem
