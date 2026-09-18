@@ -1244,6 +1244,12 @@ MainWindow::MainWindow(QWidget *parent)
     connect(propertiesDock, &QDockWidget::visibilityChanged,
             propertyEditorAction, &QAction::setChecked);
 
+    // Keep the property editor with the primary view controls, and put 3D mode
+    // after the view configuration actions.
+    viewMenu->insertAction(toggle3D, propertyEditorAction);
+    viewMenu->removeAction(toggle3D);
+    viewMenu->addAction(toggle3D);
+
     auto *helpMenu = menuBar()->addMenu("&Help");
     auto *help2D = createShortcutHelp(this, false);
     auto *help3D = createShortcutHelp(this, true);
