@@ -1,6 +1,7 @@
 #include "texturecatalog.h"
 
 #include <QMap>
+#include <QSet>
 #include <QRegularExpression>
 
 QString textureCategoryName(TextureCategory category)
@@ -43,6 +44,7 @@ TextureMetadata textureMetadata(int tile)
     };
     static const auto catalog = [] {
         QMap<int, TextureMetadata> result;
+        QSet<int> namedTiles;
         // Animation and rotation sheets have many frames without individual names.
         struct Family { int first; int last; const char *name; TextureCategory category; };
         const Family families[] = {
@@ -73,7 +75,15 @@ TextureMetadata textureMetadata(int tile)
             auto &metadata = result[entry.tile];
             metadata.keywords += " " + metadata.name;
             metadata.name = QString::fromLatin1(entry.name).replace('_', ' ');
-            metadata.categories = {textureCategoryName(entry.category)};
+            // A tile may have multiple named uses. The first named entry
+            // replaces any broad family classification; subsequent entries
+            // add their category instead of overwriting the earlier one.
+            if (!namedTiles.contains(entry.tile)) {
+                metadata.categories.clear();
+                namedTiles.insert(entry.tile);
+            }
+            const auto category = textureCategoryName(entry.category);
+            if (!metadata.categories.contains(category)) metadata.categories.append(category);
             if (entry.category == TextureCategory::WallsAndArchitecture)
                 metadata.categories.append(textureCategoryName(TextureCategory::FloorsAndCeilings));
             if (entry.category == TextureCategory::WeaponsAndAmmo && entry.tile >= 2510 && entry.tile <= 2629)
@@ -86,26 +96,7 @@ TextureMetadata textureMetadata(int tile)
             if (metadata.name.contains("PIGCOP")) metadata.keywords += " pig cop";
             if (metadata.name.contains("RPG")) metadata.keywords += " rocket launcher";
         }
-        // NAMES.H only names tiles referenced by game code. Most building
-        // materials are unnamed, so also classify actual shipped-map usage.
-        struct SurfaceUse { int tile; bool wall; bool floorOrCeiling; };
-        static const SurfaceUse surfaces[] = {
-#include "texturecatalog_surfaces.inc"
-        };
-        for (const auto &surface : surfaces) {
-            auto &metadata = result[surface.tile];
-            if (metadata.name.isEmpty()) metadata.name = QString("Surface tile %1").arg(surface.tile);
-            if (surface.wall) {
-                if (!metadata.categories.contains(textureCategoryName(TextureCategory::WallsAndArchitecture)))
-                    metadata.categories.append(textureCategoryName(TextureCategory::WallsAndArchitecture));
-                metadata.keywords += " wall architecture";
-            }
-            if (surface.floorOrCeiling) {
-                if (!metadata.categories.contains(textureCategoryName(TextureCategory::FloorsAndCeilings)))
-                    metadata.categories.append(textureCategoryName(TextureCategory::FloorsAndCeilings));
-                metadata.keywords += " floor ceiling";
-            }
-        }
+
         return result;
     }();
     return catalog.value(tile, {QString("Tile %1").arg(tile), {"Others"}, {}});

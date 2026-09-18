@@ -16,20 +16,9 @@ int main()
     require(textureMatchesSearch(2000, textureMetadata(2000), "2000 pig"), "Combined number/name search");
     require(!textureMatchesSearch(2000, textureMetadata(2000), "pig door"), "Every search word must match");
     require(textureMetadata(2005).categories.contains("Enemies"), "Enemy rotation frames stay together");
-    require(textureMetadata(626).categories.contains("Walls & Architecture")
-            && textureMetadata(626).categories.contains("Floors & Ceilings"), "Overlapping surface categories");
     require(textureMetadata(6000).categories == QStringList{"Others"}, "Unknown tiles remain in Others");
     require(textureMatchesSearch(6000, textureMetadata(6000), "6000"), "Unknown tile number search");
     require(textureMatchesSearch(6000, textureMetadata(6000), "  "), "Empty search shows all");
-    require(textureMetadata(899).categories.contains("Floors & Ceilings"),
-            "Unnamed red carpet belongs to floor and ceiling surfaces");
-    require(!textureMetadata(899).categories.contains("Others"), "Mapped surfaces leave Others");
-    int wallCount = 0, floorCount = 0;
-    for (int tile = 0; tile < 6144; ++tile) {
-        wallCount += textureMetadata(tile).categories.contains("Walls & Architecture");
-        floorCount += textureMetadata(tile).categories.contains("Floors & Ceilings");
-    }
-    require(wallCount > 600 && floorCount > 200, "Include unnamed original surface artwork");
 
     MapDocument map;
     require(map.usedTextureTiles().empty(), "Empty map has no textures");
