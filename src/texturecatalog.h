@@ -7,6 +7,7 @@ enum class TextureCategory {
     FloorsAndCeilings,
     DoorsSwitchesAndControls,
     SignsAndScreens,
+    Lights,
     PropsAndDecorations,
     SkiesAndBackgrounds,
     WeaponsAndAmmo,

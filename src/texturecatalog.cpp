@@ -11,6 +11,7 @@ QString textureCategoryName(TextureCategory category)
         case TextureCategory::FloorsAndCeilings: return "Floors & Ceilings";
         case TextureCategory::DoorsSwitchesAndControls: return "Doors, Switches & Controls";
         case TextureCategory::SignsAndScreens: return "Signs & Screens";
+        case TextureCategory::Lights: return "Lights";
         case TextureCategory::PropsAndDecorations: return "Props & Decorations";
         case TextureCategory::SkiesAndBackgrounds: return "Skies & Backgrounds";
         case TextureCategory::WeaponsAndAmmo: return "Weapons & Ammo";
