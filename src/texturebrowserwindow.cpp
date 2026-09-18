@@ -12,7 +12,7 @@ TextureBrowserWindow::TextureBrowserWindow(QWidget *parent)
     , m_buttons(new QDialogButtonBox(this))
 {
     setWindowTitle("Texture Browser");
-    setWindowModality(Qt::ApplicationModal);
+    setWindowModality(Qt::NonModal);
     resize(800, 600);
     auto *layout = new QVBoxLayout(this);
     layout->addWidget(m_browser, 1);
@@ -29,7 +29,9 @@ void TextureBrowserWindow::browse()
     m_browser->setUsedTiles(m_usedTexturesProvider ? m_usedTexturesProvider() : std::set<int>{});
     m_browser->reload();
     m_buttons->setStandardButtons(QDialogButtonBox::Close);
-    exec();
+    show();
+    raise();
+    activateWindow();
 }
 
 std::optional<TextureBrowserWindow::Selection> TextureBrowserWindow::chooseTexture(std::optional<int> currentTexture)

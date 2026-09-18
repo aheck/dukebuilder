@@ -19,6 +19,8 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QComboBox>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QCloseEvent>
 #include <QDockWidget>
 #include <QDir>
@@ -32,6 +34,7 @@
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMimeData>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -142,12 +145,43 @@ QIcon toolbarIcon(ToolbarSymbol symbol)
     return QIcon(new ToolbarIconEngine(symbol));
 }
 
+class TextureValueEdit final : public QLineEdit
+{
+public:
+    using QLineEdit::QLineEdit;
+    std::function<void(int)> tileDropped;
+
+protected:
+    void dragEnterEvent(QDragEnterEvent *event) override
+    {
+        if (event->mimeData()->hasFormat("application/x-dukebuilder-tile")) {
+            event->acceptProposedAction();
+            return;
+        }
+        QLineEdit::dragEnterEvent(event);
+    }
+
+    void dropEvent(QDropEvent *event) override
+    {
+        bool valid = false;
+        const int tile = QString::fromUtf8(
+            event->mimeData()->data("application/x-dukebuilder-tile")).toInt(&valid);
+        if (valid) {
+            setText(QString::number(tile));
+            if (tileDropped) tileDropped(tile);
+            event->acceptProposedAction();
+            return;
+        }
+        QLineEdit::dropEvent(event);
+    }
+};
+
 class TexturePropertyEditor final : public QWidget
 {
 public:
     explicit TexturePropertyEditor(QWidget *parent)
         : QWidget(parent)
-        , value(new QLineEdit(this))
+        , value(new TextureValueEdit(this))
         , browse(new QPushButton("...", this))
     {
         auto *layout = new QHBoxLayout(this);
@@ -237,6 +271,12 @@ public:
         }
 
         auto *editor = new TexturePropertyEditor(parent);
+        static_cast<TextureValueEdit *>(editor->value)->tileDropped =
+            [this, editor, index = QPersistentModelIndex(index)](int) {
+                if (index.isValid()) {
+                    emit const_cast<PropertyValueDelegate *>(this)->commitData(editor);
+                }
+            };
         connect(editor->value, &QLineEdit::editingFinished, editor,
                 [this, editor, index = QPersistentModelIndex(index)] {
                     if (index.isValid()) {

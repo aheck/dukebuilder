@@ -6,6 +6,7 @@
 #include <libduke/palette.h>
 
 #include <QFileInfo>
+#include <QMimeData>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QImage>
@@ -46,6 +47,28 @@ struct Texture {
     int height = 0;
 };
 
+class TextureListWidget final : public QListWidget
+{
+public:
+    using QListWidget::QListWidget;
+
+protected:
+    QMimeData *mimeData(const QList<QListWidgetItem *> &items) const override
+    {
+        auto *mime = QListWidget::mimeData(items);
+        if (items.size() == 1) {
+            bool valid = false;
+            const int tile = items.front()->data(Qt::UserRole).toInt(&valid);
+            if (valid) {
+                const QString tileText = QString::number(tile);
+                mime->setData("application/x-dukebuilder-tile", tileText.toUtf8());
+                mime->setText(tileText);
+            }
+        }
+        return mime;
+    }
+};
+
 QImage tileImage(const DukeArtTile &tile, const uint8_t *pixels, size_t pixelsSize,
                  const DukePaletteFile &palette)
 {
@@ -75,7 +98,7 @@ TextureBrowserWidget::TextureBrowserWidget(QWidget *parent)
     controls->addWidget(m_filter, 1);
     controls->addWidget(reloadButton);
 
-    m_textureList = new QListWidget(this);
+    m_textureList = new TextureListWidget(this);
     m_textureList->setViewMode(QListView::IconMode);
     m_textureList->setResizeMode(QListView::Adjust);
     m_textureList->setMovement(QListView::Static);
@@ -83,6 +106,8 @@ TextureBrowserWidget::TextureBrowserWidget(QWidget *parent)
     m_textureList->setGridSize(QSize(128, 132));
     m_textureList->setSpacing(4);
     m_textureList->setUniformItemSizes(true);
+    m_textureList->setDragEnabled(true);
+    m_textureList->setDragDropMode(QAbstractItemView::DragOnly);
 
     m_statusLabel = new QLabel(this);
 
