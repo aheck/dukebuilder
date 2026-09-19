@@ -85,8 +85,6 @@ TextureMetadata textureMetadata(int tile)
             }
             const auto category = textureCategoryName(entry.category);
             if (!metadata.categories.contains(category)) metadata.categories.append(category);
-            if (entry.category == TextureCategory::WallsAndArchitecture)
-                metadata.categories.append(textureCategoryName(TextureCategory::FloorsAndCeilings));
             if (entry.category == TextureCategory::WeaponsAndAmmo && entry.tile >= 2510 && entry.tile <= 2629)
                 metadata.categories.append(textureCategoryName(TextureCategory::HudAndFonts));
             if (metadata.name.contains("FIRSTGUN")) metadata.keywords += " pistol";
