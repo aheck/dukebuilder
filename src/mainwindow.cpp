@@ -10,6 +10,7 @@
 #include <QCursor>
 #include "settingsdialog.h"
 #include "texturebrowserwindow.h"
+#include "grpfilemanagerwindow.h"
 
 #include "info.h"
 #include "tags.h"
@@ -1063,6 +1064,15 @@ MainWindow::MainWindow(QWidget *parent)
     addModeAction("Sprites", QKeySequence(Qt::Key_T), MapEditor::Mode::Sprites);
 
     auto *toolsMenu = menuBar()->addMenu("&Tools");
+    auto *grpFileManagerAction = toolsMenu->addAction("GRP File Manager");
+    connect(grpFileManagerAction, &QAction::triggered, this, [this] {
+        if (!m_grpFileManager) {
+            m_grpFileManager = std::make_unique<GrpFileManagerWindow>(this);
+        }
+        m_grpFileManager->show();
+        m_grpFileManager->raise();
+        m_grpFileManager->activateWindow();
+    });
     auto *joinSectorsAction = toolsMenu->addAction("Join Sectors");
     joinSectorsAction->setShortcut(QKeySequence(Qt::Key_J));
     joinSectorsAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);

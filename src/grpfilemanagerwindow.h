@@ -1,0 +1,46 @@
+#pragma once
+
+#include <QMainWindow>
+
+#include <memory>
+
+class QCloseEvent;
+class QDragEnterEvent;
+class QDropEvent;
+class QTreeWidget;
+class QTreeWidgetItem;
+
+class GrpFileManagerWindow final : public QMainWindow
+{
+public:
+    explicit GrpFileManagerWindow(QWidget *parent = nullptr);
+    ~GrpFileManagerWindow() override;
+
+protected:
+    void closeEvent(QCloseEvent *event) override;
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
+
+private:
+    struct Member;
+
+    bool maybeDiscardChanges();
+    bool saveArchive();
+    bool saveArchiveAs();
+    bool loadArchive(const QString &path);
+    bool createArchive(const QString &path);
+    bool appendFiles(const QStringList &paths);
+    bool replaceSelected(const QString &path);
+    void deleteSelected();
+    void extractSelected(bool all);
+    void refreshList();
+    void updateActions();
+    void showError(const QString &message);
+    QString selectedMemberName() const;
+    QString initialDirectory() const;
+
+    QTreeWidget *m_files = nullptr;
+    QString m_archivePath;
+    std::vector<Member> *m_members = nullptr;
+    bool m_dirty = false;
+};

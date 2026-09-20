@@ -137,6 +137,8 @@ app_sources = [
     'src/texturecatalog.h',
     'src/texturebrowserwindow.cpp',
     'src/texturebrowserwindow.h',
+    'src/grpfilemanagerwindow.cpp',
+    'src/grpfilemanagerwindow.h',
   ]
 
 # Qt supplies the Windows GUI entry point that forwards to main(). Keep this
