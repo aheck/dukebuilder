@@ -9,6 +9,7 @@ class QDragEnterEvent;
 class QDropEvent;
 class QTreeWidget;
 class QTreeWidgetItem;
+class QTemporaryDir;
 
 class GrpFileManagerWindow final : public QMainWindow
 {
@@ -31,6 +32,7 @@ private:
     bool createArchive(const QString &path);
     bool appendFiles(const QStringList &paths);
     bool replaceSelected(const QString &path);
+    void dragSelected();
     void deleteSelected();
     void extractSelected(bool all);
     void refreshList();
@@ -42,5 +44,6 @@ private:
     QTreeWidget *m_files = nullptr;
     QString m_archivePath;
     std::vector<Member> *m_members = nullptr;
+    std::unique_ptr<QTemporaryDir> m_dragDirectory;
     bool m_dirty = false;
 };

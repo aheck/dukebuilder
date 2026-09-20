@@ -6,6 +6,7 @@
 #include <QDataStream>
 #include <QDir>
 #include <QDragEnterEvent>
+#include <QDrag>
 #include <QDropEvent>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -14,18 +15,36 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QMimeData>
+#include <QPainter>
+#include <QPixmap>
 #include <QPushButton>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QTreeWidget>
+#include <QUrl>
 #include <QVBoxLayout>
 
 #include <algorithm>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <vector>
 
 namespace {
+class GrpFileList final : public QTreeWidget
+{
+public:
+    using QTreeWidget::QTreeWidget;
+    std::function<void()> dragRequested;
+
+protected:
+    void startDrag(Qt::DropActions) override
+    {
+        if (dragRequested) dragRequested();
+    }
+};
+
 struct GrpDeleter {
     void operator()(DukeGrpFile *file) const { duke_grp_free(file); }
 };
@@ -74,13 +93,15 @@ GrpFileManagerWindow::GrpFileManagerWindow(QWidget *parent)
     description->setWordWrap(true);
     layout->addWidget(description);
 
-    m_files = new QTreeWidget(central);
+    auto *fileList = new GrpFileList(central);
+    m_files = fileList;
     m_files->setColumnCount(3);
     m_files->setHeaderLabels({"Filename", "Type", "Size"});
     m_files->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_files->setAlternatingRowColors(true);
     m_files->setSortingEnabled(false);
     m_files->setRootIsDecorated(false);
+    m_files->setDragEnabled(true);
     m_files->header()->setStretchLastSection(false);
     m_files->header()->setSectionResizeMode(0, QHeaderView::Interactive);
     m_files->header()->setSectionResizeMode(1, QHeaderView::Interactive);
@@ -88,6 +109,7 @@ GrpFileManagerWindow::GrpFileManagerWindow(QWidget *parent)
     m_files->header()->resizeSection(0, 380);
     m_files->header()->resizeSection(1, 100);
     m_files->header()->resizeSection(2, 100);
+    fileList->dragRequested = [this] { dragSelected(); };
     layout->addWidget(m_files, 1);
 
     auto *buttons = new QHBoxLayout;
@@ -320,6 +342,63 @@ bool GrpFileManagerWindow::replaceSelected(const QString &path)
     refreshList();
     m_files->setCurrentItem(m_files->topLevelItem(row));
     return true;
+}
+
+void GrpFileManagerWindow::dragSelected()
+{
+    const auto selected = m_files->selectedItems();
+    if (selected.isEmpty()) return;
+
+    // Keep these files alive after QDrag::exec() returns. Some file managers
+    // consume URI-list sources asynchronously after accepting the drop.
+    m_dragDirectory = std::make_unique<QTemporaryDir>(
+        QDir::tempPath() + "/dukebuilder-grp-XXXXXX");
+    if (!m_dragDirectory->isValid()) {
+        m_dragDirectory.reset();
+        showError("Unable to prepare files for dragging.");
+        return;
+    }
+
+    QList<QUrl> urls;
+    for (auto *item : selected) {
+        const int row = m_files->indexOfTopLevelItem(item);
+        if (row < 0) continue;
+        const Member &member = (*m_members)[static_cast<size_t>(row)];
+        const QString path = QDir(m_dragDirectory->path()).filePath(member.name);
+        QFile output(path);
+        if (!output.open(QIODevice::WriteOnly)
+            || output.write(member.data) != member.data.size()) {
+            showError(errorText("Unable to prepare file for dragging", member.name));
+            return;
+        }
+        urls.append(QUrl::fromLocalFile(path));
+    }
+
+    if (urls.isEmpty()) return;
+    QMimeData *mimeData = new QMimeData;
+    mimeData->setUrls(urls);
+    // Use the view as the drag source, as native item views do. This matters
+    // to some desktop file managers when determining the source window.
+    auto *drag = new QDrag(m_files);
+    drag->setMimeData(mimeData);
+    const QString dragLabel = selected.size() == 1
+        ? selected.front()->text(0)
+        : QString("%1 files").arg(selected.size());
+    const QFontMetrics metrics(font());
+    const int dragWidth = std::clamp(metrics.horizontalAdvance(dragLabel) + 28, 96, 260);
+    QPixmap dragPixmap(dragWidth, 34);
+    dragPixmap.fill(Qt::transparent);
+    QPainter painter(&dragPixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(palette().color(QPalette::HighlightedText));
+    painter.setBrush(palette().color(QPalette::Highlight));
+    painter.drawRoundedRect(QRectF(1, 1, dragWidth - 2, 32), 6, 6);
+    painter.drawText(QRect(14, 1, dragWidth - 22, 32), Qt::AlignVCenter,
+                     metrics.elidedText(dragLabel, Qt::ElideRight, dragWidth - 22));
+    painter.end();
+    drag->setPixmap(dragPixmap);
+    drag->setHotSpot(QPoint(14, 17));
+    drag->exec(Qt::CopyAction | Qt::MoveAction);
 }
 
 void GrpFileManagerWindow::deleteSelected()
