@@ -4,6 +4,7 @@
 #include <libduke/art.h>
 #include <libduke/grp.h>
 #include <libduke/palette.h>
+#include <libduke/palette_lookup.h>
 
 #include <QFileInfo>
 #include <QMimeData>
@@ -33,13 +34,8 @@ struct ArtDeleter {
     void operator()(DukeArtFile *file) const { duke_art_free(file); }
 };
 
-struct PaletteDeleter {
-    void operator()(DukePaletteFile *file) const { duke_palette_free(file); }
-};
-
 using GrpPointer = std::unique_ptr<DukeGrpFile, GrpDeleter>;
 using ArtPointer = std::unique_ptr<DukeArtFile, ArtDeleter>;
-using PalettePointer = std::unique_ptr<DukePaletteFile, PaletteDeleter>;
 
 struct Texture {
     QImage image;
@@ -141,10 +137,17 @@ TextureBrowserWidget::TextureBrowserWidget(QWidget *parent)
     reload();
 }
 
+TextureBrowserWidget::~TextureBrowserWidget()
+{
+    duke_palette_free(m_palette);
+    duke_palette_lookup_free(m_lookup);
+}
+
 void TextureBrowserWidget::reload()
 {
     m_textureList->clear();
     m_images.clear();
+    m_rawTextures.clear();
     m_loadStatus.clear();
     const QStringList grpPaths = QSettings().value(grpFilesSettingsKey).toStringList();
     if (grpPaths.isEmpty()) {
@@ -153,8 +156,12 @@ void TextureBrowserWidget::reload()
     }
 
     std::vector<GrpPointer> archives;
-    PalettePointer palette(duke_palette_new());
+    duke_palette_free(m_palette);
+    duke_palette_lookup_free(m_lookup);
+    m_palette = duke_palette_new();
+    m_lookup = duke_palette_lookup_new();
     bool paletteLoaded = false;
+    bool lookupLoaded = false;
     int failedArchives = 0;
     int failedArtFiles = 0;
 
@@ -170,20 +177,28 @@ void TextureBrowserWidget::reload()
         for (uint32_t index = 0; index < archive->header.entry_count; ++index) {
             DukeGrpFileEntry *entry = duke_grp_get_entry_by_index(archive.get(), index);
             if (!entry || !isEntryNamed(*entry, "PALETTE.DAT")) {
+                if (!entry || !isEntryNamed(*entry, "LOOKUP.DAT")) continue;
+                void *data = nullptr;
+                const size_t size = duke_grp_get_file_data_by_index(archive.get(), index, &data);
+                if (size != static_cast<size_t>(-1) && m_lookup
+                        && duke_palette_lookup_read_from_memory(m_lookup, data, size)) {
+                    lookupLoaded = true;
+                }
                 continue;
             }
             void *data = nullptr;
             const size_t size = duke_grp_get_file_data_by_index(
                 archive.get(), index, &data);
-            if (size != static_cast<size_t>(-1) && palette
-                    && duke_palette_read_from_memory(palette.get(), data, size)) {
+            if (size != static_cast<size_t>(-1) && m_palette
+                    && duke_palette_read_from_memory(m_palette, data, size)) {
                 paletteLoaded = true;
             }
         }
         archives.push_back(std::move(archive));
     }
 
-    if (!paletteLoaded || !palette || !duke_palette_validate(palette.get())) {
+    if (!paletteLoaded || !m_palette || !duke_palette_validate(m_palette)
+            || !lookupLoaded || !m_lookup) {
         m_statusLabel->setText("No valid PALETTE.DAT found in the configured GRP files.");
         return;
     }
@@ -225,12 +240,17 @@ void TextureBrowserWidget::reload()
                 if (pixelsSize == static_cast<size_t>(-1) || !pixels) {
                     continue;
                 }
-                const QImage image = tileImage(*tile, static_cast<const uint8_t *>(pixels),
-                                               pixelsSize, *palette);
+                const QByteArray raw(static_cast<const char *>(pixels),
+                                     static_cast<qsizetype>(pixelsSize));
+                DukeArtTile rawTile = *tile;
+                const QImage image = tileImage(rawTile,
+                                               reinterpret_cast<const uint8_t *>(raw.constData()),
+                                               pixelsSize, *m_palette);
                 if (image.isNull()) {
                     continue;
                 }
                 textures[tile->tile_number] = {image, tile->width, tile->height};
+                m_rawTextures[tile->tile_number] = {raw, tile->width, tile->height};
             }
         }
     }
@@ -275,9 +295,25 @@ std::optional<int> TextureBrowserWidget::selectedTile() const
     return item->data(Qt::UserRole).toInt();
 }
 
-QImage TextureBrowserWidget::textureImage(int tile) const
+QImage TextureBrowserWidget::textureImage(int tile, int palette) const
 {
-    return m_images.value(tile);
+    if (palette == 0) return m_images.value(tile);
+    const RawTexture raw = m_rawTextures.value(tile);
+    if (raw.pixels.isEmpty() || !m_palette || !m_lookup) return {};
+    QByteArray mapped(raw.pixels.size(), '\0');
+    for (qsizetype i = 0; i < raw.pixels.size(); ++i) {
+        uint8_t value = 0;
+        if (!duke_palette_lookup_get_index(m_lookup, static_cast<uint8_t>(palette),
+                                           static_cast<uint8_t>(raw.pixels.at(i)), &value)) {
+            return {};
+        }
+        mapped[i] = static_cast<char>(value);
+    }
+    DukeArtTile tileData{};
+    tileData.width = static_cast<int16_t>(raw.width);
+    tileData.height = static_cast<int16_t>(raw.height);
+    return tileImage(tileData, reinterpret_cast<const uint8_t *>(mapped.constData()),
+                     static_cast<size_t>(mapped.size()), *m_palette);
 }
 
 void TextureBrowserWidget::selectTile(int tile)

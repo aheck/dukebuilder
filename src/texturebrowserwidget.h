@@ -3,6 +3,7 @@
 #include <QImage>
 #include <QMap>
 #include <QWidget>
+#include <QByteArray>
 
 #include <optional>
 #include <functional>
@@ -17,10 +18,11 @@ class TextureBrowserWidget final : public QWidget
 {
 public:
     explicit TextureBrowserWidget(QWidget *parent = nullptr);
+    ~TextureBrowserWidget() override;
 
     void reload();
     [[nodiscard]] std::optional<int> selectedTile() const;
-    [[nodiscard]] QImage textureImage(int tile) const;
+    [[nodiscard]] QImage textureImage(int tile, int palette = 0) const;
     void selectTile(int tile);
     void setUsedTiles(const std::set<int> &tiles) { m_usedTiles = tiles; }
     void setTextureActivationCallback(std::function<void()> callback)
@@ -36,6 +38,10 @@ private:
     QListWidget *m_textureList = nullptr;
     QLabel *m_statusLabel = nullptr;
     QMap<int, QImage> m_images;
+    struct RawTexture { QByteArray pixels; int width = 0; int height = 0; };
+    QMap<int, RawTexture> m_rawTextures;
+    struct DukePaletteFile *m_palette = nullptr;
+    struct DukePaletteLookupFile *m_lookup = nullptr;
     std::function<void()> m_textureActivationCallback;
     std::set<int> m_usedTiles;
     QString m_loadStatus;

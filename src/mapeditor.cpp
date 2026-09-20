@@ -362,6 +362,13 @@ public:
         setInteractive(false);
     }
 
+    void setTexture(const QImage &texture)
+    {
+        m_texture = texture;
+        m_monochromeTexture = texture.convertToFormat(QImage::Format_Grayscale8);
+        update();
+    }
+
     void setInteractive(bool interactive)
     {
         m_interactive = interactive;
@@ -571,8 +578,9 @@ void MapEditor::restore(const Snapshot &snapshot)
     m_document = snapshot.document;
     m_wallSideReversed = snapshot.selection.reversed;
     for (const auto &sprite : m_document.sprites()) {
-        if (m_textureResolver && sprite.texture >= 0 && !m_spriteTextures.contains(sprite.texture))
-            m_spriteTextures.insert(sprite.texture, m_textureResolver(sprite.texture));
+        const int key = sprite.texture * 256 + sprite.palette;
+        if (m_textureResolver && sprite.texture >= 0 && !m_spriteTextures.contains(key))
+            m_spriteTextures.insert(key, m_textureResolver(sprite.texture, sprite.palette));
     }
     rebuildScene();
     // Keep the current mode, camera and zoom. Restore selection if its mode is active.
@@ -828,7 +836,7 @@ void MapEditor::setTextureSelector(
     m_textureSelector = std::move(selector);
 }
 
-void MapEditor::setTextureResolver(std::function<QImage(int)> resolver)
+void MapEditor::setTextureResolver(std::function<QImage(int, int)> resolver)
 {
     m_textureResolver = std::move(resolver);
     updateSectorTextures();
@@ -1077,6 +1085,19 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
         }
         if (changedAdditional) {
             m_document.setSprite(spriteId, updatedSprite);
+            if (property == Property::Palette && m_textureResolver) {
+                const int key = updatedSprite.texture * 256 + updatedSprite.palette;
+                const QImage image = m_textureResolver(updatedSprite.texture,
+                                                        updatedSprite.palette);
+                if (!image.isNull()) m_spriteTextures.insert(key, image);
+                for (QGraphicsItem *item : m_scene->items()) {
+                    auto *spriteItem = dynamic_cast<SpriteItem *>(item);
+                    if (spriteItem && item->data(spriteIdRole).toULongLong() == spriteId) {
+                        spriteItem->setTexture(image);
+                        break;
+                    }
+                }
+            }
             updateProperties();
             return;
         }
@@ -1122,9 +1143,10 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
                 static_cast<long long>(std::numeric_limits<short>::max())));
             m_document.setSpriteTexture(spriteId, texture);
             if (m_textureResolver) {
-                const QImage image = m_textureResolver(texture);
+                const int key = texture * 256 + sprite.palette;
+                const QImage image = m_textureResolver(texture, sprite.palette);
                 if (!image.isNull()) {
-                    m_spriteTextures.insert(texture, image);
+                    m_spriteTextures.insert(key, image);
                 }
             }
             break;
@@ -1214,8 +1236,9 @@ bool MapEditor::openMap(const QString &filename, QString &error)
     m_recoveredDirty = false;
     m_spriteTextures.clear();
     for (const auto &sprite : m_document.sprites()) {
-        if (m_textureResolver && sprite.texture >= 0 && !m_spriteTextures.contains(sprite.texture))
-            m_spriteTextures.insert(sprite.texture, m_textureResolver(sprite.texture));
+        const int key = sprite.texture * 256 + sprite.palette;
+        if (m_textureResolver && sprite.texture >= 0 && !m_spriteTextures.contains(key))
+            m_spriteTextures.insert(key, m_textureResolver(sprite.texture, sprite.palette));
     }
     rebuildScene();
     QRectF bounds(-sceneExtent, -sceneExtent, sceneExtent * 2, sceneExtent * 2);
@@ -2008,7 +2031,7 @@ void MapEditor::mouseReleaseEvent(QMouseEvent *event)
             if (selection) {
                 m_editLabel = "Change sprite texture";
                 m_document.setSpriteTexture(spriteId, selection->tile);
-                m_spriteTextures.insert(selection->tile, selection->image);
+            m_spriteTextures.insert(selection->tile * 256, selection->image);
                 rebuildScene();
                 for (QGraphicsItem *item : m_scene->items()) {
                     auto *sprite = dynamic_cast<SpriteItem *>(item);
@@ -2310,7 +2333,7 @@ void MapEditor::updateSectorTextures()
         if (m_sectorFill != SectorFill::Plain && m_textureResolver && sectorId < m_document.sectors().size()) {
             const auto &sector = m_document.sectors()[sectorId];
             const int tile = m_sectorFill == SectorFill::Floor ? sector.floorTexture : sector.ceilingTexture;
-            if (!textures.contains(tile)) textures.insert(tile, m_textureResolver(tile));
+            if (!textures.contains(tile)) textures.insert(tile, m_textureResolver(tile, 0));
             image = textures.value(tile);
         }
         sectorItem->setTexture(image);
@@ -2369,7 +2392,8 @@ void MapEditor::rebuildScene()
     for (MapDocument::SpriteId spriteId = 0;
          spriteId < m_document.sprites().size(); ++spriteId) {
         const MapDocument::Sprite &sprite = m_document.sprites()[spriteId];
-        auto *item = new SpriteItem(m_spriteTextures.value(sprite.texture), sprite.angle);
+        const int key = sprite.texture * 256 + sprite.palette;
+        auto *item = new SpriteItem(m_spriteTextures.value(key), sprite.angle);
         item->setInteractive(m_mode == Mode::Sprites);
         item->setVisible(m_spritesVisible || m_mode == Mode::Sprites);
         item->setData(spriteIdRole, static_cast<qulonglong>(spriteId));

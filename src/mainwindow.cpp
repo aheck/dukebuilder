@@ -1098,8 +1098,8 @@ MainWindow::MainWindow(QWidget *parent)
         }
         return MapEditor::SpriteTexture{selection->tile, selection->image};
     });
-    editor->setTextureResolver([textureBrowserWindow](int tile) {
-        return textureBrowserWindow->textureImage(tile);
+    editor->setTextureResolver([textureBrowserWindow](int tile, int palette) {
+        return textureBrowserWindow->textureImage(tile, palette);
     });
     connect(textureBrowserAction, &QAction::triggered, this,
             [textureBrowserWindow] {

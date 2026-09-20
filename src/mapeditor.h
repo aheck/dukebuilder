@@ -178,7 +178,7 @@ public:
     void setZoomCallback(std::function<void(qreal)> callback);
     void setTextureSelector(std::function<std::optional<SpriteTexture>(
                                 std::optional<int>)> selector);
-    void setTextureResolver(std::function<QImage(int)> resolver);
+    void setTextureResolver(std::function<QImage(int, int)> resolver);
     void setPropertiesCallback(
         std::function<void(std::optional<SelectionProperties>)> callback);
     void setSelectedProperty(Property property, qreal value);
@@ -264,6 +264,6 @@ private:
     std::function<void(const QString &)> m_statusCallback;
     std::function<void(qreal)> m_zoomCallback;
     std::function<std::optional<SpriteTexture>(std::optional<int>)> m_textureSelector;
-    std::function<QImage(int)> m_textureResolver;
+    std::function<QImage(int, int)> m_textureResolver;
     std::function<void(std::optional<SelectionProperties>)> m_propertiesCallback;
 };
