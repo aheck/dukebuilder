@@ -1178,6 +1178,57 @@ void MapEditor::setSpriteValues(std::size_t sprite, const MapDocument::Sprite &v
     updateProperties();
 }
 
+void MapEditor::setSurfaceValues(const MapDocument &values, const QString &label)
+{
+    if (values.vertices() != m_document.vertices()
+        || values.sectors().size() != m_document.sectors().size()
+        || values.walls().size() != m_document.walls().size()
+        || values.sprites().size() != m_document.sprites().size()) return;
+    for (std::size_t i = 0; i < values.sectors().size(); ++i) {
+        if (values.sectors()[i].walls != m_document.sectors()[i].walls
+            || values.sectors()[i].vertices != m_document.sectors()[i].vertices) return;
+    }
+    Edit edit(this, label, continuousEditKey);
+    // Commit object properties together, retaining the real player start and topology.
+    for (std::size_t i = 0; i < values.sectors().size(); ++i) m_document.setSector(i, values.sectors()[i]);
+    for (std::size_t i = 0; i < values.walls().size(); ++i) {
+        m_document.setWallSide(i, false, values.walls()[i].forwardSide);
+        m_document.setWallSide(i, true, values.walls()[i].reverseSide);
+    }
+    for (std::size_t i = 0; i < values.sprites().size(); ++i) m_document.setSprite(i, values.sprites()[i]);
+    rebuildScene();
+    updateProperties();
+}
+
+void MapEditor::setShadeValues(const MapDocument &values)
+{
+    if (values.sectors().size() != m_document.sectors().size()
+        || values.walls().size() != m_document.walls().size()
+        || values.sprites().size() != m_document.sprites().size()) return;
+    Edit edit(this, "Change shade", continuousEditKey);
+    // Copy only shade values: a preview snapshot has its own camera start.
+    for (std::size_t i = 0; i < values.sectors().size(); ++i) {
+        auto sector = m_document.sectors()[i];
+        sector.floorshade = values.sectors()[i].floorshade;
+        sector.ceilingshade = values.sectors()[i].ceilingshade;
+        m_document.setSector(i, sector);
+    }
+    for (std::size_t i = 0; i < values.walls().size(); ++i) {
+        for (bool reversed : {false, true}) {
+            auto side = reversed ? m_document.walls()[i].reverseSide : m_document.walls()[i].forwardSide;
+            side.shade = reversed ? values.walls()[i].reverseSide.shade : values.walls()[i].forwardSide.shade;
+            m_document.setWallSide(i, reversed, side);
+        }
+    }
+    for (std::size_t i = 0; i < values.sprites().size(); ++i) {
+        auto sprite = m_document.sprites()[i];
+        sprite.shade = values.sprites()[i].shade;
+        m_document.setSprite(i, sprite);
+    }
+    rebuildScene();
+    updateProperties();
+}
+
 void MapEditor::setSectorValues(std::size_t sector, const MapDocument::Sector &values)
 {
     Edit edit(this, "Change sector", continuousEditKey);

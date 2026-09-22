@@ -29,25 +29,26 @@ QString content(bool threeD)
             {"A / D", "Strafe left/right."}, {"Shift", "Move faster."},
             {"Mouse", "Look around while the mouse is captured."},
             {"Escape", "Clear the selection and release the mouse."}, {"Left click in viewport", "Select the highlighted surface or sprite and capture the mouse. Click it again or click empty space to clear selection."},
+            {"Shift + left click", "Add or remove a surface or sprite from the selection. A plain click replaces the selection. Returning to 2D clears it."},
             {"Q", "Return to 2D mode."}, {"H", "Toggle surface and sprite highlighting."}
         });
         html += section("Heights and slopes", {
             {"Mouse wheel", "Raise/lower the selected (or otherwise highlighted) floor, ceiling, or sprite by 1024 Z units per notch. Wheel-up raises it."},
             {"Shift + wheel", "Raise/lower by a finer 128 Z units per notch."},
-            {"Ctrl + wheel", "Adjust the selected (or otherwise highlighted) surface or sprite shade by 1 per notch. Wheel-up darkens; wheel-down brightens."},
+            {"Ctrl + wheel", "Adjust all selected surfaces and sprites (or the highlight when nothing is selected) by 1 shade unit per notch. Wheel-up darkens; wheel-down brightens. Each batch is one undoable edit."},
             {"Alt + wheel", "Change the selected (or otherwise highlighted) floor/ceiling slope by 256 per notch."},
             {"Shift + Alt + wheel", "Change slope by a finer 16 per notch."},
             {"First wall (2D properties)", "Choose the slope axis in 2D. A nonzero slope enables the slope flag; returning to zero clears it."}
         });
         html += section("Textures and sprites", {
-            {"Right click", "Choose a texture for the highlighted sprite, wall, floor, or ceiling."},
-            {"Arrow keys", "Pan the highlighted wall, floor, or ceiling texture."},
+            {"Right click", "Choose one texture for all multi-selected objects, or the highlighted object otherwise."},
+            {"Arrow keys", "Pan multi-selected wall, floor, and ceiling textures, or the highlighted surface otherwise."},
             {"Shift + arrows", "Resize its texture. Right/Up enlarges; Left/Down shrinks. Floors and ceilings support two uniform sizes."},
             {"Ctrl+C / Ctrl+V", "Copy/paste the highlighted wall, floor, or ceiling texture tile. Other properties stay unchanged."},
             {"R", "Reset the highlighted wall side to the default texture scale."},
             {"O", "Stick the highlighted sprite to the nearest wall of its sector. Position and alignment change; height and tags are retained."}
         });
-        html += "<p>Wheel edits keep targeting the orange selection when you look away. Other edits target the highlight. "
+        html += "<p>Wheel edits keep targeting the orange selection when you look away. Multi-selection supports shade, height, slope, and texture edits as one undoable batch. Heights skip walls; slopes affect only floors and ceilings; surface panning/scaling skip sprites. Ctrl+C samples the highlight; Ctrl+V applies the copied tile to the multi-selection. "
                 "This is a free-flight preview without collision or game simulation.</p>";
     } else {
         html += section("Modes and view", {

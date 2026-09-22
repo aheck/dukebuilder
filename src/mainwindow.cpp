@@ -1291,6 +1291,12 @@ MainWindow::MainWindow(QWidget *parent)
     view3D->sectorChanged = [editor](std::size_t sector, const MapDocument::Sector &values) {
         editor->setSectorValues(sector, values);
     };
+    view3D->shadesChanged = [editor](const MapDocument &values) {
+        editor->setShadeValues(values);
+    };
+    view3D->surfacesChanged = [editor](const MapDocument &values, const QString &label) {
+        editor->setSurfaceValues(values, label);
+    };
     view3D->spriteChanged = [editor](std::size_t sprite, const MapDocument::Sprite &values) {
         editor->setSpriteValues(sprite, values);
     };

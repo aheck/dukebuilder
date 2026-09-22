@@ -113,6 +113,8 @@ bool MapView3D::start(const MapDocument &document, const QPointF &pointer, QStri
     doneCurrent();
     if (!ok) { return false; }
     m_snapshot = std::move(snapshot);
+    m_selection.clear();
+    ++m_selectionRevision;
     m_hover = true;
     m_wheelRemainder = 0;
     m_active = true;
@@ -126,6 +128,8 @@ bool MapView3D::start(const MapDocument &document, const QPointF &pointer, QStri
 }
 void MapView3D::stop()
 {
+    m_selection.clear();
+    ++m_selectionRevision;
     m_active = false;
     m_timer.stop();
     releaseLook();
@@ -204,9 +208,20 @@ void MapView3D::updateSurfaceStatus()
         const auto description = describe(hovered);
         if (!description.isEmpty()) text = description;
     }
-    if (duke_renderer_get_selected_surface(m_renderer, &selected)) {
+    if (m_selection.size() == 1 && hitFromSelection(m_selection.front())) {
+        selected = *hitFromSelection(m_selection.front());
         const auto description = describe(selected);
         if (!description.isEmpty()) text = "Selected " + description;
+    } else if (m_selection.size() > 1) {
+        QString shade;
+        for (const auto &entry : m_selection) {
+            const auto hit = hitFromSelection(entry);
+            if (!hit) continue;
+            const auto value = describe(*hit).section(": ", 1);
+            if (shade.isEmpty()) shade = value;
+            else if (shade != value) { shade = "mixed"; break; }
+        }
+        text = QString("%1 selected · Shade: %2").arg(m_selection.size()).arg(shade);
     }
     if (text != m_surfaceStatus) {
         m_surfaceStatus = text;
@@ -225,7 +240,9 @@ void MapView3D::keyPressEvent(QKeyEvent *event)
     } else if (event->key() == Qt::Key_R) {
         resetTextureScale();
     } else if (event->key() == Qt::Key_Escape) {
-        duke_renderer_set_selected_surface(m_renderer, nullptr);
+        m_selection.clear();
+        ++m_selectionRevision;
+        syncSelection();
         m_wheelRemainder = 0;
         releaseLook();
     } else if (event->key() == Qt::Key_H && !event->isAutoRepeat()) {
@@ -251,14 +268,21 @@ void MapView3D::mousePressEvent(QMouseEvent *event)
             repaint();
             DukeSurfaceHit hit{};
             duke_renderer_get_hovered_surface(m_renderer, &hit);
-            DukeSurfaceHit selected{};
-            const bool sameObject = duke_renderer_get_selected_surface(m_renderer, &selected)
-                && hit.kind == selected.kind
-                && (hit.kind == DUKE_SURFACE_SPRITE
-                    ? hit.sprite_index == selected.sprite_index
-                    : hit.sector_index == selected.sector_index
-                        && hit.wall_index == selected.wall_index);
-            duke_renderer_set_selected_surface(m_renderer, sameObject ? nullptr : &hit);
+            const auto selected = selectionFromHit(hit);
+            if (event->modifiers().testFlag(Qt::ShiftModifier)) {
+                if (selected) {
+                    const auto it = std::find(m_selection.begin(), m_selection.end(), *selected);
+                    if (it == m_selection.end()) m_selection.push_back(*selected);
+                    else m_selection.erase(it);
+                }
+            } else {
+                // Retain click-again deselection for an existing single selection.
+                const bool same = selected && m_selection.size() == 1 && m_selection.front() == *selected;
+                m_selection.clear();
+                if (selected && !same) m_selection.push_back(*selected);
+            }
+            ++m_selectionRevision;
+            syncSelection();
             m_wheelRemainder = 0;
         }
         setFocus();
@@ -288,21 +312,25 @@ void MapView3D::wheelEvent(QWheelEvent *event)
     repaint();
     DukeSurfaceHit hit{};
     const bool shadeEdit = event->modifiers().testFlag(Qt::ControlModifier);
-    if ((!duke_renderer_get_selected_surface(m_renderer, &hit)
+    const auto selected = m_selection.empty() ? std::optional<DukeSurfaceHit>{} : hitFromSelection(m_selection.front());
+    if (selected) hit = *selected;
+    if ((!selected
          && !duke_renderer_get_hovered_surface(m_renderer, &hit))
         || (hit.kind != DUKE_SURFACE_FLOOR && hit.kind != DUKE_SURFACE_CEILING
             && hit.kind != DUKE_SURFACE_SPRITE
-            && !(shadeEdit && hit.kind == DUKE_SURFACE_WALL))) {
+            && !((shadeEdit || m_selection.size() > 1) && hit.kind == DUKE_SURFACE_WALL))) {
         m_wheelRemainder = 0;
         return;
     }
     // Keep partial notches separate for height, slope, shade and coarse/fine edits.
     const bool fine = event->modifiers().testFlag(Qt::ShiftModifier);
-    const bool slopeEdit = hit.kind != DUKE_SURFACE_SPRITE
+    const bool slopeEdit = (m_selection.size() > 1 || hit.kind != DUKE_SURFACE_SPRITE)
         && event->modifiers().testFlag(Qt::AltModifier);
     const int mode = shadeEdit ? 4 : (slopeEdit ? 2 : 0) + (fine ? 1 : 0);
-    if (continuousEditChanged) continuousEditChanged(QString("wheel:%1:%2:%3:%4:%5")
-        .arg(int(hit.kind)).arg(hit.sector_index).arg(hit.sprite_index).arg(hit.wall_index).arg(mode));
+    if (continuousEditChanged) continuousEditChanged(m_selection.empty()
+        ? QString("wheel:%1:%2:%3:%4:%5").arg(int(hit.kind)).arg(hit.sector_index)
+            .arg(hit.sprite_index).arg(hit.wall_index).arg(mode)
+        : QString("selection-wheel:%1:%2").arg(m_selectionRevision).arg(mode));
     const auto clearEdit = qScopeGuard([this] {
         if (continuousEditChanged) continuousEditChanged({});
     });
@@ -325,6 +353,10 @@ void MapView3D::wheelEvent(QWheelEvent *event)
     m_wheelRemainder %= 120;
     if (shadeEdit) {
         if (steps) editShade(hit, steps);
+        return;
+    }
+    if (m_selection.size() > 1) {
+        if (steps) editSelectedHeights(steps, fine, slopeEdit);
         return;
     }
     if (hit.kind == DUKE_SURFACE_SPRITE) {
@@ -380,50 +412,140 @@ void MapView3D::wheelEvent(QWheelEvent *event)
     update();
 }
 
-void MapView3D::editShade(const DukeSurfaceHit &hit, int steps)
+bool MapView3D::commitSurfaceEdit(MapDocument candidate, const QString &label)
+{
+    if (candidate == m_snapshot || !applySnapshot(std::move(candidate))) return false;
+    if (surfacesChanged) surfacesChanged(m_snapshot, label);
+    if (statusMessage) statusMessage(label);
+    return true;
+}
+
+void MapView3D::editSelectedHeights(int steps, bool fine, bool slopeEdit)
 {
     auto candidate = m_snapshot;
-    // Build shade is signed: lower values are brighter.
+    const qreal delta = steps * (fine ? 128.0 : 1024.0);
+    for (const auto &target : m_selection) {
+        if (!hitFromSelection(target)) return;
+        if (target.kind == DUKE_SURFACE_WALL) continue;
+        if (target.kind == DUKE_SURFACE_SPRITE) {
+            if (slopeEdit) continue;
+            auto sprite = candidate.sprites()[target.id];
+            sprite.z -= delta;
+            candidate.setSprite(target.id, sprite);
+        } else {
+            auto sector = candidate.sectors()[target.id];
+            const bool floor = target.kind == DUKE_SURFACE_FLOOR;
+            if (slopeEdit) {
+                int &slope = floor ? sector.floorheinum : sector.ceilingheinum;
+                int &flags = floor ? sector.floorstat : sector.ceilingstat;
+                slope = std::clamp(slope + steps * (fine ? 16 : 256), -32768, 32767);
+                if (slope) flags |= 2;
+                else flags &= ~2;
+            } else {
+                (floor ? sector.floorz : sector.ceilingz) -= delta;
+            }
+            candidate.setSector(target.id, sector);
+        }
+    }
+    commitSurfaceEdit(std::move(candidate), slopeEdit ? "Change selected slopes" : "Change selected heights");
+}
+
+void MapView3D::editShade(const DukeSurfaceHit &hit, int steps)
+{
+    auto targets = m_selection;
+    if (targets.empty()) {
+        const auto hovered = selectionFromHit(hit);
+        if (!hovered) return;
+        targets.push_back(*hovered);
+    }
+    auto candidate = m_snapshot;
     const auto adjusted = [steps](int shade) { return std::clamp(shade + steps, -128, 127); };
-    int shade = 0;
+    for (const auto &target : targets) {
+        if (!hitFromSelection(target)) return;
+        if (target.kind == DUKE_SURFACE_SPRITE) {
+            auto sprite = candidate.sprites()[target.id];
+            sprite.shade = adjusted(sprite.shade);
+            candidate.setSprite(target.id, sprite);
+        } else if (target.kind == DUKE_SURFACE_WALL) {
+            const auto &wall = candidate.walls()[target.id];
+            auto side = target.reversed ? wall.reverseSide : wall.forwardSide;
+            side.shade = adjusted(side.shade);
+            candidate.setWallSide(target.id, target.reversed, side);
+        } else {
+            auto sector = candidate.sectors()[target.id];
+            int &shade = target.kind == DUKE_SURFACE_FLOOR ? sector.floorshade : sector.ceilingshade;
+            shade = adjusted(shade);
+            candidate.setSector(target.id, sector);
+        }
+    }
+    if (candidate == m_snapshot || !applySnapshot(std::move(candidate))) return;
+    if (shadesChanged) shadesChanged(m_snapshot);
+    updateSurfaceStatus();
+}
+
+std::optional<MapView3D::SurfaceSelection> MapView3D::selectionFromHit(const DukeSurfaceHit &hit) const
+{
     if (hit.kind == DUKE_SURFACE_SPRITE) {
-        if (hit.sprite_index < 0 || std::size_t(hit.sprite_index) >= candidate.sprites().size()) return;
-        auto sprite = candidate.sprites()[hit.sprite_index];
-        shade = adjusted(sprite.shade);
-        if (shade == sprite.shade) return;
-        sprite.shade = shade;
-        candidate.setSprite(hit.sprite_index, sprite);
-        if (!applySnapshot(std::move(candidate))) return;
-        if (spriteChanged) spriteChanged(hit.sprite_index, sprite);
+        if (hit.sprite_index < 0 || std::size_t(hit.sprite_index) >= m_snapshot.sprites().size()) return {};
+        return SurfaceSelection{hit.kind, std::size_t(hit.sprite_index)};
+    }
+    if (hit.sector_index < 0 || std::size_t(hit.sector_index) >= m_snapshot.sectors().size()) return {};
+    if (hit.kind == DUKE_SURFACE_FLOOR || hit.kind == DUKE_SURFACE_CEILING)
+        return SurfaceSelection{hit.kind, std::size_t(hit.sector_index)};
+    if (hit.kind != DUKE_SURFACE_WALL) return {};
+    int local = hit.wall_index;
+    for (int s = 0; s < hit.sector_index; ++s) local -= int(m_snapshot.sectors()[s].walls.size());
+    const auto &sector = m_snapshot.sectors()[hit.sector_index];
+    if (local < 0 || std::size_t(local) >= sector.walls.size()) return {};
+    const auto id = sector.walls[local];
+    return SurfaceSelection{hit.kind, id, m_snapshot.walls()[id].start != sector.vertices[local]};
+}
+
+std::optional<DukeSurfaceHit> MapView3D::hitFromSelection(const SurfaceSelection &selection) const
+{
+    DukeSurfaceHit hit{};
+    hit.kind = selection.kind;
+    hit.sector_index = hit.wall_index = hit.sprite_index = -1;
+    if (selection.kind == DUKE_SURFACE_SPRITE) {
+        if (selection.id >= m_snapshot.sprites().size()) return {};
+        hit.sprite_index = int(selection.id);
+        const auto sector = m_snapshot.sprites()[selection.id].sectorId;
+        if (sector) hit.sector_index = int(*sector);
+    } else if (selection.kind == DUKE_SURFACE_WALL) {
+        if (selection.id >= m_snapshot.walls().size()) return {};
+        const auto &wall = m_snapshot.walls()[selection.id];
+        const auto owner = selection.reversed ? wall.reverseSector : wall.forwardSector;
+        if (!owner || *owner >= m_snapshot.sectors().size()) return {};
+        hit.sector_index = int(*owner);
+        const auto &walls = m_snapshot.sectors()[*owner].walls;
+        const auto it = std::find(walls.begin(), walls.end(), selection.id);
+        if (it == walls.end()) return {};
+        hit.wall_index = int(it - walls.begin());
+        for (std::size_t s = 0; s < *owner; ++s) hit.wall_index += int(m_snapshot.sectors()[s].walls.size());
     } else {
-        if (hit.sector_index < 0 || std::size_t(hit.sector_index) >= candidate.sectors().size()) return;
-        auto sector = candidate.sectors()[hit.sector_index];
-        if (hit.kind == DUKE_SURFACE_WALL) {
-            // The renderer uses exported wall-side indices, not document wall IDs.
-            int local = hit.wall_index;
-            for (int s = 0; s < hit.sector_index; ++s) local -= int(candidate.sectors()[s].walls.size());
-            if (local < 0 || std::size_t(local) >= sector.walls.size()) return;
-            const auto wallId = sector.walls[local];
-            const auto &wall = candidate.walls()[wallId];
-            const bool reversed = wall.start != sector.vertices[local];
-            auto side = reversed ? wall.reverseSide : wall.forwardSide;
-            shade = adjusted(side.shade);
-            if (shade == side.shade) return;
-            side.shade = shade;
-            candidate.setWallSide(wallId, reversed, side);
-            if (!applySnapshot(std::move(candidate))) return;
-            if (wallSideChanged) wallSideChanged(wallId, reversed, side);
-        } else if (hit.kind == DUKE_SURFACE_FLOOR || hit.kind == DUKE_SURFACE_CEILING) {
-            int &value = hit.kind == DUKE_SURFACE_FLOOR ? sector.floorshade : sector.ceilingshade;
-            shade = adjusted(value);
-            if (shade == value) return;
-            value = shade;
-            candidate.setSector(hit.sector_index, sector);
-            if (!applySnapshot(std::move(candidate))) return;
-            if (sectorChanged) sectorChanged(hit.sector_index, sector);
-        } else return;
+        if (selection.id >= m_snapshot.sectors().size()
+            || (selection.kind != DUKE_SURFACE_FLOOR && selection.kind != DUKE_SURFACE_CEILING)) return {};
+        hit.sector_index = int(selection.id);
+    }
+    return hit;
+}
+
+void MapView3D::syncSelection()
+{
+    if (!m_renderer) return;
+    std::vector<DukeSurfaceHit> hits;
+    for (const auto &entry : m_selection) {
+        const auto hit = hitFromSelection(entry);
+        if (hit) hits.push_back(*hit);
+    }
+    if (hits.size() != m_selection.size()
+        || !duke_renderer_set_selected_surfaces(m_renderer, hits.data(), hits.size())) {
+        m_selection.clear();
+        ++m_selectionRevision;
+        duke_renderer_set_selected_surfaces(m_renderer, nullptr, 0);
     }
     updateSurfaceStatus();
+    update();
 }
 
 void MapView3D::runModal(const std::function<void()> &show)
@@ -477,15 +599,23 @@ bool MapView3D::applySnapshot(MapDocument candidate)
         return replacement != nullptr;
     }, BuildMapValidation::Preview);
     if (ok) {
-        DukeSurfaceHit selection{};
-        if (duke_renderer_get_selected_surface(m_renderer, &selection)) {
-            duke_renderer_set_selected_surface(replacement, &selection);
+        // Property edits preserve document identities; geometry changes may not.
+        bool topologyChanged = candidate.vertices() != m_snapshot.vertices()
+            || candidate.sectors().size() != m_snapshot.sectors().size()
+            || candidate.walls().size() != m_snapshot.walls().size()
+            || candidate.sprites().size() != m_snapshot.sprites().size();
+        if (!topologyChanged) {
+            for (std::size_t s = 0; s < candidate.sectors().size(); ++s)
+                topologyChanged = topologyChanged || candidate.sectors()[s].walls != m_snapshot.sectors()[s].walls
+                    || candidate.sectors()[s].vertices != m_snapshot.sectors()[s].vertices;
         }
+        if (topologyChanged) { m_selection.clear(); ++m_selectionRevision; }
         duke_renderer_destroy(m_renderer);
         m_renderer = replacement;
         duke_renderer_set_hover_enabled(m_renderer, m_hover);
         duke_renderer_set_sprite_picking_enabled(m_renderer, true);
         m_snapshot = std::move(candidate);
+        syncSelection();
     }
     doneCurrent();
     m_clock.restart(); // Upload time must not become a navigation step.
@@ -499,119 +629,111 @@ bool MapView3D::applySnapshot(MapDocument candidate)
 
 void MapView3D::editTexture(int key, bool scale)
 {
-    if (!m_active || !m_renderer || !m_hover) { return; }
-    if (key == Qt::Key_V && !m_copiedTexture) { return; }
+    if (!m_active || !m_renderer || (!m_hover && m_selection.size() < 2)) return;
+    if (key == Qt::Key_V && !m_copiedTexture) return;
     repaint();
     DukeSurfaceHit hit{};
-    if (!duke_renderer_get_hovered_surface(m_renderer, &hit) || hit.sector_index < 0
-        || std::size_t(hit.sector_index) >= m_snapshot.sectors().size()) { return; }
+    const bool hasHover = duke_renderer_get_hovered_surface(m_renderer, &hit);
+    const auto hovered = hasHover ? selectionFromHit(hit) : std::optional<SurfaceSelection>{};
+    // Copy samples the pointed-at texture; edits use the multi-selection.
+    // Retain the existing hover behavior for single-selection texture editing.
+    auto targets = m_selection.size() > 1 && key != Qt::Key_C
+        ? m_selection : std::vector<SurfaceSelection>{};
+    if (targets.empty()) {
+        if (!hovered) return;
+        targets.push_back(*hovered);
+    }
+    for (const auto &target : targets) {
+        if (!hitFromSelection(target)) return;
+    }
+    const auto texture = [this](const SurfaceSelection &target) {
+        if (target.kind == DUKE_SURFACE_SPRITE) return m_snapshot.sprites()[target.id].texture;
+        if (target.kind == DUKE_SURFACE_WALL) {
+            const auto &wall = m_snapshot.walls()[target.id];
+            return (target.reversed ? wall.reverseSide : wall.forwardSide).texture;
+        }
+        const auto &sector = m_snapshot.sectors()[target.id];
+        return target.kind == DUKE_SURFACE_FLOOR ? sector.floorTexture : sector.ceilingTexture;
+    };
+    if (key == Qt::Key_C) {
+        m_copiedTexture = texture(targets.front());
+        if (statusMessage) statusMessage(QString("Copied texture %1").arg(*m_copiedTexture));
+        return;
+    }
     const bool arrow = key == Qt::Key_Left || key == Qt::Key_Right
         || key == Qt::Key_Up || key == Qt::Key_Down;
-    if (continuousEditChanged) continuousEditChanged(arrow
-        ? QString("texture:%1:%2:%3:%4:%5:%6").arg(int(hit.kind)).arg(hit.sector_index)
-            .arg(hit.wall_index).arg(hit.sprite_index).arg(key).arg(scale) : QString{});
+    if (continuousEditChanged) continuousEditChanged(!arrow ? QString{} : targets.size() > 1
+        ? QString("selection-texture:%1:%2:%3").arg(m_selectionRevision).arg(key).arg(scale)
+        : QString("texture:%1:%2:%3:%4:%5:%6").arg(int(hit.kind)).arg(hit.sector_index)
+            .arg(hit.wall_index).arg(hit.sprite_index).arg(key).arg(scale));
     const auto clearEdit = qScopeGuard([this] {
         if (continuousEditChanged) continuousEditChanged({});
     });
+    std::optional<int> tile;
+    if (key == Qt::Key_V) tile = m_copiedTexture;
+    if (key == 0) {
+        if (!chooseTexture) return;
+        // Open one chooser for the entire fixed target set.
+        const bool captured = m_captured;
+        m_timer.stop();
+        releaseLook();
+        tile = chooseTexture(texture(targets.front()));
+        if (m_active) {
+            setFocus();
+            if (captured) captureLook();
+            m_clock.restart();
+            m_timer.start();
+        }
+        if (!tile || !m_active) return;
+    }
     auto candidate = m_snapshot;
-    auto sector = candidate.sectors()[hit.sector_index];
     const bool horizontal = key == Qt::Key_Left || key == Qt::Key_Right;
     const int pan = (key == Qt::Key_Left || key == Qt::Key_Down) ? 1 : -1;
     const bool enlarge = key == Qt::Key_Right || key == Qt::Key_Up;
     const auto wrap = [](int value) { return (value + 256) % 256; };
-    // Keep the picked surface fixed while the modal chooser owns input.
-    const auto selectTile = [&](int current) -> std::optional<int> {
-        if (!chooseTexture) { return std::nullopt; }
-        const bool captured = m_captured;
-        m_timer.stop();
-        releaseLook();
-        const auto selection = chooseTexture(current);
-        if (m_active) {
-            setFocus();
-            if (captured) { captureLook(); }
-            m_clock.restart();
-            m_timer.start();
-        }
-        return selection;
-    };
-    if (hit.kind == DUKE_SURFACE_SPRITE) {
-        if (key != 0 || hit.sprite_index < 0
-            || std::size_t(hit.sprite_index) >= candidate.sprites().size()) { return; }
-        auto sprite = candidate.sprites()[hit.sprite_index];
-        const auto selection = selectTile(sprite.texture);
-        if (!selection || !m_active || *selection == sprite.texture) { return; }
-        sprite.texture = *selection;
-        candidate.setSprite(hit.sprite_index, sprite);
-        if (!applySnapshot(std::move(candidate))) { return; }
-        if (spriteChanged) { spriteChanged(hit.sprite_index, sprite); }
-    } else if (hit.kind == DUKE_SURFACE_WALL) {
-        // Export emits each sector's wall sides consecutively in boundary order.
-        int local = hit.wall_index;
-        for (int i = 0; i < hit.sector_index; ++i) {
-            local -= int(candidate.sectors()[i].walls.size());
-        }
-        if (local < 0 || std::size_t(local) >= sector.walls.size()) { return; }
-        const auto wallId = sector.walls[local];
-        const auto &wall = candidate.walls()[wallId];
-        const bool reversed = wall.start != sector.vertices[local];
-        auto side = reversed ? wall.reverseSide : wall.forwardSide;
-        if (key == Qt::Key_R) {
-            side.xrepeat = candidate.defaultWallXRepeat(wallId);
-            side.yrepeat = 8;
-        } else if (key == Qt::Key_C) {
-            m_copiedTexture = side.texture;
-            if (statusMessage) { statusMessage(QString("Copied texture %1").arg(*m_copiedTexture)); }
-            return;
-        } else if (key == Qt::Key_V) {
-            side.texture = *m_copiedTexture;
-        } else if (key == 0) {
-            const auto selection = selectTile(side.texture);
-            if (!selection || !m_active) { return; }
-            side.texture = *selection;
-        } else if (scale) {
-            int &repeat = horizontal ? side.xrepeat : side.yrepeat;
-            // Fewer repeats make each texture copy larger; never collapse to zero.
-            repeat = std::clamp(repeat + (enlarge ? -1 : 1), 1, 255);
+    for (const auto &target : targets) {
+        if (target.kind == DUKE_SURFACE_SPRITE) {
+            // Sprite texture choice/paste is supported; surface UV shortcuts
+            // do not reinterpret sprite dimensions or offsets.
+            if (!tile) continue;
+            auto sprite = candidate.sprites()[target.id];
+            sprite.texture = *tile;
+            candidate.setSprite(target.id, sprite);
+        } else if (target.kind == DUKE_SURFACE_WALL) {
+            const auto &wall = candidate.walls()[target.id];
+            auto side = target.reversed ? wall.reverseSide : wall.forwardSide;
+            if (tile) side.texture = *tile;
+            else if (key == Qt::Key_R) {
+                side.xrepeat = candidate.defaultWallXRepeat(target.id);
+                side.yrepeat = 8;
+            } else if (scale) {
+                int &repeat = horizontal ? side.xrepeat : side.yrepeat;
+                repeat = std::clamp(repeat + (enlarge ? -1 : 1), 1, 255);
+            } else {
+                int &offset = horizontal ? side.xpanning : side.ypanning;
+                offset = wrap(offset + pan);
+            }
+            candidate.setWallSide(target.id, target.reversed, side);
         } else {
-            int &offset = horizontal ? side.xpanning : side.ypanning;
-            offset = wrap(offset + pan);
+            if (key == Qt::Key_R) continue;
+            auto sector = candidate.sectors()[target.id];
+            const bool floor = target.kind == DUKE_SURFACE_FLOOR;
+            if (tile) (floor ? sector.floorTexture : sector.ceilingTexture) = *tile;
+            else if (scale) {
+                int &flags = floor ? sector.floorstat : sector.ceilingstat;
+                if (enlarge) flags &= ~8;
+                else flags |= 8;
+            } else {
+                int &offset = floor
+                    ? (horizontal ? sector.floorxpanning : sector.floorypanning)
+                    : (horizontal ? sector.ceilingxpanning : sector.ceilingypanning);
+                offset = wrap(offset + pan);
+            }
+            candidate.setSector(target.id, sector);
         }
-        if (side == (reversed ? wall.reverseSide : wall.forwardSide)) { return; }
-        candidate.setWallSide(wallId, reversed, side);
-        if (!applySnapshot(std::move(candidate))) { return; }
-        if (wallSideChanged) { wallSideChanged(wallId, reversed, side); }
-    } else if (hit.kind == DUKE_SURFACE_FLOOR || hit.kind == DUKE_SURFACE_CEILING) {
-        if (key == Qt::Key_R) { return; }
-        const bool floor = hit.kind == DUKE_SURFACE_FLOOR;
-        if (key == Qt::Key_C) {
-            m_copiedTexture = floor ? sector.floorTexture : sector.ceilingTexture;
-            if (statusMessage) { statusMessage(QString("Copied texture %1").arg(*m_copiedTexture)); }
-            return;
-        } else if (key == Qt::Key_V) {
-            (floor ? sector.floorTexture : sector.ceilingTexture) = *m_copiedTexture;
-        } else if (key == 0) {
-            int &tile = floor ? sector.floorTexture : sector.ceilingTexture;
-            const auto selection = selectTile(tile);
-            if (!selection || !m_active) { return; }
-            tile = *selection;
-        } else if (scale) {
-            // Build's double-smoosh flag is the only floor/ceiling scale field.
-            int &flags = floor ? sector.floorstat : sector.ceilingstat;
-            if (enlarge) { flags &= ~8; } else { flags |= 8; }
-        } else {
-            int &offset = floor
-                ? (horizontal ? sector.floorxpanning : sector.floorypanning)
-                : (horizontal ? sector.ceilingxpanning : sector.ceilingypanning);
-            offset = wrap(offset + pan);
-        }
-        if (sector == candidate.sectors()[hit.sector_index]) { return; }
-        candidate.setSector(hit.sector_index, sector);
-        if (!applySnapshot(std::move(candidate))) { return; }
-        if (sectorChanged) { sectorChanged(hit.sector_index, sector); }
-    } else { return; }
-    if (statusMessage) {
-        statusMessage(key == Qt::Key_R ? "Texture scale reset" : (key == 0 || key == Qt::Key_V) ? "Texture changed" : scale ? "Texture size changed" : "Texture offset changed");
     }
+    commitSurfaceEdit(std::move(candidate), key == Qt::Key_R ? "Reset texture scale"
+        : tile ? "Change texture" : scale ? "Change texture size" : "Change texture offset");
 }
 
 void MapView3D::stickSpriteToWall()

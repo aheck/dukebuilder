@@ -27,6 +27,8 @@ public:
     std::function<void(std::size_t, const MapDocument::Sector &)> sectorChanged;
     std::function<void(std::size_t, const MapDocument::Sprite &)> spriteChanged;
     std::function<void(std::size_t, bool, const MapDocument::WallSide &)> wallSideChanged;
+    std::function<void(const MapDocument &)> shadesChanged;
+    std::function<void(const MapDocument &, const QString &)> surfacesChanged;
     std::function<void(const QString &)> statusMessage;
     std::function<void(const QString &)> surfaceStatusChanged;
 protected:
@@ -41,12 +43,27 @@ protected:
     void focusOutEvent(QFocusEvent *event) override;
     void hideEvent(QHideEvent *event) override;
 private:
+    struct SurfaceSelection {
+        DukeSurfaceKind kind;
+        std::size_t id;
+        bool reversed = false;
+        bool operator==(const SurfaceSelection &other) const {
+            return kind == other.kind && id == other.id && reversed == other.reversed;
+        }
+    };
+    std::optional<SurfaceSelection> selectionFromHit(const DukeSurfaceHit &hit) const;
+    std::optional<DukeSurfaceHit> hitFromSelection(const SurfaceSelection &selection) const;
+    void syncSelection();
+    std::vector<SurfaceSelection> m_selection;
+    std::size_t m_selectionRevision = 0;
     void releaseLook();
     void captureLook();
     void cleanup();
     bool applySnapshot(MapDocument candidate);
     void editTexture(int key, bool scale);
     void editShade(const DukeSurfaceHit &hit, int steps);
+    void editSelectedHeights(int steps, bool fine, bool slope);
+    bool commitSurfaceEdit(MapDocument candidate, const QString &label);
     void updateSurfaceStatus();
     QString m_surfaceStatus;
     QTimer m_timer;

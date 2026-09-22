@@ -222,13 +222,82 @@ int main(int argc, char **argv)
         QApplication::sendEvent(view, &event);
         QTest::qWait(100);
     };
-    const auto selectAt = [&](double y) {
+    const auto selectAt = [&](double y, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
         QPoint point(view->width()/2, int(view->height()*y));
         QCursor::setPos(view->mapToGlobal(point));
         QTest::qWait(50);
-        QTest::mouseClick(view, Qt::LeftButton, Qt::NoModifier, point);
+        QTest::mouseClick(view, Qt::LeftButton, modifiers, point);
         view->releaseMouseLook();
     };
+    {
+        // Different starting shades must retain their relative difference.
+        wheel(0.9,120,Qt::ControlModifier);
+        const auto beforeBatch = editor->document();
+        selectAt(0.9);
+        selectAt(0.1,Qt::ShiftModifier);
+        const auto *status = window.findChild<QLabel *>("surfaceStatusLabel");
+        require(status && status->text() == "2 selected · Shade: mixed", "Shift click adds a second surface");
+        const auto historyCount = editor->undoStack()->count();
+        wheel(0.5,120,Qt::ControlModifier);
+        require(editor->document().sectors()[0].floorshade == 2
+                && editor->document().sectors()[0].ceilingshade == 1,
+                "Batch shade changes both selected surfaces relative to their own values");
+        require(editor->undoStack()->count() == historyCount + 1, "Batch shade is one undo command");
+        const auto batch = editor->document();
+        wheel(0.5,120);
+        require(editor->document().sectors()[0].floorz == batch.sectors()[0].floorz - 1024
+                && editor->document().sectors()[0].ceilingz == batch.sectors()[0].ceilingz - 1024,
+                "Height wheel moves all selected surfaces preserving room clearance");
+        editor->undo();
+        require(editor->document() == batch, "Batch height is one undoable edit separate from shading");
+        wheel(0.5,120,Qt::AltModifier | Qt::ShiftModifier);
+        require(editor->document().sectors()[0].floorheinum == batch.sectors()[0].floorheinum + 16
+                && editor->document().sectors()[0].ceilingheinum == batch.sectors()[0].ceilingheinum + 16,
+                "Batch slope edits both selected surfaces with fine steps");
+        editor->undo();
+        require(editor->document() == batch, "Batch slope undo restores both surfaces");
+        editor->undo();
+        require(editor->document() == beforeBatch && status->text().startsWith("2 selected"),
+                "Undo restores all shades and preserves the selection");
+        editor->redo();
+        require(editor->document() == batch && status->text().startsWith("2 selected"), "Redo preserves multi-selection");
+        editor->undo();
+        selectAt(0.9,Qt::ShiftModifier);
+        require(status->text() == "Selected Ceiling shade: 0", "Shift click removes only the clicked surface");
+        selectAt(0.1,Qt::ShiftModifier);
+        require(!status->text().contains("Selected"), "Shift click removes final selection");
+        wheel(0.9,-120,Qt::ControlModifier);
+        require(editor->document() == original, "Batch test preserves unrelated geometry and player start");
+        selectAt(0.9);
+        selectAt(0.1,Qt::ShiftModifier);
+        selectAt(0.5);
+        require(status->text().startsWith("Selected Wall"), "Plain click replaces a multi-selection");
+        selectAt(0.9,Qt::ShiftModifier);
+        const auto beforeWallHeight = editor->document();
+        wheel(0.1,120,Qt::ShiftModifier);
+        require(editor->document().sectors()[0].floorz == beforeWallHeight.sectors()[0].floorz - 128
+                && editor->document().walls() == beforeWallHeight.walls(),
+                "Wall-first selection applies fine height to floor and skips wall");
+        editor->undo();
+        require(editor->document() == beforeWallHeight, "Mixed wall/floor height undo preserves player start");
+        const auto beforeInvalidIndex = editor->undoStack()->index();
+        wheel(0.1,12000);
+        require(editor->document() == beforeWallHeight && editor->undoStack()->index() == beforeInvalidIndex,
+                "Invalid batch height is rejected atomically without history changes");
+        QTest::keyClick(view, Qt::Key_Escape);
+        require(!status->text().contains("Selected") && !status->text().contains("selected"),
+                "Escape clears the whole selection");
+        selectAt(0.9);
+        selectAt(0.1,Qt::ShiftModifier);
+        QTest::keyClick(view, Qt::Key_Q);
+        QTest::qWait(100);
+        QCursor::setPos(editor->viewport()->mapToGlobal(editor->viewport()->rect().center()));
+        QTest::keyClick(editor, Qt::Key_Q);
+        QTest::qWait(150);
+        view->releaseMouseLook();
+        require(view->isVisible() && !status->text().contains("Selected") && !status->text().contains("selected"),
+                "Returning to 2D and back clears multi-selection");
+    }
     wheel(0.9,60,Qt::ControlModifier);
     require(editor->document() == original, "Partial shade notch does not change geometry");
     const auto *helpStatus = window.findChild<QLabel *>("help3DStatusLabel");
@@ -488,6 +557,53 @@ int main(int argc, char **argv)
         }
     }
     require(resetSides == 1, "reset restores wall scale and preserves panning");
+    {
+        const auto beforeTextures = editor->document();
+        selectAt(0.9);
+        selectAt(0.1,Qt::ShiftModifier);
+        const auto count = editor->undoStack()->count();
+        choose(0.5, -1);
+        require(editor->document() == beforeTextures && editor->undoStack()->count() == count,
+                "Cancelled batch texture picker changes nothing");
+        choose(0.5, copyTile);
+        require(editor->document().sectors()[0].floorTexture == copyTile
+                && editor->document().sectors()[0].ceilingTexture == copyTile,
+                "One texture choice applies to selected floor and ceiling instead of hovered wall");
+        require(editor->undoStack()->count() == count + 1, "Texture batch creates one undo command");
+        editor->undo();
+        require(editor->document() == beforeTextures, "Texture batch undo preserves other properties");
+        editor->redo();
+        require(editor->document().sectors()[0].floorTexture == copyTile, "Texture batch redo works");
+        editor->undo();
+        QTest::keyClick(view, Qt::Key_Left);
+        require(editor->document().sectors()[0].floorxpanning == (beforeTextures.sectors()[0].floorxpanning + 1) % 256
+                && editor->document().sectors()[0].ceilingxpanning == (beforeTextures.sectors()[0].ceilingxpanning + 1) % 256,
+                "Batch panning preserves relative offsets and wraps independently");
+        editor->undo();
+        QTest::keyClick(view, Qt::Key_Right, Qt::ShiftModifier);
+        require(!(editor->document().sectors()[0].floorstat & 8)
+                && !(editor->document().sectors()[0].ceilingstat & 8), "Batch surface scaling affects both surfaces");
+        editor->undo();
+        require(editor->document() == beforeTextures, "Batch UV edits undo atomically");
+        selectAt(0.5);
+        selectAt(0.9,Qt::ShiftModifier);
+        choose(0.1,copyTile);
+        int changed = 0;
+        for (std::size_t w = 0; w < editor->document().walls().size(); ++w) {
+            const auto &a = editor->document().walls()[w];
+            const auto &b = beforeTextures.walls()[w];
+            changed += a.forwardSide.texture != b.forwardSide.texture;
+            changed += a.reverseSide.texture != b.reverseSide.texture;
+        }
+        require(changed == 1 && editor->document().sectors()[0].floorTexture == copyTile,
+                "Mixed wall/floor texture choice updates only the selected wall side");
+        QTest::keyClick(view, Qt::Key_V, Qt::ControlModifier);
+        require(editor->document().sectors()[0].floorTexture == 0, "Paste applies copied tile to multi-selection");
+        editor->undo();
+        editor->undo();
+        require(editor->document() == beforeTextures, "Mixed texture batch restores exactly");
+        QTest::keyClick(view, Qt::Key_Escape);
+    }
     QTest::keyClick(view, Qt::Key_Q);
     require(editor->isVisible(), "return to 2D after edits");
     require(editor->document().sectors()[0].ceilingz == -33792, "3D edit persists into 2D");
@@ -650,6 +766,25 @@ int main(int argc, char **argv)
             "Ctrl wheel shades selected sprite instead of hovered ceiling");
     wheel(0.1,-120,Qt::ControlModifier);
     require(editor->document() == beforeSelectedSprite, "Sprite shade restores independently");
+    selectAt(0.9,Qt::ShiftModifier);
+    wheel(0.1,120,Qt::ControlModifier);
+    require(editor->document().sprites()[targetId].shade == beforeWheel.shade + 1
+            && editor->document().sectors()[0].floorshade == beforeSelectedSprite.sectors()[0].floorshade + 1,
+            "Mixed sprite and floor selection shades both objects");
+    editor->undo();
+    require(editor->document() == beforeSelectedSprite, "One undo restores mixed-type batch");
+    wheel(0.1,120);
+    require(editor->document().sprites()[targetId].z == beforeWheel.z - 1024
+            && editor->document().sectors()[0].floorz == beforeSelectedSprite.sectors()[0].floorz - 1024,
+            "Mixed sprite/floor height edit moves both objects");
+    editor->undo();
+    require(editor->document() == beforeSelectedSprite, "One undo restores mixed height batch");
+    choose(0.1,0);
+    require(editor->document().sprites()[targetId].texture == 0
+            && editor->document().sectors()[0].floorTexture == 0, "Texture choice supports mixed sprite/floor selection");
+    editor->undo();
+    require(editor->document() == beforeSelectedSprite, "One undo restores mixed texture batch");
+    selectAt(0.9,Qt::ShiftModifier);
     wheel(0.1,240);
     require(editor->document().sprites()[targetId].z == -8192
             && editor->document().sectors() == beforeSelectedSprite.sectors(),

@@ -312,6 +312,17 @@ Run geometry and map open/save regression tests with `meson test -C build`.
 
 Configure a game archive containing ART tiles and PALETTE.DAT (normally
 DUKE3D.GRP) in **Settings → Game Data**. Left-click a highlighted surface or sprite to select it in orange; click it again to deselect.
+**Shift+click** adds or removes a surface or sprite. A plain click replaces a
+multi-selection. **Ctrl+wheel** shades the entire selection relative to each
+surface's current value, as one undoable edit. Wheel height, Alt+wheel slope,
+texture choice/paste, panning, scaling, and wall-scale reset also support
+multi-selection. Each action validates and commits the whole batch together.
+Height edits skip walls; slope edits affect only floors and ceilings. Texture
+choice and paste include sprites, while surface panning/scaling skip them.
+Right-click opens one texture picker for the selection; Ctrl+C still samples
+the highlighted texture. Relative heights and texture offsets are preserved.
+Selection survives property edits and undo/redo, but clears when returning to 2D
+or when restored geometry changes invalidate its identities.
 Mouse-wheel edits keep targeting the selection when you look away. Escape clears
 the selection and releases the mouse. Press **Q** over the map to enter 3D,
 and **Q** again to return to the same 2D view. **View → 3D Mode** also switches
@@ -320,6 +331,7 @@ views; when the pointer is outside the viewport it uses the 2D view's center.
 The slim 3D status bar keeps control help on one line beside operation messages.
 A separate field shows shade once: for the selected surface when present,
 otherwise for the highlighted surface.
+With multiple selections it shows the count and their shared shade, or “mixed”.
 
 The camera starts at the map point under the cursor, or just inside the nearest
 sector when the cursor is outside. Its height is placed between the local floor
