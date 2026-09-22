@@ -1001,6 +1001,18 @@ MainWindow::MainWindow(QWidget *parent)
                 editor->setGridSize(gridSizeCombo->itemData(index).toReal());
             });
 
+    auto *cursorStatusLabel = new QLabel(this);
+    cursorStatusLabel->setObjectName("cursorStatusLabel");
+    cursorStatusLabel->setContentsMargins(8, 0, 8, 0);
+    cursorStatusLabel->setToolTip("2D cursor coordinates and current drawing measurements");
+    cursorStatusLabel->setMinimumWidth(cursorStatusLabel->fontMetrics().horizontalAdvance("X -131072  Y -131072") + 16);
+    editor->setCursorStatusCallback([cursorStatusLabel](const QString &message) {
+        cursorStatusLabel->setText(message);
+    });
+    statusBar()->addPermanentWidget(cursorStatusLabel);
+    connect(views, &QStackedWidget::currentChanged, cursorStatusLabel, [=](int) {
+        cursorStatusLabel->setVisible(views->currentWidget() == editor);
+    });
     statusBar()->addPermanentWidget(gridSizeCombo);
 
     const auto addGridShortcut = [this, gridSizeCombo](const QString &name, int key, int step) {

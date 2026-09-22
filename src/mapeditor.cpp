@@ -830,6 +830,11 @@ void MapEditor::setStatusCallback(std::function<void(const QString &)> callback)
     reportStatus("Draw: left click | Finish: right click/Enter | Close: click first vertex | Cancel: Esc | Pan: middle mouse");
 }
 
+void MapEditor::setCursorStatusCallback(std::function<void(const QString &)> callback)
+{
+    m_cursorStatusCallback = std::move(callback);
+}
+
 void MapEditor::setTextureSelector(
     std::function<std::optional<SpriteTexture>(std::optional<int>)> selector)
 {
@@ -1987,19 +1992,18 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
     position.setY(std::clamp(position.y(), bounds.top(), bounds.bottom()));
     updatePreview(position);
 
-    if (!m_drawingPoints.empty()) {
+    if (m_cursorStatusCallback && !m_drawingPoints.empty()) {
         const qreal length = QLineF(m_drawingPoints.back(), position).length();
         const qreal angle = QLineF(m_drawingPoints.back(), position).angle();
-        reportStatus(QString("Drawing | X %1  Y %2 | Length %3 | Angle %4°")
+        m_cursorStatusCallback(QString("X %1  Y %2 | Length %3 | Angle %4°")
                          .arg(position.x(), 0, 'f', 0)
                          .arg(position.y(), 0, 'f', 0)
                          .arg(length, 0, 'f', 1)
                          .arg(angle, 0, 'f', 1));
-    } else {
-        reportStatus(QString("X %1  Y %2 | Grid %3")
+    } else if (m_cursorStatusCallback) {
+        m_cursorStatusCallback(QString("X %1  Y %2")
                          .arg(position.x(), 0, 'f', 0)
-                         .arg(position.y(), 0, 'f', 0)
-                         .arg(m_scene->gridSize(), 0, 'f', 0));
+                         .arg(position.y(), 0, 'f', 0));
     }
 
     QGraphicsView::mouseMoveEvent(event);

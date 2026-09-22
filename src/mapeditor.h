@@ -184,6 +184,7 @@ public:
     void setSelectedProperty(Property property, qreal value);
     void setSelectedWallSide(bool reversed);
     void setStatusCallback(std::function<void(const QString &)> callback);
+    void setCursorStatusCallback(std::function<void(const QString &)> callback);
 
 protected:
     void mousePressEvent(QMouseEvent *event) override;
@@ -262,6 +263,7 @@ private:
     bool m_wallSideReversed = false;
     SectorFill m_sectorFill = SectorFill::Plain;
     std::function<void(const QString &)> m_statusCallback;
+    std::function<void(const QString &)> m_cursorStatusCallback;
     std::function<void(qreal)> m_zoomCallback;
     std::function<std::optional<SpriteTexture>(std::optional<int>)> m_textureSelector;
     std::function<QImage(int, int)> m_textureResolver;
