@@ -205,9 +205,9 @@ wall. To join partway along an existing edge, first split it by inserting a vert
 in Vertices mode.
 
 New rooms attached to existing sector vertices inherit that sector's floor and
-ceiling heights. If several sectors qualify, the first attachment point in
+ceiling heights and textures. If several sectors qualify, the first attachment point in
 drawing order chooses the source, with the lowest sector number breaking ties.
-Other properties are not copied, and existing rooms keep their own heights.
+Other properties are not copied, and existing rooms keep their own heights and textures.
 
 Drawing a closed sector entirely inside another sector creates an inner loop
 in the surrounding room and two-sided walls connecting the sectors. Raise the

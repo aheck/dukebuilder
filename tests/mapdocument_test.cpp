@@ -56,21 +56,33 @@ int main()
         attached.setSectorFloorZ(0, -4096);
         attached.setSectorCeilingZ(0, -16384);
         attached.setSectorFloorTexture(0, 123);
+        attached.setSectorCeilingTexture(0, 456);
+        attached.setSectorLotag(0, 17);
         require(attached.addPolyline({{1024,0},{2048,0},{2048,1024},{1024,1024}}, true), "Draw attached room");
         require(attached.sectors()[1].floorz == -4096 && attached.sectors()[1].ceilingz == -16384,
                 "Shared-edge attachment inherits both heights");
-        require(attached.sectors()[1].floorTexture == 0, "Attachment does not copy unrelated properties");
+        require(attached.sectors()[1].floorTexture == 123 && attached.sectors()[1].ceilingTexture == 456,
+                "Shared-edge attachment inherits both textures");
+        require(attached.sectors()[1].lotag == 0, "Attachment does not copy unrelated properties");
         attached.setSectorFloorZ(1, 4096);
         attached.setSectorCeilingZ(1, -2048);
+        attached.setSectorFloorTexture(1, 789);
+        attached.setSectorCeilingTexture(1, 890);
         require(attached.addPolyline({{2048,1024},{2048,2048},{0,2048},{0,1024},{1024,1024}}, true),
                 "Draw room attached to sources with different heights");
         require(attached.sectors()[2].floorz == 4096 && attached.sectors()[2].ceilingz == -2048,
                 "First drawn attachment chooses height source");
+        require(attached.sectors()[2].floorTexture == 789 && attached.sectors()[2].ceilingTexture == 890,
+                "Textures use the same first attachment as heights");
+        require(attached.sectors()[0].floorTexture == 123 && attached.sectors()[0].ceilingTexture == 456,
+                "Existing sector textures remain unchanged");
         require(attached.sectors()[0].floorz == -4096 && attached.sectors()[1].floorz == 4096,
                 "Existing sectors retain independent heights");
         require(attached.addPolyline({{0,0},{-1024,0},{-1024,-1024},{0,-1024}}, true), "Draw corner-attached room");
         require(attached.sectors()[3].floorz == -4096 && attached.sectors()[3].ceilingz == -16384,
                 "Single-vertex attachment inherits heights");
+        require(attached.sectors()[3].floorTexture == 123 && attached.sectors()[3].ceilingTexture == 456,
+                "Single-vertex attachment inherits textures");
         require(attached.addPolyline({{4096,0},{5120,0},{5120,1024},{4096,1024}}, true), "Draw detached room");
         require(attached.sectors()[4].floorz == 0 && attached.sectors()[4].ceilingz == -8192,
                 "Detached room retains default heights");

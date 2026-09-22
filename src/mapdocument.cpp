@@ -216,6 +216,8 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed, Q
                         continue;
                     sector.floorz = source.floorz;
                     sector.ceilingz = source.ceilingz;
+                    sector.floorTexture = source.floorTexture;
+                    sector.ceilingTexture = source.ceilingTexture;
                     inherited = true;
                     break;
                 }
