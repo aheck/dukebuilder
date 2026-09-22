@@ -175,6 +175,43 @@ void MapView3D::paintGL()
     duke_renderer_draw(m_renderer, matrix);
     sg_end_pass();
     sg_commit();
+    updateSurfaceStatus();
+}
+
+void MapView3D::updateSurfaceStatus()
+{
+    const auto describe = [this](const DukeSurfaceHit &hit) -> QString {
+        if (hit.kind == DUKE_SURFACE_SPRITE && hit.sprite_index >= 0
+            && std::size_t(hit.sprite_index) < m_snapshot.sprites().size())
+            return QString("Sprite shade: %1").arg(m_snapshot.sprites()[hit.sprite_index].shade);
+        if (hit.sector_index < 0 || std::size_t(hit.sector_index) >= m_snapshot.sectors().size()) return {};
+        const auto &sector = m_snapshot.sectors()[hit.sector_index];
+        if (hit.kind == DUKE_SURFACE_FLOOR) return QString("Floor shade: %1").arg(sector.floorshade);
+        if (hit.kind == DUKE_SURFACE_CEILING) return QString("Ceiling shade: %1").arg(sector.ceilingshade);
+        if (hit.kind == DUKE_SURFACE_WALL) {
+            int local = hit.wall_index;
+            for (int s = 0; s < hit.sector_index; ++s) local -= int(m_snapshot.sectors()[s].walls.size());
+            if (local < 0 || std::size_t(local) >= sector.walls.size()) return {};
+            const auto &wall = m_snapshot.walls()[sector.walls[local]];
+            const auto &side = wall.start == sector.vertices[local] ? wall.forwardSide : wall.reverseSide;
+            return QString("Wall shade: %1").arg(side.shade);
+        }
+        return {};
+    };
+    DukeSurfaceHit hovered{}, selected{};
+    QString text = "Shade: —";
+    if (duke_renderer_get_hovered_surface(m_renderer, &hovered)) {
+        const auto description = describe(hovered);
+        if (!description.isEmpty()) text = description;
+    }
+    if (duke_renderer_get_selected_surface(m_renderer, &selected)) {
+        const auto description = describe(selected);
+        if (!description.isEmpty()) text = "Selected " + description;
+    }
+    if (text != m_surfaceStatus) {
+        m_surfaceStatus = text;
+        if (surfaceStatusChanged) surfaceStatusChanged(text);
+    }
 }
 void MapView3D::keyPressEvent(QKeyEvent *event)
 {
@@ -250,26 +287,29 @@ void MapView3D::wheelEvent(QWheelEvent *event)
     // Pick using the current camera and pointer rather than a previous frame.
     repaint();
     DukeSurfaceHit hit{};
+    const bool shadeEdit = event->modifiers().testFlag(Qt::ControlModifier);
     if ((!duke_renderer_get_selected_surface(m_renderer, &hit)
          && !duke_renderer_get_hovered_surface(m_renderer, &hit))
         || (hit.kind != DUKE_SURFACE_FLOOR && hit.kind != DUKE_SURFACE_CEILING
-            && hit.kind != DUKE_SURFACE_SPRITE)) {
+            && hit.kind != DUKE_SURFACE_SPRITE
+            && !(shadeEdit && hit.kind == DUKE_SURFACE_WALL))) {
         m_wheelRemainder = 0;
         return;
     }
-    // Keep partial notches separate for height/slope and coarse/fine edits.
+    // Keep partial notches separate for height, slope, shade and coarse/fine edits.
     const bool fine = event->modifiers().testFlag(Qt::ShiftModifier);
     const bool slopeEdit = hit.kind != DUKE_SURFACE_SPRITE
         && event->modifiers().testFlag(Qt::AltModifier);
-    const int mode = (slopeEdit ? 2 : 0) + (fine ? 1 : 0);
-    if (continuousEditChanged) continuousEditChanged(QString("wheel:%1:%2:%3:%4")
-        .arg(int(hit.kind)).arg(hit.sector_index).arg(hit.sprite_index).arg(mode));
+    const int mode = shadeEdit ? 4 : (slopeEdit ? 2 : 0) + (fine ? 1 : 0);
+    if (continuousEditChanged) continuousEditChanged(QString("wheel:%1:%2:%3:%4:%5")
+        .arg(int(hit.kind)).arg(hit.sector_index).arg(hit.sprite_index).arg(hit.wall_index).arg(mode));
     const auto clearEdit = qScopeGuard([this] {
         if (continuousEditChanged) continuousEditChanged({});
     });
     const qreal heightStep = fine ? 128.0 : 1024.0;
     if (mode != m_wheelMode || hit.kind != m_wheelTarget.kind
         || hit.sector_index != m_wheelTarget.sector_index
+        || hit.wall_index != m_wheelTarget.wall_index
         || hit.sprite_index != m_wheelTarget.sprite_index) {
         m_wheelRemainder = 0;
     }
@@ -283,6 +323,10 @@ void MapView3D::wheelEvent(QWheelEvent *event)
     m_wheelRemainder += wheelDelta;
     const int steps = m_wheelRemainder / 120;
     m_wheelRemainder %= 120;
+    if (shadeEdit) {
+        if (steps) editShade(hit, steps);
+        return;
+    }
     if (hit.kind == DUKE_SURFACE_SPRITE) {
         if (!steps || hit.sprite_index < 0
             || std::size_t(hit.sprite_index) >= m_snapshot.sprites().size()) { return; }
@@ -334,6 +378,52 @@ void MapView3D::wheelEvent(QWheelEvent *event)
                       .arg(floor ? "floor" : "ceiling").arg(height));
     }
     update();
+}
+
+void MapView3D::editShade(const DukeSurfaceHit &hit, int steps)
+{
+    auto candidate = m_snapshot;
+    // Build shade is signed: lower values are brighter.
+    const auto adjusted = [steps](int shade) { return std::clamp(shade + steps, -128, 127); };
+    int shade = 0;
+    if (hit.kind == DUKE_SURFACE_SPRITE) {
+        if (hit.sprite_index < 0 || std::size_t(hit.sprite_index) >= candidate.sprites().size()) return;
+        auto sprite = candidate.sprites()[hit.sprite_index];
+        shade = adjusted(sprite.shade);
+        if (shade == sprite.shade) return;
+        sprite.shade = shade;
+        candidate.setSprite(hit.sprite_index, sprite);
+        if (!applySnapshot(std::move(candidate))) return;
+        if (spriteChanged) spriteChanged(hit.sprite_index, sprite);
+    } else {
+        if (hit.sector_index < 0 || std::size_t(hit.sector_index) >= candidate.sectors().size()) return;
+        auto sector = candidate.sectors()[hit.sector_index];
+        if (hit.kind == DUKE_SURFACE_WALL) {
+            // The renderer uses exported wall-side indices, not document wall IDs.
+            int local = hit.wall_index;
+            for (int s = 0; s < hit.sector_index; ++s) local -= int(candidate.sectors()[s].walls.size());
+            if (local < 0 || std::size_t(local) >= sector.walls.size()) return;
+            const auto wallId = sector.walls[local];
+            const auto &wall = candidate.walls()[wallId];
+            const bool reversed = wall.start != sector.vertices[local];
+            auto side = reversed ? wall.reverseSide : wall.forwardSide;
+            shade = adjusted(side.shade);
+            if (shade == side.shade) return;
+            side.shade = shade;
+            candidate.setWallSide(wallId, reversed, side);
+            if (!applySnapshot(std::move(candidate))) return;
+            if (wallSideChanged) wallSideChanged(wallId, reversed, side);
+        } else if (hit.kind == DUKE_SURFACE_FLOOR || hit.kind == DUKE_SURFACE_CEILING) {
+            int &value = hit.kind == DUKE_SURFACE_FLOOR ? sector.floorshade : sector.ceilingshade;
+            shade = adjusted(value);
+            if (shade == value) return;
+            value = shade;
+            candidate.setSector(hit.sector_index, sector);
+            if (!applySnapshot(std::move(candidate))) return;
+            if (sectorChanged) sectorChanged(hit.sector_index, sector);
+        } else return;
+    }
+    updateSurfaceStatus();
 }
 
 void MapView3D::runModal(const std::function<void()> &show)

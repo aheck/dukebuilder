@@ -28,6 +28,7 @@ public:
     std::function<void(std::size_t, const MapDocument::Sprite &)> spriteChanged;
     std::function<void(std::size_t, bool, const MapDocument::WallSide &)> wallSideChanged;
     std::function<void(const QString &)> statusMessage;
+    std::function<void(const QString &)> surfaceStatusChanged;
 protected:
     void initializeGL() override;
     void paintGL() override;
@@ -45,6 +46,9 @@ private:
     void cleanup();
     bool applySnapshot(MapDocument candidate);
     void editTexture(int key, bool scale);
+    void editShade(const DukeSurfaceHit &hit, int steps);
+    void updateSurfaceStatus();
+    QString m_surfaceStatus;
     QTimer m_timer;
     QElapsedTimer m_clock;
     QSet<int> m_keys;

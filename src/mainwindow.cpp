@@ -1051,6 +1051,39 @@ MainWindow::MainWindow(QWidget *parent)
     statusBar()->addPermanentWidget(zoomCombo);
     statusBar()->addPermanentWidget(modeLabel);
 
+    auto *help3DLabel = new QLabel(
+        "WASD move · Mouse look · Shift faster · "
+        "Wheel height · Ctrl+wheel shade · Alt+wheel slope · "
+        "Arrows pan · Shift+Arrows scale · H highlight · Esc release · Q 2D", this);
+    help3DLabel->setObjectName("help3DStatusLabel");
+    help3DLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    help3DLabel->setToolTip(help3DLabel->text());
+    help3DLabel->setContentsMargins(8, 0, 8, 0);
+    auto *surfaceStatusLabel = new QLabel("Shade: —", this);
+    surfaceStatusLabel->setObjectName("surfaceStatusLabel");
+    surfaceStatusLabel->setContentsMargins(8, 0, 8, 0);
+    // Keep hover/selection text from resizing the viewport during mouse-look.
+    surfaceStatusLabel->setFixedWidth(
+        surfaceStatusLabel->fontMetrics().horizontalAdvance("Selected Ceiling shade: -128") + 16);
+    surfaceStatusLabel->setToolTip("Shade of the selected surface, or the highlighted surface when nothing is selected.");
+    view3D->surfaceStatusChanged = [surfaceStatusLabel](const QString &text) {
+        surfaceStatusLabel->setText(text);
+    };
+    statusBar()->addPermanentWidget(help3DLabel, 1);
+    statusBar()->addPermanentWidget(surfaceStatusLabel);
+    help3DLabel->hide();
+    surfaceStatusLabel->hide();
+    // Retain the normal single-row height when the 2D combo boxes are hidden.
+    statusBar()->setMinimumHeight(statusBar()->sizeHint().height());
+    connect(views, &QStackedWidget::currentChanged, help3DLabel, [=](int) {
+        const bool in3D = views->currentWidget() == view3D;
+        help3DLabel->setVisible(in3D);
+        surfaceStatusLabel->setVisible(in3D);
+        gridSizeCombo->setVisible(!in3D);
+        zoomCombo->setVisible(!in3D);
+        modeLabel->setVisible(!in3D);
+    });
+
     const auto addModeAction = [modeMenu, modeGroup, modeLabel, editor](
                                    const QString &name,
                                    const QKeySequence &shortcut,
@@ -1286,7 +1319,7 @@ MainWindow::MainWindow(QWidget *parent)
         modeGroup->setEnabled(false); // In particular, S must reach navigation.
         gridSizeCombo->setEnabled(false);
         zoomCombo->setEnabled(false);
-        statusBar()->showMessage("3D: WASD move · Mouse look · Shift faster · Wheel height · Arrows pan · Shift+Arrows scale · H highlight · Esc release mouse · Q return to 2D");
+        statusBar()->showMessage("3D mode");
     });
     viewMenu->addSeparator();
     viewMenu->addAction(reorientGridAction);

@@ -317,6 +317,10 @@ the selection and releases the mouse. Press **Q** over the map to enter 3D,
 and **Q** again to return to the same 2D view. **View → 3D Mode** also switches
 views; when the pointer is outside the viewport it uses the 2D view's center.
 
+The slim 3D status bar keeps control help on one line beside operation messages.
+A separate field shows shade once: for the selected surface when present,
+otherwise for the highlighted surface.
+
 The camera starts at the map point under the cursor, or just inside the nearest
 sector when the cursor is outside. Its height is placed between the local floor
 and ceiling, accounting for slopes; its initial angle follows the player start.
@@ -335,6 +339,9 @@ it can render with; it does not combine multiple archives.
   units per notch, or 128 with **Shift** held. Wheel-up raises it; wheel-down lowers it. Walls are unaffected.
   Height edits update the map, persist on return to 2D, and are saved normally.
   Changes that would invalidate the map are rejected with a status message.
+- **Ctrl+wheel:** change the selected surface's shade, or the highlighted surface
+  when nothing is selected. Works on floors, ceilings, wall sides, and sprites.
+  Wheel-up darkens and wheel-down brightens by 1 per notch, limited to -128–127.
 - **Alt+wheel:** change the highlighted floor/ceiling slope by 256 per notch.
   **Shift+Alt+wheel:** use fine steps of 16. Wheel-up
   increases the signed slope; wheel-down decreases it. Nonzero slopes enable

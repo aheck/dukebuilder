@@ -20,6 +20,7 @@
 #include <QAction>
 #include <QCursor>
 #include <QWheelEvent>
+#include <QLabel>
 #include <QTreeWidget>
 #include <QComboBox>
 #include <QLineEdit>
@@ -228,7 +229,40 @@ int main(int argc, char **argv)
         QTest::mouseClick(view, Qt::LeftButton, Qt::NoModifier, point);
         view->releaseMouseLook();
     };
+    wheel(0.9,60,Qt::ControlModifier);
+    require(editor->document() == original, "Partial shade notch does not change geometry");
+    const auto *helpStatus = window.findChild<QLabel *>("help3DStatusLabel");
+    const auto *surfaceStatus = window.findChild<QLabel *>("surfaceStatusLabel");
+    require(helpStatus && helpStatus->isVisible() && helpStatus->text().contains("Ctrl+wheel shade"),
+            "3D help has a permanent visible status field");
+    require(!helpStatus->wordWrap() && !helpStatus->text().contains('\n'), "3D help stays on one line");
+    require(surfaceStatus && surfaceStatus->isVisible() && surfaceStatus->text().contains("Floor shade: 0"),
+            "Hover shows floor shade before any edit");
+    wheel(0.9,60,Qt::ControlModifier);
+    require(editor->document().sectors()[0].floorshade == 1
+            && editor->document().sectors()[0].floorz == original.sectors()[0].floorz,
+            "Ctrl wheel darkens hovered floor without moving it");
+    require(helpStatus->isVisible() && surfaceStatus->text().contains("Floor shade: 1"),
+            "Shade updates without replacing permanent help");
+    editor->undo();
+    require(editor->document() == original, "Undo restores floor shade");
+    editor->redo();
+    require(editor->document().sectors()[0].floorshade == 1, "Redo restores floor shade");
+    wheel(0.9,-120,Qt::ControlModifier);
+    require(editor->document() == original, "Ctrl wheel brightens hovered floor");
     selectAt(0.9);
+    wheel(0.1,120,Qt::ControlModifier);
+    require(editor->document().sectors()[0].floorshade == 1
+            && editor->document().sectors()[0].ceilingshade == original.sectors()[0].ceilingshade,
+            "Selected floor shade takes precedence over hovered ceiling");
+    require(surfaceStatus->text() == "Selected Floor shade: 1",
+            "Status shows shade only once, preferring the selected edit target");
+    wheel(0.1,120*256,Qt::ControlModifier);
+    require(editor->document().sectors()[0].floorshade == 127, "Shade clamps at dark limit");
+    wheel(0.1,-120*512,Qt::ControlModifier);
+    require(editor->document().sectors()[0].floorshade == -128, "Shade clamps at bright limit");
+    wheel(0.1,120*128,Qt::ControlModifier);
+    require(editor->document() == original, "Shade edits preserve all other map fields");
     wheel(0.1,120);
     wheel(0.1,120);
     require(editor->document().sectors()[0].floorz == -2048
@@ -237,6 +271,10 @@ int main(int argc, char **argv)
     wheel(0.1,-240);
     require(editor->document() == original, "selected floor restores original height");
     selectAt(0.9); // Clicking the selected floor restores hover-based wheel edits.
+    wheel(0.1,-120,Qt::ControlModifier);
+    require(editor->document().sectors()[0].ceilingshade == -1, "Ctrl wheel brightens hovered ceiling");
+    wheel(0.1,120,Qt::ControlModifier);
+    require(editor->document() == original, "Ceiling shade restores independently");
     wheel(0.1,120);
     require(editor->document().sectors()[0].ceilingz == -33792, "wheel raises ceiling");
     require(editor->document().sectors()[0].floorz == 0, "ceiling edit leaves floor alone");
@@ -330,6 +368,27 @@ int main(int argc, char **argv)
         }
     }
     require(changedSides == 1, "wall panning and vertical scaling affect one side only");
+    const auto beforeWallShade = editor->document();
+    wheel(0.5,120,Qt::ControlModifier);
+    int shadedSides = 0;
+    for (std::size_t w = 0; w < editor->document().walls().size(); ++w) {
+        const auto &after = editor->document().walls()[w];
+        const auto &before = beforeWallShade.walls()[w];
+        shadedSides += after.forwardSide.shade != before.forwardSide.shade;
+        shadedSides += after.reverseSide.shade != before.reverseSide.shade;
+    }
+    require(shadedSides == 1 && editor->document().sectors() == beforeWallShade.sectors(),
+            "Ctrl wheel shades exactly the hovered wall side");
+    wheel(0.5,-120,Qt::ControlModifier);
+    require(editor->document() == beforeWallShade, "Wall shade preserves textures and geometry");
+    selectAt(0.5);
+    wheel(0.1,120,Qt::ControlModifier);
+    require(editor->document().walls() != beforeWallShade.walls()
+            && editor->document().sectors() == beforeWallShade.sectors(),
+            "Selected wall shades while pointing at ceiling");
+    wheel(0.1,-120,Qt::ControlModifier);
+    require(editor->document() == beforeWallShade, "Selected wall shade restores independently");
+    QTest::keyClick(view, Qt::Key_Escape);
     const auto choose = [&](double y, int tile, bool captured = false) {
         aim(y);
         if (captured) {
@@ -584,6 +643,13 @@ int main(int argc, char **argv)
     QTest::keyClick(view, Qt::Key_Escape);
     const auto beforeSelectedSprite = editor->document();
     selectAt(0.5);
+    wheel(0.1,120,Qt::ControlModifier);
+    require(editor->document().sprites()[targetId].shade == beforeWheel.shade + 1
+            && editor->document().sprites()[targetId].z == beforeWheel.z
+            && editor->document().sectors() == beforeSelectedSprite.sectors(),
+            "Ctrl wheel shades selected sprite instead of hovered ceiling");
+    wheel(0.1,-120,Qt::ControlModifier);
+    require(editor->document() == beforeSelectedSprite, "Sprite shade restores independently");
     wheel(0.1,240);
     require(editor->document().sprites()[targetId].z == -8192
             && editor->document().sectors() == beforeSelectedSprite.sectors(),

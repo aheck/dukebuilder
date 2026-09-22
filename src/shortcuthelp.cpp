@@ -34,6 +34,7 @@ QString content(bool threeD)
         html += section("Heights and slopes", {
             {"Mouse wheel", "Raise/lower the selected (or otherwise highlighted) floor, ceiling, or sprite by 1024 Z units per notch. Wheel-up raises it."},
             {"Shift + wheel", "Raise/lower by a finer 128 Z units per notch."},
+            {"Ctrl + wheel", "Adjust the selected (or otherwise highlighted) surface or sprite shade by 1 per notch. Wheel-up darkens; wheel-down brightens."},
             {"Alt + wheel", "Change the selected (or otherwise highlighted) floor/ceiling slope by 256 per notch."},
             {"Shift + Alt + wheel", "Change slope by a finer 16 per notch."},
             {"First wall (2D properties)", "Choose the slope axis in 2D. A nonzero slope enables the slope flag; returning to zero clears it."}
