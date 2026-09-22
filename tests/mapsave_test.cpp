@@ -139,7 +139,11 @@ int main(int argc, char **argv)
         require(scoped.openMap(scopedPath, error), error);
         checkProtected();
         // Extend an ordinary room after reloading a map containing stacked rooms.
+        scoped.setSectorFloorZ(2, 1024);
+        scoped.setSectorCeilingZ(2, -12288);
         require(scoped.addPolyline({{4096,0},{6144,0},{6144,2048},{4096,2048}}, true, &error), error);
+        require(scoped.sectors()[3].floorz == 1024 && scoped.sectors()[3].ceilingz == -12288,
+                "Scoped attached room inherits floor and ceiling heights");
         checkProtected();
         require(scoped.sectors().size() == 4, "Extension creates an adjacent room");
         bool portal = false;

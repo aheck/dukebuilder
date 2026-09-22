@@ -51,6 +51,32 @@ void checkSideReferences(const MapDocument &document)
 int main()
 {
     {
+        MapDocument attached;
+        require(attached.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}}, true), "Attachment source");
+        attached.setSectorFloorZ(0, -4096);
+        attached.setSectorCeilingZ(0, -16384);
+        attached.setSectorFloorTexture(0, 123);
+        require(attached.addPolyline({{1024,0},{2048,0},{2048,1024},{1024,1024}}, true), "Draw attached room");
+        require(attached.sectors()[1].floorz == -4096 && attached.sectors()[1].ceilingz == -16384,
+                "Shared-edge attachment inherits both heights");
+        require(attached.sectors()[1].floorTexture == 0, "Attachment does not copy unrelated properties");
+        attached.setSectorFloorZ(1, 4096);
+        attached.setSectorCeilingZ(1, -2048);
+        require(attached.addPolyline({{2048,1024},{2048,2048},{0,2048},{0,1024},{1024,1024}}, true),
+                "Draw room attached to sources with different heights");
+        require(attached.sectors()[2].floorz == 4096 && attached.sectors()[2].ceilingz == -2048,
+                "First drawn attachment chooses height source");
+        require(attached.sectors()[0].floorz == -4096 && attached.sectors()[1].floorz == 4096,
+                "Existing sectors retain independent heights");
+        require(attached.addPolyline({{0,0},{-1024,0},{-1024,-1024},{0,-1024}}, true), "Draw corner-attached room");
+        require(attached.sectors()[3].floorz == -4096 && attached.sectors()[3].ceilingz == -16384,
+                "Single-vertex attachment inherits heights");
+        require(attached.addPolyline({{4096,0},{5120,0},{5120,1024},{4096,1024}}, true), "Draw detached room");
+        require(attached.sectors()[4].floorz == 0 && attached.sectors()[4].ceilingz == -8192,
+                "Detached room retains default heights");
+        checkSideReferences(attached);
+    }
+    {
         MapDocument split;
         require(split.addPolyline({{0,0}, {1024,0}, {1024,1024}, {0,1024}}, true), "Split outer room");
         require(split.addPolyline({{256,256}, {768,256}, {768,768}, {256,768}}, true), "Split inner room");

@@ -196,6 +196,32 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed, Q
     voidSides.resize(m_walls.size() * 2, false);
     rebuildSectors(std::move(voidSides));
     if (m_sectors.size() > originalSectorCount) {
+        // Inherit from the first drawn attachment belonging to this new face.
+        // Use vertex identity, not coordinates, to keep independent rooms apart.
+        // Existing faces retain their properties; nested unattached faces have
+        // already inherited their containing sector's heights in rebuildSectors.
+        for (auto &sector : m_sectors) {
+            const bool survived = std::any_of(original.m_sectors.begin(), original.m_sectors.end(),
+                [&](const Sector &old) {
+                    return std::is_permutation(sector.walls.begin(), sector.walls.end(),
+                                               old.walls.begin(), old.walls.end());
+                });
+            if (survived) continue;
+            bool inherited = false;
+            for (const auto vertex : vertexIds) {
+                if (std::find(sector.vertices.begin(), sector.vertices.end(), vertex) == sector.vertices.end())
+                    continue;
+                for (const auto &source : original.m_sectors) {
+                    if (std::find(source.vertices.begin(), source.vertices.end(), vertex) == source.vertices.end())
+                        continue;
+                    sector.floorz = source.floorz;
+                    sector.ceilingz = source.ceilingz;
+                    inherited = true;
+                    break;
+                }
+                if (inherited) break;
+            }
+        }
         return true;
     }
 

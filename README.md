@@ -204,6 +204,11 @@ sides together. Hover and selection highlighting still apply to either kind of
 wall. To join partway along an existing edge, first split it by inserting a vertex
 in Vertices mode.
 
+New rooms attached to existing sector vertices inherit that sector's floor and
+ceiling heights. If several sectors qualify, the first attachment point in
+drawing order chooses the source, with the lowest sector number breaking ties.
+Other properties are not copied, and existing rooms keep their own heights.
+
 Drawing a closed sector entirely inside another sector creates an inner loop
 in the surrounding room and two-sided walls connecting the sectors. Raise the
 inner floor (use a smaller Z value) to make a box or platform. Maps saved by
