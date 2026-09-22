@@ -126,9 +126,12 @@ public:
     bool operator==(const MapDocument &other) const;
     // Read a classic Build map transactionally, retaining imported topology.
     bool openMap(const QString &filename, QString &error);
+    // Whether unrestricted planar reconstruction is safe. Drawing also supports
+    // validated local edits when this is false.
     [[nodiscard]] bool supportsTopologyEditing() const { return !m_complexTopology; }
     [[nodiscard]] bool supportsLineDeletion() const;
-    [[nodiscard]] bool addPolyline(const std::vector<QPointF> &points, bool closed);
+    [[nodiscard]] bool addPolyline(const std::vector<QPointF> &points, bool closed,
+                                   QString *error = nullptr);
     // Join a connected selection transactionally; the first ID supplies properties.
     std::optional<SectorId> joinSectors(const std::vector<SectorId> &ids, QString &error);
     // Remove sector interiors, retaining shared boundaries as solid walls.
@@ -170,6 +173,7 @@ public:
 private:
     friend class RecoveryCodec;
     VertexId findOrAddVertex(const QPointF &position);
+    bool addScopedPolyline(const std::vector<QPointF> &points, bool closed, QString *error);
     std::vector<bool> voidWallSides() const;
     void rebuildSectors(std::vector<bool> voidSides = {});
 

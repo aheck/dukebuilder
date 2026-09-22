@@ -151,9 +151,10 @@ MapDocument::VertexId MapDocument::findOrAddVertex(const QPointF &position)
     return m_vertices.size() - 1;
 }
 
-bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed)
+bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed, QString *error)
 {
-    if (m_complexTopology) return false;
+    if (error) error->clear();
+    if (m_complexTopology) return addScopedPolyline(points, closed, error);
     if (points.size() < 2) {
         return false;
     }
@@ -200,6 +201,259 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed)
 
     *this = original;
     return false;
+}
+
+bool MapDocument::addScopedPolyline(const std::vector<QPointF> &points, bool closed, QString *error)
+{
+    const auto fail = [&](const QString &message) {
+        if (error) *error = message;
+        return false;
+    };
+    if (points.size() < 2) return false;
+    for (const auto &p : points) {
+        if (!std::isfinite(p.x()) || !std::isfinite(p.y())) return fail("Invalid drawing coordinates.");
+    }
+    const auto shape = [](const MapDocument &document, const Sector &sector) {
+        QPainterPath path;
+        path.setFillRule(Qt::OddEvenFill);
+        for (std::size_t i = 0; i < sector.vertices.size(); ++i) {
+            const auto p = document.m_vertices[sector.vertices[i]].position;
+            if (i == 0 || std::find(sector.loopStarts.begin(), sector.loopStarts.end(), i)
+                          != sector.loopStarts.end()) path.moveTo(p);
+            else path.lineTo(p);
+            if (sector.nextWallIndex(i) <= i) path.closeSubpath();
+        }
+        return path;
+    };
+    const auto overlaps = [](const QPainterPath &a, const QPainterPath &b) {
+        for (const auto &polygon : a.intersected(b).toFillPolygons()) {
+            qreal area = 0;
+            for (int i = 0; i < polygon.size(); ++i) {
+                const auto p = polygon[i], q = polygon[(i + 1) % polygon.size()];
+                area += p.x() * q.y() - q.x() * p.y();
+            }
+            if (std::abs(area) > coordinateEpsilon) return true;
+        }
+        return false;
+    };
+    const auto onSegment = [](const QPointF &p, const QPointF &a, const QPointF &b) {
+        const auto d = b - a, v = p - a;
+        return std::abs(d.x() * v.y() - d.y() * v.x()) < coordinateEpsilon
+            && p.x() >= std::min(a.x(), b.x()) && p.x() <= std::max(a.x(), b.x())
+            && p.y() >= std::min(a.y(), b.y()) && p.y() <= std::max(a.y(), b.y());
+    };
+    QPainterPath drawing;
+    drawing.moveTo(points.front());
+    for (std::size_t i = 1; i < points.size(); ++i) drawing.lineTo(points[i]);
+    if (closed) drawing.closeSubpath();
+    std::vector<QPainterPath> shapes;
+    std::vector<bool> affected(m_sectors.size(), false);
+    for (SectorId s = 0; s < m_sectors.size(); ++s) {
+        shapes.push_back(shape(*this, m_sectors[s]));
+        affected[s] = shapes.back().intersects(drawing);
+    }
+    const auto segmentCount = closed ? points.size() : points.size() - 1;
+    for (std::size_t i = 0; i < segmentCount; ++i) {
+        const auto a = points[i], b = points[(i + 1) % points.size()];
+        if (a == b) return fail("Drawing contains a zero-length line.");
+        for (std::size_t j = i + 1; j < segmentCount; ++j) {
+            const auto p = points[j], q = points[(j + 1) % points.size()];
+            QPointF intersection;
+            const bool adjacent = j == i + 1 || (closed && i == 0 && j + 1 == segmentCount);
+            if ((!adjacent && (QLineF(a, b).intersects(QLineF(p, q), &intersection)
+                                  == QLineF::BoundedIntersection
+                              || onSegment(p, a, b) || onSegment(q, a, b)))
+                || (onSegment(p, a, b) && p != a && p != b)
+                || (onSegment(q, a, b) && q != a && q != b)
+                || (onSegment(a, p, q) && a != p && a != q)
+                || (onSegment(b, p, q) && b != p && b != q)
+                || (a == q && b == p))
+                return fail("Drawing must not cross or retrace itself.");
+        }
+    }
+    // Include every touched boundary, including collinear edges and endpoints.
+    // The face builder requires explicit vertices at intersections.
+    for (const auto &wall : m_walls) {
+        const auto a = m_vertices[wall.start].position, b = m_vertices[wall.end].position;
+        for (std::size_t i = 0; i < segmentCount; ++i) {
+            const auto p = points[i], q = points[(i + 1) % points.size()];
+            QPointF intersection;
+            const bool crosses = QLineF(a, b).intersects(QLineF(p, q), &intersection)
+                == QLineF::BoundedIntersection;
+            const bool touches = crosses || onSegment(p, a, b) || onSegment(q, a, b)
+                || onSegment(a, p, q) || onSegment(b, p, q);
+            if (!touches) continue;
+            if (!wall.forwardSector && !wall.reverseSector)
+                return fail("Drawing touches an unsupported loose wall.");
+            if (wall.forwardSector) affected[*wall.forwardSector] = true;
+            if (wall.reverseSector) affected[*wall.reverseSector] = true;
+            if ((crosses && ((intersection != a && intersection != b)
+                             || (intersection != p && intersection != q)))
+                || (onSegment(p, a, b) && p != a && p != b)
+                || (onSegment(q, a, b) && q != a && q != b)
+                || (onSegment(a, p, q) && a != p && a != q)
+                || (onSegment(b, p, q) && b != p && b != q))
+                return fail("Drawing crosses an existing wall. Insert vertices at the intersections first.");
+        }
+    }
+    for (SectorId a = 0; a < m_sectors.size(); ++a) {
+        if (!affected[a]) continue;
+        for (SectorId b = 0; b < m_sectors.size(); ++b) {
+            if (a != b && overlaps(shapes[a], shapes[b]))
+                return fail("Drawing affects overlapping sectors. Only non-overlapping areas can be edited.");
+        }
+    }
+
+    // Work on a compact copy of just the touched sectors. Global IDs and all
+    // external portal sides are retained separately for the transactional merge.
+    MapDocument local;
+    std::vector<SectorId> sectorIds;
+    std::vector<WallId> wallIds;
+    std::vector<VertexId> vertexIds;
+    std::map<SectorId, SectorId> sectorMap;
+    std::map<WallId, WallId> wallMap;
+    std::map<VertexId, VertexId> vertexMap;
+    std::map<std::pair<qreal, qreal>, VertexId> positions;
+    for (SectorId s = 0; s < m_sectors.size(); ++s) {
+        if (affected[s]) { sectorMap[s] = sectorIds.size(); sectorIds.push_back(s); }
+    }
+    const auto localVertex = [&](VertexId id) {
+        auto [it, inserted] = vertexMap.emplace(id, vertexIds.size());
+        if (inserted) {
+            vertexIds.push_back(id);
+            local.m_vertices.push_back(m_vertices[id]);
+        }
+        return it->second;
+    };
+    for (const auto s : sectorIds) {
+        auto sector = m_sectors[s];
+        for (auto &id : sector.vertices) id = localVertex(id);
+        for (auto &id : sector.walls) {
+            auto [it, inserted] = wallMap.emplace(id, wallIds.size());
+            if (inserted) {
+                wallIds.push_back(id);
+                auto wall = m_walls[id];
+                wall.start = localVertex(wall.start);
+                wall.end = localVertex(wall.end);
+                const auto remap = [&](std::optional<SectorId> s) -> std::optional<SectorId> {
+                    return s && affected[*s] ? std::optional<SectorId>(sectorMap.at(*s)) : std::nullopt;
+                };
+                wall.forwardSector = remap(wall.forwardSector);
+                wall.reverseSector = remap(wall.reverseSector);
+                local.m_walls.push_back(wall);
+            }
+            id = it->second;
+        }
+        local.m_sectors.push_back(std::move(sector));
+    }
+    for (VertexId id = 0; id < local.m_vertices.size(); ++id) {
+        const auto p = local.m_vertices[id].position;
+        if (!positions.emplace(std::make_pair(p.x(), p.y()), id).second)
+            return fail("Drawing affects independent vertices at identical coordinates.");
+    }
+    auto rebuilt = local;
+    rebuilt.rebuildSectors();
+    if (rebuilt.m_sectors.size() != local.m_sectors.size())
+        return fail("The affected area contains unsupported sector loops.");
+    for (WallId w = 0; w < local.m_walls.size(); ++w) {
+        if (rebuilt.m_walls[w].forwardSector != local.m_walls[w].forwardSector
+            || rebuilt.m_walls[w].reverseSector != local.m_walls[w].reverseSector)
+            return fail("The affected area cannot safely be reconstructed.");
+    }
+    const auto before = local;
+    if (!local.addPolyline(points, closed)) return false;
+
+    // Splits inherit their source sector's properties. Do not silently change
+    // the first-wall basis of slopes or relative texture alignment.
+    for (auto &sector : local.m_sectors) {
+        const auto path = shape(local, sector);
+        for (SectorId s = 0; s < before.m_sectors.size(); ++s) {
+            const auto &source = before.m_sectors[s];
+            if (!overlaps(path, shapes[sectorIds[s]])) continue;
+            if ((((source.floorstat & 2) && source.floorheinum)
+                 || ((source.ceilingstat & 2) && source.ceilingheinum)
+                 || ((source.floorstat | source.ceilingstat) & 64))
+                && sector.walls.front() != source.walls.front())
+                return fail("This split would change a slope or texture alignment's first wall.");
+            auto walls = std::move(sector.walls);
+            auto vertices = std::move(sector.vertices);
+            auto loops = std::move(sector.loopStarts);
+            sector = source;
+            sector.walls = std::move(walls);
+            sector.vertices = std::move(vertices);
+            sector.loopStarts = std::move(loops);
+            break;
+        }
+    }
+    // Preserve IDs of surviving sectors, and reuse removed IDs for split faces.
+    std::vector<SectorId> resultIds(local.m_sectors.size());
+    std::set<SectorId> available(sectorIds.begin(), sectorIds.end());
+    for (SectorId s = 0; s < local.m_sectors.size(); ++s) {
+        resultIds[s] = m_sectors.size();
+        for (SectorId old = 0; old < before.m_sectors.size(); ++old) {
+            if (local.m_sectors[s].walls == before.m_sectors[old].walls) {
+                resultIds[s] = sectorIds[old];
+                available.erase(sectorIds[old]);
+                break;
+            }
+        }
+    }
+    auto nextSector = m_sectors.size();
+    for (auto &id : resultIds) {
+        if (id != m_sectors.size()) continue;
+        if (available.empty()) id = nextSector++;
+        else { id = *available.begin(); available.erase(available.begin()); }
+    }
+    auto candidate = *this;
+    candidate.m_sectors.resize(nextSector);
+    for (VertexId v = vertexIds.size(); v < local.m_vertices.size(); ++v) {
+        vertexIds.push_back(candidate.m_vertices.size());
+        candidate.m_vertices.push_back(local.m_vertices[v]);
+    }
+    for (WallId w = wallIds.size(); w < local.m_walls.size(); ++w) {
+        wallIds.push_back(candidate.m_walls.size());
+        candidate.m_walls.push_back(local.m_walls[w]);
+    }
+    for (WallId w = 0; w < local.m_walls.size(); ++w) {
+        auto wall = local.m_walls[w];
+        wall.start = vertexIds[wall.start];
+        wall.end = vertexIds[wall.end];
+        const auto restoreSide = [&](std::optional<SectorId> &side, std::optional<SectorId> old) {
+            if (old && !affected[*old]) {
+                if (side) return false;
+                side = old;
+            } else if (side) side = resultIds[*side];
+            return true;
+        };
+        const Wall old = w < before.m_walls.size() ? m_walls[wallIds[w]] : Wall{};
+        if (!restoreSide(wall.forwardSector, old.forwardSector)
+            || !restoreSide(wall.reverseSector, old.reverseSector))
+            return fail("Drawing would replace a neighboring sector's portal.");
+        candidate.m_walls[wallIds[w]] = wall;
+    }
+    for (SectorId s = 0; s < local.m_sectors.size(); ++s) {
+        auto sector = local.m_sectors[s];
+        for (auto &v : sector.vertices) v = vertexIds[v];
+        for (auto &w : sector.walls) w = wallIds[w];
+        candidate.m_sectors[resultIds[s]] = std::move(sector);
+    }
+    const auto remapMembership = [&](std::optional<SectorId> &id, const QPointF &p) {
+        if (!id || !affected[*id]) return;
+        id.reset();
+        for (SectorId s = 0; s < local.m_sectors.size(); ++s) {
+            bool contains = shape(local, local.m_sectors[s]).contains(p);
+            for (auto w : local.m_sectors[s].walls) {
+                const auto &wall = local.m_walls[w];
+                contains = contains || onSegment(p, local.m_vertices[wall.start].position,
+                                                   local.m_vertices[wall.end].position);
+            }
+            if (contains) { id = resultIds[s]; break; }
+        }
+    };
+    remapMembership(candidate.m_playerStart.sectorId, candidate.m_playerStart.position);
+    for (auto &sprite : candidate.m_sprites) remapMembership(sprite.sectorId, sprite.position);
+    *this = std::move(candidate);
+    return true;
 }
 
 std::optional<MapDocument::VertexId> MapDocument::splitWall(WallId wallId, const QPointF &position)

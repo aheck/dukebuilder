@@ -2244,10 +2244,6 @@ void MapEditor::keyPressEvent(QKeyEvent *event)
 
 void MapEditor::addDrawingPoint(const QPointF &position)
 {
-    if (!m_document.supportsTopologyEditing()) {
-        reportStatus("Adding lines is not yet supported for imported maps with overlapping or complex effect geometry.");
-        return;
-    }
     if (!m_drawingPoints.empty() && position == m_drawingPoints.back()) {
         return;
     }
@@ -2264,10 +2260,11 @@ void MapEditor::addDrawingPoint(const QPointF &position)
 void MapEditor::finishDrawing(bool close)
 {
     Edit edit(this, "Draw geometry");
-    const bool sectorCreated = m_document.addPolyline(m_drawingPoints, close);
+    QString error;
+    const bool sectorCreated = m_document.addPolyline(m_drawingPoints, close, &error);
     m_drawingPoints.clear();
     rebuildScene();
-    reportStatus(sectorCreated ? "Sector created" : "Drawing discarded");
+    reportStatus(sectorCreated ? "Sector created" : error.isEmpty() ? "Drawing discarded" : error);
 }
 
 void MapEditor::cancelDrawing()

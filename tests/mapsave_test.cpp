@@ -111,6 +111,115 @@ int main(int argc, char **argv)
     require(legacy.openMap(overlapPath, error), error);
     require(!legacy.supportsTopologyEditing() && legacy.supportsLineDeletion(),
             "Overlapping single-loop sectors support local deletion without rebuilding faces");
+    {
+        MapDocument scoped = legacy;
+        scoped.setSectorCeilingZ(1, -16384);
+        scoped.setSectorFloorZ(1, -12288);
+        const auto spriteId = scoped.addSprite({0, 0});
+        auto sprite = scoped.sprites()[spriteId];
+        sprite.sectorId = 1;
+        sprite.z = -14000;
+        sprite.texture = 1;
+        scoped.setSprite(spriteId, sprite);
+        const auto protectedMap = scoped;
+        const auto checkProtected = [&]() {
+            for (std::size_t s = 0; s < protectedMap.sectors().size(); ++s)
+                require(scoped.sectors()[s] == protectedMap.sectors()[s], "Stacked sector is unchanged");
+            for (std::size_t w = 0; w < protectedMap.walls().size(); ++w)
+                require(scoped.walls()[w] == protectedMap.walls()[w], "Stacked wall and portals are unchanged");
+            for (std::size_t v = 0; v < protectedMap.vertices().size(); ++v)
+                require(scoped.vertices()[v] == protectedMap.vertices()[v], "Stacked vertex is unchanged");
+            require(scoped.sprites()[spriteId] == protectedMap.sprites()[spriteId], "Stacked sprite membership is unchanged");
+            require(scoped.playerStart() == protectedMap.playerStart(), "Unrelated player membership is unchanged");
+        };
+        require(scoped.addPolyline({{2048,0},{4096,0},{4096,2048},{2048,2048}}, true, &error), error);
+        checkProtected();
+        const auto scopedPath = directory.filePath("stacked-scoped.map");
+        require(saveBuildMap(scoped, scopedPath, error), error);
+        require(scoped.openMap(scopedPath, error), error);
+        checkProtected();
+        // Extend an ordinary room after reloading a map containing stacked rooms.
+        require(scoped.addPolyline({{4096,0},{6144,0},{6144,2048},{4096,2048}}, true, &error), error);
+        checkProtected();
+        require(scoped.sectors().size() == 4, "Extension creates an adjacent room");
+        bool portal = false;
+        for (const auto &wall : scoped.walls()) {
+            if (wall.forwardSector && wall.reverseSector)
+                portal = portal || ((*wall.forwardSector == 2 && *wall.reverseSector == 3)
+                                    || (*wall.forwardSector == 3 && *wall.reverseSector == 2));
+        }
+        require(portal, "Extension has a reciprocal portal to the ordinary room");
+        const auto neighbor = scoped.sectors()[3];
+        const auto neighborWalls = scoped.walls();
+        require(scoped.addPolyline({{2304,256},{2816,256},{2816,768},{2304,768}}, true, &error), error);
+        checkProtected();
+        require(scoped.sectors()[3] == neighbor, "An untouched portal neighbor keeps its sector record");
+        for (const auto w : neighbor.walls)
+            require(scoped.walls()[w] == neighborWalls[w], "External portal sides remain unchanged");
+        // A second inner room must preserve the first inner room, whose walls
+        // are present in the local outer boundary but whose interior is excluded.
+        const auto inner = scoped.sectors()[4];
+        require(scoped.addPolyline({{3072,256},{3584,256},{3584,768},{3072,768}}, true, &error), error);
+        require(scoped.sectors()[4] == inner, "Excluded inner sector and its portal loop are preserved");
+        require(scoped.sectors()[2].loopStarts.size() == 3, "Both occupied inner loops survive scoped reconstruction");
+        // Reload the base fixture so the diagonal split below tests an
+        // ordinary single-loop room.
+        require(scoped.openMap(scopedPath, error), error);
+        require(scoped.addPolyline({{4096,0},{6144,0},{6144,2048},{4096,2048}}, true, &error), error);
+        scoped.setSectorFloorTexture(2, 123);
+        scoped.setSectorFloorZ(2, 2048);
+        const auto normalSpriteId = scoped.addSprite({2304,1792});
+        auto normalSprite = scoped.sprites()[normalSpriteId];
+        normalSprite.texture = 1;
+        normalSprite.sectorId = 2;
+        scoped.setSprite(normalSpriteId, normalSprite);
+        // The shared edge brings the adjacent room into scope as well.
+        require(scoped.addPolyline({{2048,0},{4096,2048}}, false, &error), error);
+        checkProtected();
+        require(scoped.sectors().size() == 5, "Ordinary room can be split beside stacked rooms");
+        require(scoped.sprites()[normalSpriteId].sectorId.has_value(), "Split remaps sprite membership");
+        require(scoped.sectors()[*scoped.sprites()[normalSpriteId].sectorId].floorTexture == 123,
+                "Split sprite stays in a child with inherited properties");
+        int splitChildren = 0;
+        for (const auto &sector : scoped.sectors())
+            if (sector.floorTexture == 123 && sector.floorz == 2048) ++splitChildren;
+        require(splitChildren == 2, "Both split children inherit sector properties");
+        const auto beforeRejected = scoped;
+        for (const auto &drawing : std::vector<std::vector<QPointF>>{
+                 {{-900,-900},{900,-900},{900,900},{-900,900}}, // inside overlapping outer room
+                 {{-2048,-2048},{1536,-2048},{1536,1536},{-2048,1536}}, // encloses stacked rooms
+                 {{-256,-256},{-512,-256},{-512,-512},{-256,-512}}, // touches stacked boundary
+                 {{3000,-512},{3500,-512},{3500,512},{3000,512}}, // crosses an existing wall
+                 {{8000,0},{9000,1024},{8000,1024},{9000,0}}}) { // self intersection
+            require(!scoped.addPolyline(drawing, true, &error) && !error.isEmpty(),
+                    "Unsafe drawing returns an explanation");
+            require(scoped == beforeRejected, "Rejected drawing is transactional");
+        }
+        require(saveBuildMap(scoped, scopedPath, error), error);
+        require(scoped.openMap(scopedPath, error), error);
+        checkProtected();
+        const auto copyPath = directory.filePath("stacked-scoped-copy.map");
+        require(saveBuildMap(scoped, copyPath, error), error);
+        require(read(scopedPath) == read(copyPath), "Scoped edits survive another byte-stable round trip");
+        require(scoped.addPolyline({{8192,0},{9216,0},{9216,1024},{8192,1024}}, true, &error), error);
+        checkProtected();
+        // Independent vertices at identical XY coordinates elsewhere must not
+        // be welded by local drawing, including across a save/load cycle.
+        auto coincident = legacy;
+        std::vector<std::pair<MapDocument::VertexId, QPointF>> positions;
+        for (std::size_t i = 0; i < 4; ++i)
+            positions.push_back({coincident.sectors()[1].vertices[i],
+                                 coincident.vertices()[coincident.sectors()[0].vertices[i]].position});
+        coincident.setVertexPositions(positions);
+        require(saveBuildMap(coincident, scopedPath, error), error);
+        require(coincident.openMap(scopedPath, error), error);
+        const auto coincidentBefore = coincident;
+        require(coincident.addPolyline({{2048,0},{4096,0},{4096,2048},{2048,2048}}, true, &error), error);
+        for (std::size_t s = 0; s < 2; ++s)
+            require(coincident.sectors()[s] == coincidentBefore.sectors()[s], "Coincident sectors remain independent");
+        for (std::size_t w = 0; w < coincidentBefore.walls().size(); ++w)
+            require(coincident.walls()[w] == coincidentBefore.walls()[w], "Coincident walls remain independent");
+    }
     legacy.removeWalls({legacy.sectors()[1].walls.front()});
     require(legacy.sectors().size() == 2 && legacy.sectors()[1].walls.size() == 3,
             "Delete a line from a disconnected legacy box");

@@ -210,6 +210,16 @@ inner floor (use a smaller Z value) to make a box or platform. Maps saved by
 older versions with disconnected overlapping sectors need their topology
 repaired; opening them does not automatically join intentional overlaps.
 
+Maps containing overlapping rooms still allow drawing in non-overlapping areas:
+create rooms, extend ordinary rooms, or split them between existing vertices.
+Only the sectors touched by the drawing are reconstructed; unrelated rooms,
+including stacked rooms, keep their geometry and properties. Drawings that affect
+an overlapping sector or unsupported loops are rejected when completed, with a
+status message and no change to the map. Insert vertices before drawing across
+existing wall edges. Splits that would change the first wall used by a slope or
+relative texture alignment are also rejected. Editing directly within stacked
+rooms does not yet have a floor-selection context.
+
 In Lines mode, select one wall to edit its texture, overlay texture, shade,
 palette, texture repeat and panning, flags (`cstat`), hitag, and lotag. For a
 two-sided wall, use the Properties panel's Side dropdown to choose Front or
