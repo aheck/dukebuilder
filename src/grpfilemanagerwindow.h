@@ -3,6 +3,7 @@
 #include <QMainWindow>
 
 #include <memory>
+#include <vector>
 
 class QCloseEvent;
 class QDragEnterEvent;
@@ -23,6 +24,7 @@ protected:
     void dropEvent(QDropEvent *event) override;
 
 private:
+    friend struct GrpFileManagerTest;
     struct Member;
 
     bool maybeDiscardChanges();
@@ -35,6 +37,7 @@ private:
     void dragSelected();
     void deleteSelected();
     void extractSelected(bool all);
+    bool extractFiles(const std::vector<int> &rows, const QString &directory);
     void refreshList();
     void updateActions();
     void showError(const QString &message);

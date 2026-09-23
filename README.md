@@ -308,6 +308,19 @@ spaces in both the executable and map paths without a command shell.
 
 Run geometry and map open/save regression tests with `meson test -C build`.
 
+## GRP File Manager
+
+When appended files have names already present in the archive, choose **Replace**,
+**Skip**, or **Cancel**. **Apply to all remaining conflicts** repeats that choice
+for the current batch. Replacements keep the existing entry's position. Cancelling
+an append discards the whole pending batch, including any replacements.
+
+Extraction asks before overwriting existing destination files, with the same
+choices. Conflict prompts are resolved before extraction starts, so cancelling
+at a prompt writes no files. Individual files are written through temporary files
+to avoid truncating an existing destination if its write fails. An I/O failure
+after extraction begins can still leave earlier files successfully extracted.
+
 ## 3D preview
 
 Configure a game archive containing ART tiles and PALETTE.DAT (normally

@@ -3,6 +3,7 @@
 #include <libduke/grp.h>
 
 #include <QCloseEvent>
+#include <QCheckBox>
 #include <QDataStream>
 #include <QDir>
 #include <QDragEnterEvent>
@@ -29,6 +30,7 @@
 #include <cstring>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace {
@@ -50,6 +52,29 @@ struct GrpDeleter {
 };
 
 using GrpPointer = std::unique_ptr<DukeGrpFile, GrpDeleter>;
+
+enum class ConflictChoice { Replace, Skip, Cancel };
+
+ConflictChoice resolveConflict(QWidget *parent, const QString &message,
+                               std::optional<ConflictChoice> &remaining)
+{
+    if (remaining) return *remaining;
+    QMessageBox dialog(QMessageBox::Question, "File already exists", message,
+                       QMessageBox::NoButton, parent);
+    dialog.setTextFormat(Qt::PlainText);
+    auto *replace = dialog.addButton("Replace", QMessageBox::AcceptRole);
+    auto *skip = dialog.addButton("Skip", QMessageBox::RejectRole);
+    auto *cancel = dialog.addButton(QMessageBox::Cancel);
+    auto *all = new QCheckBox("Apply to all remaining conflicts", &dialog);
+    dialog.setCheckBox(all);
+    dialog.setDefaultButton(skip);
+    dialog.setEscapeButton(cancel);
+    dialog.exec();
+    const auto choice = dialog.clickedButton() == replace ? ConflictChoice::Replace
+        : dialog.clickedButton() == skip ? ConflictChoice::Skip : ConflictChoice::Cancel;
+    if (all->isChecked() && choice != ConflictChoice::Cancel) remaining = choice;
+    return choice;
+}
 
 bool validMemberName(const QString &name)
 {
@@ -281,20 +306,24 @@ bool GrpFileManagerWindow::saveArchiveAs()
 
 bool GrpFileManagerWindow::appendFiles(const QStringList &paths)
 {
-    std::vector<Member> additions;
+    // Stage the entire batch so Cancel or an input error preserves the archive.
+    auto updated = *m_members;
+    std::optional<ConflictChoice> remaining;
+    bool changed = false;
     for (const QString &path : paths) {
         const QString name = QFileInfo(path).fileName();
         if (!validMemberName(name)) {
             showError(QString("'%1' is not a valid GRP member name. Names must be 1–12 characters.").arg(name));
             return false;
         }
-        if (std::any_of(m_members->begin(), m_members->end(), [&](const Member &member) {
-                return member.name == name;
-            }) || std::any_of(additions.begin(), additions.end(), [&](const Member &member) {
-                return member.name == name;
-            })) {
-            showError("A file with the name '" + name + "' is already in the archive.");
-            return false;
+        const auto existing = std::find_if(updated.begin(), updated.end(), [&](const Member &member) {
+            return member.name == name;
+        });
+        if (existing != updated.end()) {
+            const auto choice = resolveConflict(this,
+                QString("'%1' already exists in this archive. Replace it with '%2'?").arg(name, path), remaining);
+            if (choice == ConflictChoice::Cancel) return false;
+            if (choice == ConflictChoice::Skip) continue;
         }
         QFile input(path);
         if (!input.open(QIODevice::ReadOnly)) {
@@ -310,9 +339,16 @@ bool GrpFileManagerWindow::appendFiles(const QStringList &paths)
             showError("GRP files cannot contain members larger than 4 GiB.");
             return false;
         }
-        additions.push_back({name, data});
+        if (existing != updated.end()) {
+            changed = changed || existing->data != data;
+            existing->data = data;
+        } else {
+            updated.push_back({name, data});
+            changed = true;
+        }
     }
-    m_members->insert(m_members->end(), additions.begin(), additions.end());
+    if (!changed) return true;
+    *m_members = std::move(updated);
     m_dirty = true;
     refreshList();
     return true;
@@ -429,14 +465,44 @@ void GrpFileManagerWindow::extractSelected(bool all)
     const QString directory = QFileDialog::getExistingDirectory(this, "Extract GRP files",
                                                                  initialDirectory());
     if (directory.isEmpty()) return;
+    extractFiles(rows, directory);
+}
+
+bool GrpFileManagerWindow::extractFiles(const std::vector<int> &rows, const QString &directory)
+{
+    std::optional<ConflictChoice> remaining;
+    std::vector<std::pair<QString, int>> outputs;
+    // Resolve all conflicts before writing anything, so cancelling this prompt
+    // does not leave a partially extracted batch.
     for (const int row : rows) {
         const Member &member = (*m_members)[static_cast<size_t>(row)];
-        QFile output(QDir(directory).filePath(member.name));
-        if (!output.open(QIODevice::WriteOnly) || output.write(member.data) != member.data.size()) {
+        if (!validMemberName(member.name) || member.name == "." || member.name == "..") {
+            showError("Cannot extract an invalid member name: " + member.name);
+            return false;
+        }
+        const QString path = QDir(directory).filePath(member.name);
+        const auto planned = std::find_if(outputs.begin(), outputs.end(), [&](const auto &output) {
+            return output.first == path;
+        });
+        if (QFileInfo::exists(path) || QFileInfo(path).isSymLink() || planned != outputs.end()) {
+            const auto choice = resolveConflict(this,
+                QString("'%1' already exists or is included earlier in this extraction. Replace it?").arg(path), remaining);
+            if (choice == ConflictChoice::Cancel) return false;
+            if (choice == ConflictChoice::Skip) continue;
+        }
+        if (planned != outputs.end()) planned->second = row;
+        else outputs.emplace_back(path, row);
+    }
+    for (const auto &[path, row] : outputs) {
+        const auto &member = (*m_members)[static_cast<size_t>(row)];
+        QSaveFile output(path);
+        if (!output.open(QIODevice::WriteOnly) || output.write(member.data) != member.data.size()
+            || !output.commit()) {
             showError(errorText("Unable to extract file", member.name));
-            return;
+            return false;
         }
     }
+    return true;
 }
 
 void GrpFileManagerWindow::refreshList()

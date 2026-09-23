@@ -97,6 +97,27 @@ mapsave_test = executable(
 )
 test('mapsave', mapsave_test)
 
+grp_test_dependencies = app_dependencies
+grp_test_args = []
+if cpp.compiles('''
+    #include <QtCore/qglobal.h>
+    #ifndef QT_STATIC
+    #error Qt is not static
+    #endif
+    int main() { return 0; }
+  ''', dependencies: qt6, name: 'GRP tests use static Qt')
+  qt_test_prefix = dependency('Qt6Core').get_variable(pkgconfig: 'prefix')
+  grp_test_dependencies += cpp.find_library('qminimal',
+    dirs: qt_test_prefix / 'plugins/platforms', static: true)
+  grp_test_args += '-DDUKE_BUILDER_STATIC_MINIMAL_PLUGIN'
+endif
+grpfilemanager_test = executable('grpfilemanager-test',
+  ['tests/grpfilemanager_test.cpp', 'src/grpfilemanagerwindow.cpp'],
+  include_directories: [include_directories('src'), libduke_inc],
+  cpp_args: grp_test_args,
+  dependencies: grp_test_dependencies)
+test('grpfilemanager', grpfilemanager_test, env: ['QT_QPA_PLATFORM=minimal'])
+
 texturecatalog_test = executable(
   'texturecatalog-test',
   ['tests/texturecatalog_test.cpp', 'src/texturecatalog.cpp', 'src/mapdocument.cpp'],
