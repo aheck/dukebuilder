@@ -4,6 +4,13 @@
 
 #include <QCloseEvent>
 #include <QCheckBox>
+#include <QAction>
+#include <QMenuBar>
+#include <QMenu>
+#include <QScrollBar>
+#include <QSignalBlocker>
+#include <QStatusBar>
+#include <QUndoStack>
 #include <QDataStream>
 #include <QDir>
 #include <QDragEnterEvent>
@@ -100,12 +107,84 @@ QString errorText(const QString &operation, const QString &path)
 struct GrpFileManagerWindow::Member {
     QString name;
     QByteArray data;
+    quint64 id = 0;
+    bool operator==(const Member &other) const { return name == other.name && data == other.data && id == other.id; }
 };
+
+struct GrpFileManagerWindow::ViewState {
+    std::vector<quint64> selected;
+    quint64 current = 0;
+    int vertical = 0;
+    int horizontal = 0;
+};
+
+class GrpFileManagerWindow::EditCommand final : public QUndoCommand {
+public:
+    EditCommand(GrpFileManagerWindow *window, std::vector<Member> after, const QString &label)
+        : QUndoCommand(label), m_window(window), m_before(*window->m_members),
+          m_after(std::move(after)), m_beforeView(window->captureView()), m_afterView(m_beforeView) {}
+    void undo() override { apply(m_before, m_beforeView); }
+    void redo() override {
+        apply(m_after, m_afterView);
+        m_afterView = m_window->captureView();
+    }
+private:
+    void apply(const std::vector<Member> &members, const ViewState &view) {
+        *m_window->m_members = members;
+        m_window->refreshList();
+        m_window->restoreView(view);
+        m_window->updateActions();
+    }
+    GrpFileManagerWindow *m_window;
+    // QByteArray shares unchanged file contents between snapshots.
+    std::vector<Member> m_before, m_after;
+    ViewState m_beforeView, m_afterView;
+};
+
+GrpFileManagerWindow::ViewState GrpFileManagerWindow::captureView() const
+{
+    ViewState state;
+    for (auto *item : m_files->selectedItems()) state.selected.push_back(item->data(0, Qt::UserRole + 1).toULongLong());
+    if (auto *item = m_files->currentItem()) state.current = item->data(0, Qt::UserRole + 1).toULongLong();
+    state.vertical = m_files->verticalScrollBar()->value();
+    state.horizontal = m_files->horizontalScrollBar()->value();
+    return state;
+}
+
+void GrpFileManagerWindow::restoreView(const ViewState &state)
+{
+    const QSignalBlocker blocker(m_files);
+    m_files->clearSelection();
+    for (int row = 0; row < m_files->topLevelItemCount(); ++row) {
+        auto *item = m_files->topLevelItem(row);
+        const auto id = item->data(0, Qt::UserRole + 1).toULongLong();
+        if (id == state.current) m_files->setCurrentItem(item, 0, QItemSelectionModel::NoUpdate);
+        item->setSelected(std::find(state.selected.begin(), state.selected.end(), id) != state.selected.end());
+    }
+    m_files->doItemsLayout();
+    m_files->verticalScrollBar()->setValue(state.vertical);
+    m_files->horizontalScrollBar()->setValue(state.horizontal);
+}
+
+void GrpFileManagerWindow::commitEdit(std::vector<Member> members, const QString &label)
+{
+    if (members == *m_members) return;
+    m_history->push(new EditCommand(this, std::move(members), label));
+}
 
 GrpFileManagerWindow::GrpFileManagerWindow(QWidget *parent)
     : QMainWindow(parent)
     , m_members(new std::vector<Member>)
+    , m_savedMembers(new std::vector<Member>)
 {
+    m_history = new QUndoStack(this);
+    auto *editMenu = menuBar()->addMenu("Edit");
+    auto *undoAction = m_history->createUndoAction(this, "Undo");
+    undoAction->setShortcuts(QKeySequence::Undo);
+    editMenu->addAction(undoAction);
+    auto *redoAction = m_history->createRedoAction(this, "Redo");
+    redoAction->setShortcuts(QKeySequence::Redo);
+    editMenu->addAction(redoAction);
     setAttribute(Qt::WA_DeleteOnClose, false);
     setAcceptDrops(true);
     setWindowTitle("GRP File Manager");
@@ -120,8 +199,8 @@ GrpFileManagerWindow::GrpFileManagerWindow(QWidget *parent)
 
     auto *fileList = new GrpFileList(central);
     m_files = fileList;
-    m_files->setColumnCount(3);
-    m_files->setHeaderLabels({"Filename", "Type", "Size"});
+    m_files->setColumnCount(4);
+    m_files->setHeaderLabels({"Filename", "Type", "Size", "Change"});
     m_files->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_files->setAlternatingRowColors(true);
     m_files->setSortingEnabled(false);
@@ -191,6 +270,8 @@ GrpFileManagerWindow::GrpFileManagerWindow(QWidget *parent)
 
 GrpFileManagerWindow::~GrpFileManagerWindow()
 {
+    m_history->clear();
+    delete m_savedMembers;
     delete m_members;
 }
 
@@ -239,11 +320,14 @@ bool GrpFileManagerWindow::loadArchive(const QString &path)
         }
         members.push_back({QString::fromLocal8Bit(entry->filename),
                            QByteArray(static_cast<const char *>(data),
-                                      static_cast<qsizetype>(size))});
+                                      static_cast<qsizetype>(size)), m_nextMemberId++});
     }
     *m_members = std::move(members);
     m_archivePath = path;
-    m_dirty = false;
+    *m_savedMembers = *m_members;
+    m_needsSave = false;
+    m_history->clear();
+    m_files->clear();
     refreshList();
     return true;
 }
@@ -252,7 +336,10 @@ bool GrpFileManagerWindow::createArchive(const QString &path)
 {
     m_archivePath = path;
     m_members->clear();
-    m_dirty = true;
+    m_savedMembers->clear();
+    m_needsSave = true;
+    m_history->clear();
+    m_files->clear();
     refreshList();
     return saveArchive();
 }
@@ -289,7 +376,8 @@ bool GrpFileManagerWindow::saveArchive()
         showError(errorText("Unable to write GRP file", m_archivePath));
         return false;
     }
-    m_dirty = false;
+    *m_savedMembers = *m_members;
+    m_needsSave = false;
     refreshList();
     return true;
 }
@@ -343,14 +431,12 @@ bool GrpFileManagerWindow::appendFiles(const QStringList &paths)
             changed = changed || existing->data != data;
             existing->data = data;
         } else {
-            updated.push_back({name, data});
+            updated.push_back({name, data, m_nextMemberId++});
             changed = true;
         }
     }
     if (!changed) return true;
-    *m_members = std::move(updated);
-    m_dirty = true;
-    refreshList();
+    commitEdit(std::move(updated), "Append / replace files");
     return true;
 }
 
@@ -373,10 +459,9 @@ bool GrpFileManagerWindow::replaceSelected(const QString &path)
         return false;
     }
     const int row = m_files->indexOfTopLevelItem(m_files->currentItem());
-    (*m_members)[static_cast<size_t>(row)].data = data;
-    m_dirty = true;
-    refreshList();
-    m_files->setCurrentItem(m_files->topLevelItem(row));
+    auto updated = *m_members;
+    updated[static_cast<size_t>(row)].data = data;
+    commitEdit(std::move(updated), "Replace file");
     return true;
 }
 
@@ -448,9 +533,9 @@ void GrpFileManagerWindow::deleteSelected()
     rows.reserve(selected.size());
     for (auto *item : selected) rows.push_back(m_files->indexOfTopLevelItem(item));
     std::sort(rows.rbegin(), rows.rend());
-    for (const int row : rows) m_members->erase(m_members->begin() + row);
-    m_dirty = true;
-    refreshList();
+    auto updated = *m_members;
+    for (const int row : rows) updated.erase(updated.begin() + row);
+    commitEdit(std::move(updated), "Delete files");
 }
 
 void GrpFileManagerWindow::extractSelected(bool all)
@@ -507,6 +592,10 @@ bool GrpFileManagerWindow::extractFiles(const std::vector<int> &rows, const QStr
 
 void GrpFileManagerWindow::refreshList()
 {
+    const auto view = captureView();
+    const QSignalBlocker blocker(m_files);
+    m_dirty = m_needsSave || *m_members != *m_savedMembers;
+    int added = 0, replaced = 0, deleted = 0;
     m_files->clear();
     for (const Member &member : *m_members) {
         auto *item = new QTreeWidgetItem(m_files);
@@ -515,7 +604,22 @@ void GrpFileManagerWindow::refreshList()
         item->setText(1, extension.isEmpty() ? "(none)" : extension);
         item->setText(2, QString::number(member.data.size()) + " bytes");
         item->setData(0, Qt::UserRole, member.name);
+        item->setData(0, Qt::UserRole + 1, member.id);
+        const auto saved = std::find_if(m_savedMembers->begin(), m_savedMembers->end(),
+                                       [&](const Member &old) { return old.id == member.id; });
+        if (saved == m_savedMembers->end()) { item->setText(3, "Added"); ++added; }
+        else if (saved->data != member.data) { item->setText(3, "Replaced"); ++replaced; }
+        if (!item->text(3).isEmpty()) {
+            auto font = item->font(0);
+            font.setBold(true);
+            item->setFont(0, font);
+        }
     }
+    for (const auto &saved : *m_savedMembers)
+        if (std::none_of(m_members->begin(), m_members->end(), [&](const Member &member) { return member.id == saved.id; })) ++deleted;
+    restoreView(view);
+    statusBar()->showMessage(QString("%1 files · %2 added · %3 replaced · %4 deleted")
+                            .arg(m_members->size()).arg(added).arg(replaced).arg(deleted));
     setWindowTitle((m_dirty ? "* " : "") + QString("GRP File Manager")
                    + (m_archivePath.isEmpty() ? QString() : " — " + QFileInfo(m_archivePath).fileName()));
     updateActions();

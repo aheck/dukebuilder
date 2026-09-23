@@ -310,6 +310,14 @@ Run geometry and map open/save regression tests with `meson test -C build`.
 
 ## GRP File Manager
 
+The **Edit** menu provides undo/redo for appending, replacing, and deleting files
+(Ctrl+Z / Ctrl+Y). A multi-file operation is one undo step. The **Change** column
+marks added and replaced entries; the status bar also counts pending deletions.
+Saving resets the change indicators without discarding undo history. Undoing back
+to the saved contents clears the unsaved marker. Opening or creating another
+archive clears history. Selection and scroll position are retained across list
+refreshes, and undoing a deletion restores the deleted selection.
+
 When appended files have names already present in the archive, choose **Replace**,
 **Skip**, or **Cancel**. **Apply to all remaining conflicts** repeats that choice
 for the current batch. Replacements keep the existing entry's position. Cancelling

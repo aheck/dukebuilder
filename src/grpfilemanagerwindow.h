@@ -11,6 +11,7 @@ class QDropEvent;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QTemporaryDir;
+class QUndoStack;
 
 class GrpFileManagerWindow final : public QMainWindow
 {
@@ -26,6 +27,11 @@ protected:
 private:
     friend struct GrpFileManagerTest;
     struct Member;
+    struct ViewState;
+    class EditCommand;
+    ViewState captureView() const;
+    void restoreView(const ViewState &state);
+    void commitEdit(std::vector<Member> members, const QString &label);
 
     bool maybeDiscardChanges();
     bool saveArchive();
@@ -47,6 +53,10 @@ private:
     QTreeWidget *m_files = nullptr;
     QString m_archivePath;
     std::vector<Member> *m_members = nullptr;
+    std::vector<Member> *m_savedMembers = nullptr;
+    QUndoStack *m_history = nullptr;
+    quint64 m_nextMemberId = 1;
+    bool m_needsSave = false;
     std::unique_ptr<QTemporaryDir> m_dragDirectory;
     bool m_dirty = false;
 };

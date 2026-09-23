@@ -9,6 +9,10 @@
 #include <QMessageBox>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QTreeWidget>
+#include <QScrollBar>
+#include <QStatusBar>
+#include <QUndoStack>
 #include <QtPlugin>
 #include <cstdlib>
 #include <functional>
@@ -28,6 +32,11 @@ struct GrpFileManagerTest {
     static bool append(GrpFileManagerWindow &window, const QStringList &paths) { return window.appendFiles(paths); }
     static bool save(GrpFileManagerWindow &window) { return window.saveArchive(); }
     static bool dirty(const GrpFileManagerWindow &window) { return window.m_dirty; }
+    static bool load(GrpFileManagerWindow &window, const QString &path) { return window.loadArchive(path); }
+    static bool replace(GrpFileManagerWindow &window, const QString &path) { return window.replaceSelected(path); }
+    static void remove(GrpFileManagerWindow &window) { window.deleteSelected(); }
+    static QUndoStack *history(GrpFileManagerWindow &window) { return window.m_history; }
+    static QTreeWidget *list(GrpFileManagerWindow &window) { return window.m_files; }
     static bool extract(GrpFileManagerWindow &window, const std::vector<int> &rows, const QString &path) {
         return window.extractFiles(rows, path);
     }
@@ -156,5 +165,90 @@ int main(int argc, char **argv)
     require(!QFileInfo::exists(path("cancel/C.TXT")) && read(path("cancel/A.TXT")) == "keep A"
             && read(path("cancel/B.TXT")) == "keep B", "Cancelled preflight writes no files");
     require(!GrpFileManagerTest::dirty(window) && members(archive) == saved, "Extraction does not modify archive");
-    std::cout << "GRP conflict handling passed\n";
+    auto *history = GrpFileManagerTest::history(window);
+    auto *list = GrpFileManagerTest::list(window);
+    require(list->topLevelItem(3)->text(3).isEmpty(), "Save clears change markers");
+    history->undo();
+    require(list->topLevelItemCount() == 3 && GrpFileManagerTest::dirty(window)
+            && window.statusBar()->currentMessage().contains("1 deleted"), "Undo across save marks missing saved entry as deleted");
+    history->redo();
+    require(!GrpFileManagerTest::dirty(window), "Redo to saved contents restores clean state");
+
+    list->setCurrentItem(list->topLevelItem(0));
+    require(GrpFileManagerTest::replace(window, path("one/A.TXT")), "Replace selected entry");
+    require(list->topLevelItem(0)->text(3) == "Replaced" && list->currentItem()->text(0) == "A.TXT",
+            "Replace marks entry and retains current selection");
+    history->undo();
+    require(!GrpFileManagerTest::dirty(window) && list->topLevelItem(0)->text(3).isEmpty(), "Undo replacement clears marker");
+    history->redo();
+    require(list->topLevelItem(0)->text(3) == "Replaced", "Redo restores replacement marker");
+    history->undo();
+
+    list->clearSelection();
+    list->topLevelItem(0)->setSelected(true);
+    list->topLevelItem(1)->setSelected(true);
+    QTimer confirmation;
+    QObject::connect(&confirmation, &QTimer::timeout, [&] {
+        if (auto *dialog = qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+            dialog->button(QMessageBox::Yes)->click();
+    });
+    confirmation.start(1);
+    const auto beforeDeleteIndex = history->index();
+    GrpFileManagerTest::remove(window);
+    confirmation.stop();
+    require(list->topLevelItemCount() == 2 && history->index() == beforeDeleteIndex + 1
+            && window.statusBar()->currentMessage().contains("2 deleted"), "Multi-file deletion is one undo step");
+    history->undo();
+    require(list->topLevelItemCount() == 4 && list->selectedItems().size() == 2
+            && list->currentItem()->text(0) == "A.TXT" && !GrpFileManagerTest::dirty(window),
+            "Undo deletion restores entries, selection and clean state");
+    history->redo();
+    require(list->topLevelItemCount() == 2, "Redo deletes the same entries");
+    history->undo();
+
+    QStringList many;
+    for (int i = 0; i < 80; ++i) {
+        const auto filename = path(QString("two/F%1.TXT").arg(i));
+        write(filename, "data");
+        many.push_back(filename);
+    }
+    require(GrpFileManagerTest::append(window, many), "Append many files as one batch");
+    require(list->topLevelItem(4)->text(3) == "Added", "New entries marked Added");
+    history->undo();
+    require(list->topLevelItemCount() == 4 && !GrpFileManagerTest::dirty(window), "One undo removes whole append batch");
+    history->redo();
+    require(list->topLevelItemCount() == 84, "Redo restores complete append batch");
+    window.show();
+    QApplication::processEvents();
+    list->clearSelection();
+    list->setCurrentItem(list->topLevelItem(30));
+    list->topLevelItem(32)->setSelected(true);
+    list->setColumnWidth(0, 1600);
+    list->doItemsLayout();
+    list->verticalScrollBar()->setValue(20);
+    list->horizontalScrollBar()->setValue(10);
+    const auto vertical = list->verticalScrollBar()->value();
+    const auto horizontal = list->horizontalScrollBar()->value();
+    const auto current = list->currentItem()->text(0);
+    require(vertical > 0, "Scroll fixture has nonzero scroll position");
+    require(horizontal > 0, "Scroll fixture has nonzero horizontal scroll position");
+    require(GrpFileManagerTest::save(window), "Save large archive");
+    require(list->currentItem()->text(0) == current && list->selectedItems().size() == 2
+            && list->verticalScrollBar()->value() == vertical
+            && list->horizontalScrollBar()->value() == horizontal, "Save preserves multi-selection and both scroll positions");
+    // Replacement uses a single selection, and retains viewport position on undo.
+    list->clearSelection();
+    list->currentItem()->setSelected(true);
+    require(GrpFileManagerTest::replace(window, path("two/A.TXT")), "Replace scrolled entry");
+    require(list->currentItem()->text(0) == current && list->verticalScrollBar()->value() == vertical,
+            "Replacement preserves scrolled view");
+    history->undo();
+    require(list->currentItem()->text(0) == current && list->verticalScrollBar()->value() == vertical
+            && !GrpFileManagerTest::dirty(window), "Undo restores scrolled view and saved contents");
+    const auto index = history->index();
+    require(choices({{"Skip", true}}, [&] { return GrpFileManagerTest::append(window, {path("one/A.TXT")}); }), "Skip conflict");
+    require(history->index() == index && history->canRedo(), "No-op append preserves redo history");
+    require(GrpFileManagerTest::load(window, archive) && !history->canUndo() && !history->canRedo(),
+            "Opening an archive clears edit history");
+    std::cout << "GRP conflict handling, history, change markers and view preservation passed\n";
 }
