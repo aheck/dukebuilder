@@ -1,6 +1,8 @@
 #include "grpfilemanagerwindow.h"
 #include <libduke/grp.h>
 #include <QApplication>
+#include <QAction>
+#include <QMenu>
 #include <QAbstractButton>
 #include <QCheckBox>
 #include <QDir>
@@ -115,6 +117,13 @@ int main(int argc, char **argv)
     write(path("two/C.TXT"), "new");
     write(path("two/D.TXT"), "cancelled");
     GrpFileManagerWindow window;
+    auto *saveAction = window.findChild<QAction *>("grpSaveAction");
+    auto *replaceAction = window.findChild<QAction *>("grpReplaceAction");
+    auto *extractAction = window.findChild<QAction *>("grpExtractAction");
+    auto *selectAllAction = window.findChild<QAction *>("grpSelectAllAction");
+    require(saveAction && replaceAction && extractAction && selectAllAction, "Shared archive actions exist");
+    require(!saveAction->isEnabled() && !replaceAction->isEnabled() && !extractAction->isEnabled(),
+            "Archive actions disabled before opening archive");
     const auto archive = path("test.grp");
     require(GrpFileManagerTest::create(window, archive), "Create archive");
     require(GrpFileManagerTest::append(window, {path("one/A.TXT"), path("one/B.TXT")}), "Initial append");
@@ -167,6 +176,13 @@ int main(int argc, char **argv)
     require(!GrpFileManagerTest::dirty(window) && members(archive) == saved, "Extraction does not modify archive");
     auto *history = GrpFileManagerTest::history(window);
     auto *list = GrpFileManagerTest::list(window);
+    selectAllAction->trigger();
+    require(list->selectedItems().size() == 4 && extractAction->isEnabled() && !replaceAction->isEnabled(),
+            "Select All enables batch extraction and disables single-file replacement");
+    require(window.statusBar()->currentMessage().contains("4 selected"), "Selection count updates in status bar");
+    list->clearSelection();
+    require(!extractAction->isEnabled() && window.statusBar()->currentMessage().contains("0 selected"),
+            "Clearing selection updates action state and summary");
     require(list->topLevelItem(3)->text(3).isEmpty(), "Save clears change markers");
     history->undo();
     require(list->topLevelItemCount() == 3 && GrpFileManagerTest::dirty(window)
@@ -250,5 +266,34 @@ int main(int argc, char **argv)
     require(history->index() == index && history->canRedo(), "No-op append preserves redo history");
     require(GrpFileManagerTest::load(window, archive) && !history->canUndo() && !history->canRedo(),
             "Opening an archive clears edit history");
+    list->setCurrentItem(list->topLevelItem(0));
+    list->topLevelItem(1)->setSelected(true);
+    bool contextChecked = false;
+    QTimer contextTimer;
+    QObject::connect(&contextTimer, &QTimer::timeout, [&] {
+        auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+        if (!menu) return;
+        require(menu->actions().contains(extractAction) && menu->actions().contains(replaceAction),
+                "Context menu shares the main actions");
+        require(list->selectedItems().size() == 2 && extractAction->isEnabled() && !replaceAction->isEnabled(),
+                "Right click on selected entry preserves multi-selection and correct actions");
+        contextChecked = true;
+        menu->close();
+    });
+    contextTimer.start(1);
+    QMetaObject::invokeMethod(list, "customContextMenuRequested", Qt::DirectConnection,
+                             Q_ARG(QPoint, list->visualItemRect(list->topLevelItem(0)).center()));
+    contextTimer.stop();
+    require(contextChecked, "Context menu opened");
+    // Current row can differ from the sole selected row after Ctrl-selection.
+    list->clearSelection();
+    list->topLevelItem(1)->setSelected(true);
+    require(replaceAction->isEnabled(), "Replace enabled for one selected entry");
+    require(GrpFileManagerTest::replace(window, path("one/B.TXT")), "Replace selected rather than current entry");
+    require(list->topLevelItem(0)->text(3).isEmpty() && list->topLevelItem(1)->text(3) == "Replaced",
+            "Only the selected entry is replaced");
+    require(saveAction->isEnabled(), "Editing enables shared Save action");
+    saveAction->trigger();
+    require(!saveAction->isEnabled() && members(archive)[1].second == "original", "Save action commits archive and updates state");
     std::cout << "GRP conflict handling, history, change markers and view preservation passed\n";
 }

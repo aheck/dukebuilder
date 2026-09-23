@@ -18,7 +18,9 @@
 #include <QDropEvent>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QHBoxLayout>
+#include <QToolBar>
+#include <QStyle>
+#include <QLocale>
 #include <QHeaderView>
 #include <QLabel>
 #include <QMessageBox>
@@ -178,6 +180,7 @@ GrpFileManagerWindow::GrpFileManagerWindow(QWidget *parent)
     , m_savedMembers(new std::vector<Member>)
 {
     m_history = new QUndoStack(this);
+    auto *fileMenu = menuBar()->addMenu("File");
     auto *editMenu = menuBar()->addMenu("Edit");
     auto *undoAction = m_history->createUndoAction(this, "Undo");
     undoAction->setShortcuts(QKeySequence::Undo);
@@ -216,49 +219,93 @@ GrpFileManagerWindow::GrpFileManagerWindow(QWidget *parent)
     fileList->dragRequested = [this] { dragSelected(); };
     layout->addWidget(m_files, 1);
 
-    auto *buttons = new QHBoxLayout;
-    auto *newButton = new QPushButton("New", central);
-    auto *openButton = new QPushButton("Open", central);
-    auto *saveButton = new QPushButton("Save", central);
-    auto *saveAsButton = new QPushButton("Save As", central);
-    auto *extractButton = new QPushButton("Extract Selected", central);
-    auto *extractAllButton = new QPushButton("Extract All", central);
-    auto *deleteButton = new QPushButton("Delete", central);
-    auto *replaceButton = new QPushButton("Replace", central);
-    auto *appendButton = new QPushButton("Append", central);
-    for (auto *button : {newButton, openButton, saveButton, saveAsButton,
-                         extractButton, extractAllButton, deleteButton,
-                         replaceButton, appendButton}) {
-        buttons->addWidget(button);
-    }
-    layout->addLayout(buttons);
     setCentralWidget(central);
+    const auto action = [this](const QString &name, const QString &id, QStyle::StandardPixmap icon) {
+        auto *result = new QAction(style()->standardIcon(icon), name, this);
+        result->setObjectName(id);
+        return result;
+    };
+    auto *newAction = action("New archive…", "grpNewAction", QStyle::SP_FileIcon);
+    auto *openAction = action("Open archive…", "grpOpenAction", QStyle::SP_DialogOpenButton);
+    m_saveAction = action("Save", "grpSaveAction", QStyle::SP_DialogSaveButton);
+    m_saveAsAction = action("Save As…", "grpSaveAsAction", QStyle::SP_DialogSaveButton);
+    m_appendAction = action("Append files…", "grpAppendAction", QStyle::SP_ArrowDown);
+    m_replaceAction = action("Replace selected file…", "grpReplaceAction", QStyle::SP_BrowserReload);
+    m_deleteAction = action("Delete selected files", "grpDeleteAction", QStyle::SP_TrashIcon);
+    m_extractAction = action("Extract selected files…", "grpExtractAction", QStyle::SP_ArrowUp);
+    m_extractAllAction = action("Extract all files…", "grpExtractAllAction", QStyle::SP_ArrowUp);
+    m_selectAllAction = new QAction("Select All", this);
+    m_selectAllAction->setObjectName("grpSelectAllAction");
+    newAction->setShortcuts(QKeySequence::New);
+    openAction->setShortcuts(QKeySequence::Open);
+    m_saveAction->setShortcuts(QKeySequence::Save);
+    m_saveAsAction->setShortcuts(QKeySequence::SaveAs);
+    m_deleteAction->setShortcut(QKeySequence(Qt::Key_Delete));
+    m_selectAllAction->setShortcuts(QKeySequence::SelectAll);
+    m_appendAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_I));
+    m_extractAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_E));
+    m_extractAllAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E));
+    fileMenu->addActions({newAction, openAction, m_saveAction, m_saveAsAction});
+    fileMenu->addSeparator();
+    fileMenu->addActions({m_extractAction, m_extractAllAction});
+    editMenu->addSeparator();
+    editMenu->addActions({m_appendAction, m_replaceAction, m_deleteAction});
+    editMenu->addSeparator();
+    editMenu->addAction(m_selectAllAction);
+    auto *toolbar = addToolBar("Archive");
+    toolbar->setObjectName("grpToolbar");
+    toolbar->setMovable(false);
+    toolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    toolbar->setIconSize(QSize(20, 20));
+    toolbar->addActions({newAction, openAction, m_saveAction});
+    toolbar->addSeparator();
+    toolbar->addActions({m_appendAction, m_extractAction, m_replaceAction, m_deleteAction});
+    toolbar->addSeparator();
+    undoAction->setIcon(style()->standardIcon(QStyle::SP_ArrowBack));
+    redoAction->setIcon(style()->standardIcon(QStyle::SP_ArrowForward));
+    toolbar->addActions({undoAction, redoAction});
+    m_files->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_files, &QWidget::customContextMenuRequested, this, [this, undoAction, redoAction](const QPoint &point) {
+        if (auto *item = m_files->itemAt(point)) {
+            m_files->setCurrentItem(item, 0, item->isSelected()
+                ? QItemSelectionModel::NoUpdate : QItemSelectionModel::ClearAndSelect);
+        }
+        updateActions();
+        QMenu menu(this);
+        menu.addActions({m_extractAction, m_replaceAction, m_deleteAction});
+        menu.addSeparator();
+        menu.addActions({m_appendAction, m_extractAllAction, m_selectAllAction});
+        menu.addSeparator();
+        menu.addActions({undoAction, redoAction});
+        menu.exec(m_files->viewport()->mapToGlobal(point));
+    });
 
-    connect(newButton, &QPushButton::clicked, this, [this] {
+    connect(newAction, &QAction::triggered, this, [this] {
         if (!maybeDiscardChanges()) return;
         const QString path = QFileDialog::getSaveFileName(
             this, "Create GRP file", initialDirectory(), "GRP files (*.grp);;All files (*)");
         if (!path.isEmpty()) createArchive(path);
     });
-    connect(openButton, &QPushButton::clicked, this, [this] {
+    connect(openAction, &QAction::triggered, this, [this] {
         if (!maybeDiscardChanges()) return;
         const QString path = QFileDialog::getOpenFileName(
             this, "Open GRP file", initialDirectory(), "GRP files (*.grp *.GRP);;All files (*)");
         if (!path.isEmpty()) loadArchive(path);
     });
-    connect(saveButton, &QPushButton::clicked, this, &GrpFileManagerWindow::saveArchive);
-    connect(saveAsButton, &QPushButton::clicked, this, &GrpFileManagerWindow::saveArchiveAs);
-    connect(extractButton, &QPushButton::clicked, this, [this] { extractSelected(false); });
-    connect(extractAllButton, &QPushButton::clicked, this, [this] { extractSelected(true); });
-    connect(deleteButton, &QPushButton::clicked, this, &GrpFileManagerWindow::deleteSelected);
-    connect(replaceButton, &QPushButton::clicked, this, [this] {
+    connect(m_saveAction, &QAction::triggered, this, &GrpFileManagerWindow::saveArchive);
+    connect(m_saveAsAction, &QAction::triggered, this, &GrpFileManagerWindow::saveArchiveAs);
+    connect(m_extractAction, &QAction::triggered, this, [this] { extractSelected(false); });
+    connect(m_extractAllAction, &QAction::triggered, this, [this] { extractSelected(true); });
+    connect(m_deleteAction, &QAction::triggered, this, &GrpFileManagerWindow::deleteSelected);
+    connect(m_selectAllAction, &QAction::triggered, m_files, &QTreeWidget::selectAll);
+    connect(m_replaceAction, &QAction::triggered, this, [this] {
         const QString name = selectedMemberName();
         if (name.isEmpty()) return;
         const QString path = QFileDialog::getOpenFileName(this, "Replace " + name,
                                                            initialDirectory());
         if (!path.isEmpty()) replaceSelected(path);
     });
-    connect(appendButton, &QPushButton::clicked, this, [this] {
+    connect(m_appendAction, &QAction::triggered, this, [this] {
         const QStringList paths = QFileDialog::getOpenFileNames(
             this, "Append files", initialDirectory());
         if (!paths.isEmpty()) appendFiles(paths);
@@ -458,7 +505,7 @@ bool GrpFileManagerWindow::replaceSelected(const QString &path)
         showError("GRP files cannot contain members larger than 4 GiB.");
         return false;
     }
-    const int row = m_files->indexOfTopLevelItem(m_files->currentItem());
+    const int row = m_files->indexOfTopLevelItem(m_files->selectedItems().front());
     auto updated = *m_members;
     updated[static_cast<size_t>(row)].data = data;
     commitEdit(std::move(updated), "Replace file");
@@ -618,8 +665,8 @@ void GrpFileManagerWindow::refreshList()
     for (const auto &saved : *m_savedMembers)
         if (std::none_of(m_members->begin(), m_members->end(), [&](const Member &member) { return member.id == saved.id; })) ++deleted;
     restoreView(view);
-    statusBar()->showMessage(QString("%1 files · %2 added · %3 replaced · %4 deleted")
-                            .arg(m_members->size()).arg(added).arg(replaced).arg(deleted));
+    m_pendingChanges = added || replaced || deleted
+        ? QString(" · %1 added · %2 replaced · %3 deleted").arg(added).arg(replaced).arg(deleted) : QString();
     setWindowTitle((m_dirty ? "* " : "") + QString("GRP File Manager")
                    + (m_archivePath.isEmpty() ? QString() : " — " + QFileInfo(m_archivePath).fileName()));
     updateActions();
@@ -627,7 +674,8 @@ void GrpFileManagerWindow::refreshList()
 
 QString GrpFileManagerWindow::selectedMemberName() const
 {
-    const auto *item = m_files->currentItem();
+    const auto selected = m_files->selectedItems();
+    const auto *item = selected.size() == 1 ? selected.front() : nullptr;
     return item ? item->data(0, Qt::UserRole).toString() : QString();
 }
 
@@ -635,14 +683,19 @@ void GrpFileManagerWindow::updateActions()
 {
     const bool hasArchive = !m_archivePath.isEmpty();
     const bool hasSelection = !m_files->selectedItems().isEmpty();
-    for (auto *button : findChildren<QPushButton *>()) {
-        if (button->text() == "Save") button->setEnabled(hasArchive && m_dirty);
-        else if (button->text() == "Save As") button->setEnabled(hasArchive);
-        else if (button->text() == "Extract Selected" || button->text() == "Delete") button->setEnabled(hasSelection);
-        else if (button->text() == "Extract All") button->setEnabled(hasArchive && !m_members->empty());
-        else if (button->text() == "Replace") button->setEnabled(hasSelection && m_files->selectedItems().size() == 1);
-        else if (button->text() == "Append") button->setEnabled(hasArchive);
-    }
+    m_saveAction->setEnabled(hasArchive && m_dirty);
+    m_saveAsAction->setEnabled(hasArchive);
+    m_appendAction->setEnabled(hasArchive);
+    m_replaceAction->setEnabled(m_files->selectedItems().size() == 1);
+    m_deleteAction->setEnabled(hasSelection);
+    m_extractAction->setEnabled(hasSelection);
+    m_extractAllAction->setEnabled(hasArchive && !m_members->empty());
+    m_selectAllAction->setEnabled(!m_members->empty());
+    qint64 bytes = 0;
+    for (const auto &member : *m_members) bytes += member.data.size();
+    statusBar()->showMessage(QString("%1 files · %2 · %3 selected%4")
+        .arg(m_members->size()).arg(QLocale().formattedDataSize(bytes))
+        .arg(m_files->selectedItems().size()).arg(m_pendingChanges));
 }
 
 void GrpFileManagerWindow::closeEvent(QCloseEvent *event)

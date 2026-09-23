@@ -310,6 +310,17 @@ Run geometry and map open/save regression tests with `meson test -C build`.
 
 ## GRP File Manager
 
+A compact toolbar provides the common archive actions; hover an icon for its
+label. The **File** and **Edit** menus contain all commands. Right-click the file
+list for extraction, replacement, deletion, append, and undo/redo commands.
+Right-clicking within a multi-selection keeps that selection. The status bar
+shows file count, total contents size, selected count, and pending changes.
+
+Shortcuts: **Ctrl+N** New, **Ctrl+O** Open, **Ctrl+S** Save,
+**Ctrl+Shift+S** Save As, **Ctrl+I** Append, **Ctrl+E** Extract Selected,
+**Ctrl+Shift+E** Extract All, **Ctrl+A** Select All, and **Delete** to delete
+selected entries. Standard shortcuts follow platform conventions.
+
 The **Edit** menu provides undo/redo for appending, replacing, and deleting files
 (Ctrl+Z / Ctrl+Y). A multi-file operation is one undo step. The **Change** column
 marks added and replaced entries; the status bar also counts pending deletions.

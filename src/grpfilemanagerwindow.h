@@ -12,6 +12,7 @@ class QTreeWidget;
 class QTreeWidgetItem;
 class QTemporaryDir;
 class QUndoStack;
+class QAction;
 
 class GrpFileManagerWindow final : public QMainWindow
 {
@@ -55,6 +56,15 @@ private:
     std::vector<Member> *m_members = nullptr;
     std::vector<Member> *m_savedMembers = nullptr;
     QUndoStack *m_history = nullptr;
+    QAction *m_saveAction = nullptr;
+    QAction *m_saveAsAction = nullptr;
+    QAction *m_appendAction = nullptr;
+    QAction *m_replaceAction = nullptr;
+    QAction *m_deleteAction = nullptr;
+    QAction *m_extractAction = nullptr;
+    QAction *m_extractAllAction = nullptr;
+    QAction *m_selectAllAction = nullptr;
+    QString m_pendingChanges;
     quint64 m_nextMemberId = 1;
     bool m_needsSave = false;
     std::unique_ptr<QTemporaryDir> m_dragDirectory;
