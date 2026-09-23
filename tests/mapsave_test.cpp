@@ -322,8 +322,8 @@ int main(int argc, char **argv)
     invalid = room(); invalid.setVertexPositions({{1, {-1023.8, -1024}}});
     rejected(invalid, "zero length");
     invalid = room();
-    for (int i = 0; i <= MAPV7_MAXSPRITES; ++i) invalid.addSprite({0, 0});
-    rejected(invalid, "4096 sprites");
+    for (int i = 0; i <= MAPV8_MAXSPRITES; ++i) invalid.addSprite({0, 0});
+    rejected(invalid, "16384 sprites");
     require(!saveBuildMap(document, directory.filePath("missing/map.map"), error) && !error.isEmpty(), "Report I/O failure");
     require(saveBuildMap(document, path, error) && error.isEmpty() && read(path) == bytes, "Repeated saves are deterministic");
 
@@ -508,6 +508,105 @@ int main(int argc, char **argv)
 
     // Optional local fixtures permit checking original maps without bundling
     // copyrighted game data in the repository.
+    // Version selection depends on exported counts, not the loaded header.
+    {
+        const auto versionPath = directory.filePath("version.map");
+        const auto assertVersion = [&](const MapDocument &source, int expected) {
+            require(checkMap(source).valid, "Version fixture passes Check Map");
+            require(withBuildMap(source, error, [&](DukeMapFile &snapshot, QString &) {
+                return snapshot.mapversion == expected;
+            }, BuildMapValidation::Preview), "Preview selects expected version: " + error);
+            require(saveBuildMap(source, versionPath, error), error);
+            std::unique_ptr<DukeMapFile, decltype(&duke_map_file_free)> saved(duke_map_file_new(), duke_map_file_free);
+            require(duke_map_file_read_from_filename(saved.get(), QFile::encodeName(versionPath).constData()), "Read version fixture");
+            require(saved->mapversion == expected, "Automatic output version");
+            MapDocument loaded;
+            require(loaded.openMap(versionPath, error), error);
+            require(loaded.sectors().size() == source.sectors().size()
+                && loaded.sprites().size() == source.sprites().size(), "Version roundtrip preserves counts");
+            const auto contents = read(versionPath);
+            require(saveBuildMap(loaded, versionPath, error) && read(versionPath) == contents,
+                "Version roundtrip preserves serialized properties");
+        };
+        require(withBuildMap(room(), error, [&](DukeMapFile &map, QString &) {
+            map.mapversion = 8;
+            return duke_map_file_write_to_filename(&map, QFile::encodeName(versionPath).constData());
+        }), error);
+        MapDocument smallV8;
+        require(smallV8.openMap(versionPath, error), "Open small version-8 map: " + error);
+        assertVersion(smallV8, 7);
+        require(withBuildMap(room(), error, [&](DukeMapFile &map, QString &) {
+            map.mapversion = 9;
+            return duke_map_file_write_to_filename(&map, QFile::encodeName(versionPath).constData());
+        }), error);
+        const auto unchanged = smallV8;
+        require(!smallV8.openMap(versionPath, error) && smallV8 == unchanged,
+            "Version 9 remains unsupported and failed open preserves document");
+
+        auto sprites = room();
+        for (int count = 1; count <= MAPV8_MAXSPRITES; ++count) {
+            const auto id = sprites.addSprite({0,0});
+            sprites.setSpriteTexture(id, 1405);
+            if (count == MAPV7_MAXSPRITES || count == MAPV7_MAXSPRITES + 1 || count == MAPV8_MAXSPRITES) {
+                assertVersion(sprites, count <= MAPV7_MAXSPRITES ? 7 : 8);
+            }
+        }
+
+        // Build disconnected rectangles directly to avoid thousands of editor
+        // topology rebuilds. Collinear top-edge splits vary the wall-side count.
+        const auto grid = [&](int sectorCount, int wallsPerSector, bool extraWall) {
+            const int wallCount = sectorCount * wallsPerSector + int(extraWall);
+            std::vector<DukeMapSector> sectors(sectorCount);
+            std::vector<DukeMapWall> walls(wallCount);
+            std::vector<DukeMapSector *> sectorPointers;
+            std::vector<DukeMapWall *> wallPointers;
+            for (auto &sector : sectors) { sectorPointers.push_back(&sector); }
+            for (auto &wall : walls) { wallPointers.push_back(&wall); }
+            int offset = 0;
+            for (int s = 0; s < sectorCount; ++s) {
+                const int count = wallsPerSector + int(extraWall && s == 0);
+                auto &sector = sectors[s];
+                sector.wallptr = offset;
+                sector.wallnum = count;
+                sector.ceilingz = -8192;
+                sector.extra = -1;
+                const int x = (s % 64) * 2048, y = (s / 64) * 2048;
+                for (int j = 0; j < count; ++j) {
+                    auto &wall = walls[offset + j];
+                    wall.x = x + (j < count - 3 ? j * 1024 / (count - 3) : j == count - 1 ? 0 : 1024);
+                    wall.y = y + (j >= count - 2 ? 1024 : 0);
+                    wall.point2 = offset + (j + 1) % count;
+                    wall.nextwall = wall.nextsector = -1;
+                    wall.xrepeat = wall.yrepeat = 8;
+                    wall.extra = -1;
+                }
+                offset += count;
+            }
+            DukeMapFile map{};
+            map.mapversion = 8;
+            map.posx = map.posy = 512;
+            map.posz = -4096;
+            map.numsectors = sectorCount;
+            map.numwalls = wallCount;
+            map.sectors = sectorPointers.data();
+            map.walls = wallPointers.data();
+            require(duke_map_file_write_to_filename(&map, QFile::encodeName(versionPath).constData()),
+                QString("Write grid fixture: ") + map.last_error);
+            MapDocument loaded;
+            require(loaded.openMap(versionPath, error), error);
+            return loaded;
+        };
+        assertVersion(grid(MAPV7_MAXSECTORS, 4, false), 7);
+        assertVersion(grid(MAPV7_MAXSECTORS + 1, 4, false), 8);
+        assertVersion(grid(MAPV7_MAXSECTORS, 8, false), 7); // Exactly 8192 wall sides.
+        assertVersion(grid(MAPV7_MAXSECTORS, 8, true), 8);  // Walls alone require v8.
+        auto maximum = grid(MAPV8_MAXSECTORS, 4, false);
+        assertVersion(maximum, 8); // Both v8 geometry limits.
+        const auto maximumBytes = read(versionPath);
+        require(maximum.splitWall(0, {512,0}).has_value(), "Split at version-8 wall limit");
+        require(!saveBuildMap(maximum, versionPath, error) && error.contains("16384 wall sides")
+            && read(versionPath) == maximumBytes, "Exceeding version-8 wall limit preserves destination");
+    }
     for (int i = 1; i < argc; ++i) {
         require(opened.openMap(QString::fromLocal8Bit(argv[i]), error), error);
         require(withBuildMap(opened, error, [](DukeMapFile &map, QString &) {

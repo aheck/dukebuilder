@@ -15,7 +15,8 @@ struct MapCheckResult {
 // blocker; callers can navigate to its editor object and check again after fixing.
 MapCheckResult checkMap(const MapDocument &document);
 
-// Export a validated version-7 Build map. Failure leaves the destination intact
+// Export a validated Build map: version 7 when its limits suffice, otherwise 8.
+// Failure leaves the destination intact
 // and returns a diagnostic in error. Editor coordinates are Build coordinates;
 // fractional coordinates are rounded, and angles are expressed in degrees.
 bool saveBuildMap(const MapDocument &document, const QString &filename, QString &error);

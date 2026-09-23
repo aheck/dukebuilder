@@ -258,7 +258,7 @@ does not clear an explicitly enabled sanitizer.
 
 ## Opening and saving maps
 
-Use **File → Open Map** (Ctrl+O) to open a classic version-7 Build `.map`
+Use **File → Open Map** (Ctrl+O) to open a version-7 or version-8 Build `.map`
 file. The view centers on the player start, and Save uses the opened filename.
 An unsuccessful open leaves the current map intact. New, Open, and closing the application prompt to
 save unsaved changes first; choose Discard to proceed without saving or Cancel
@@ -276,8 +276,12 @@ rebuilding their faces; adding lines remains restricted. Empty inner loops remai
 and effect sectors still restrict structural edits. Saving applies the validation rules
 below; some original effect geometry may be opened but cannot yet be saved.
 
-Use **File → Save** (Ctrl+S) or **Save As** (Ctrl+Shift+S) to write a classic
-version-7 Build `.map` file. Save remembers the filename until you start a new
+Use **File → Save** (Ctrl+S) or **Save As** (Ctrl+Shift+S) to write a
+Build `.map` file. Saving automatically uses version 7 for maps with at most
+1,024 sectors, 8,192 wall sides, and 4,096 sprites; exceeding any of those limits
+selects version 8 (up to 4,096 sectors, 16,384 wall sides, and 16,384 sprites).
+Shared lines count as two wall sides. This also means a version-8 map that fits
+the version-7 limits is saved as version 7. Save remembers the filename until you start a new
 map. Existing files are replaced only after validation and writing succeed.
 
 Finish or cancel any active drawing before saving. The player start must lie

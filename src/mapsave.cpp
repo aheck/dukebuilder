@@ -88,8 +88,8 @@ static bool buildMap(const MapDocument &document, QString &error,
     try {
         const auto &sectors = document.sectors();
         require(!sectors.empty(), "The map has no closed sectors.");
-        require(sectors.size() <= MAPV7_MAXSECTORS, "Version 7 supports at most 1024 sectors.");
-        require(document.sprites().size() <= MAPV7_MAXSPRITES, "Version 7 supports at most 4096 sprites.");
+        require(sectors.size() <= MAPV8_MAXSECTORS, "Version 8 supports at most 4096 sectors.");
+        require(document.sprites().size() <= MAPV8_MAXSPRITES, "Version 8 supports at most 16384 sprites.");
         std::size_t wallCount = 0;
         for (std::size_t id = 0; id < sectors.size(); ++id) {
             target(Target::Sector, id);
@@ -99,7 +99,7 @@ static bool buildMap(const MapDocument &document, QString &error,
             wallCount += sector.walls.size();
         }
         target(Target::Map);
-        require(wallCount <= MAPV7_MAXWALLS, "Version 7 supports at most 8192 wall sides (shared lines count twice).");
+        require(wallCount <= MAPV8_MAXWALLS, "Version 8 supports at most 16384 wall sides (shared lines count twice).");
 
         // Storage owns the records; libduke borrows the pointer arrays below.
         std::vector<DukeMapSector> sectorRecords(sectors.size());
@@ -112,7 +112,8 @@ static bool buildMap(const MapDocument &document, QString &error,
         for (auto &record : wallRecords) wallPointers.push_back(&record);
         for (auto &record : spriteRecords) spritePointers.push_back(&record);
         DukeMapFile map{};
-        map.mapversion = 7;
+        map.mapversion = sectors.size() <= MAPV7_MAXSECTORS && wallCount <= MAPV7_MAXWALLS
+            && spriteRecords.size() <= MAPV7_MAXSPRITES ? 7 : 8;
         map.numsectors = static_cast<int16_t>(sectors.size());
         map.numwalls = static_cast<uint16_t>(wallCount);
         map.numsprites = static_cast<uint16_t>(spriteRecords.size());

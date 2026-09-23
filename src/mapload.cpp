@@ -16,7 +16,8 @@ bool MapDocument::openMap(const QString &filename, QString &error)
         if (!map) throw std::bad_alloc();
         const auto path = QFile::encodeName(filename);
         if (!duke_map_file_read_from_filename(map.get(), path.constData())) throw std::runtime_error(map->last_error);
-        if (map->mapversion != 7) throw std::runtime_error("Only classic version-7 Build maps are supported.");
+        if (map->mapversion != 7 && map->mapversion != 8)
+            throw std::runtime_error("Only version-7 and version-8 Build maps are supported.");
         if (map->numsectors == 0) throw std::runtime_error("The map contains no sectors.");
 
         // Import permits effect sectors; strict export geometry checks remain separate.
