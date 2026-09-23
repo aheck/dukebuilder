@@ -79,7 +79,9 @@ int main(int argc, char **argv)
     QString error;
     QString path = settings.filePath("preview.map");
     require(saveBuildMap(room,path,error), "save fixture");
+    require(editor->openMap(path,error,true) && editor->hasUnsavedChanges(), "Archive copy is unsaved");
     require(editor->openMap(path,error), "load fixture");
+    require(!editor->hasUnsavedChanges(), "Normal map opening is clean");
     auto original = editor->document();
     auto *help2D = window.findChild<QDialog *>("shortcuts2D");
     auto *help3D = window.findChild<QDialog *>("shortcuts3D");

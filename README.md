@@ -310,6 +310,12 @@ Run geometry and map open/save regression tests with `meson test -C build`.
 
 ## GRP File Manager
 
+Select a file to preview CON/text contents, MAP information, or paged ART
+thumbnails. ART previews use the archive's `PALETTE.DAT` when available, otherwise
+a labeled grayscale palette. Text previews show up to 256 KiB. Previews include
+unsaved archive edits. Double-click a MAP to open an unsaved copy in DukeBuilder;
+saving that map asks for a separate filename and does not modify the archive.
+
 A compact toolbar provides the common archive actions; hover an icon for its
 label. The **File** and **Edit** menus contain all commands. Right-click the file
 list for extraction, replacement, deletion, append, and undo/redo commands.

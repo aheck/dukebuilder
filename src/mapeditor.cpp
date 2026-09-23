@@ -1273,7 +1273,7 @@ bool MapEditor::saveMap(const QString &filename, QString &error)
     return true;
 }
 
-bool MapEditor::openMap(const QString &filename, QString &error)
+bool MapEditor::openMap(const QString &filename, QString &error, bool asUnsavedCopy)
 {
     MapDocument loaded;
     if (!loaded.openMap(filename, error)) return false;
@@ -1289,7 +1289,7 @@ bool MapEditor::openMap(const QString &filename, QString &error)
     m_undoStack.clear();
     m_document = std::move(loaded);
     m_savedDocument = m_document;
-    m_recoveredDirty = false;
+    m_recoveredDirty = asUnsavedCopy;
     m_spriteTextures.clear();
     for (const auto &sprite : m_document.sprites()) {
         const int key = sprite.texture * 256 + sprite.palette;

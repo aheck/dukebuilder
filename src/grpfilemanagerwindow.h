@@ -3,6 +3,7 @@
 #include <QMainWindow>
 
 #include <memory>
+#include <functional>
 #include <vector>
 
 class QCloseEvent;
@@ -13,12 +14,17 @@ class QTreeWidgetItem;
 class QTemporaryDir;
 class QUndoStack;
 class QAction;
+class QLabel;
+class QPlainTextEdit;
+class QListWidget;
+class QSpinBox;
 
 class GrpFileManagerWindow final : public QMainWindow
 {
 public:
     explicit GrpFileManagerWindow(QWidget *parent = nullptr);
     ~GrpFileManagerWindow() override;
+    std::function<void(const QString &, const QByteArray &)> openMapRequested;
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -47,11 +53,16 @@ private:
     bool extractFiles(const std::vector<int> &rows, const QString &directory);
     void refreshList();
     void updateActions();
+    void updatePreview(bool resetPage = true);
     void showError(const QString &message);
     QString selectedMemberName() const;
     QString initialDirectory() const;
 
     QTreeWidget *m_files = nullptr;
+    QLabel *m_previewInfo = nullptr;
+    QPlainTextEdit *m_textPreview = nullptr;
+    QListWidget *m_artPreview = nullptr;
+    QSpinBox *m_artPage = nullptr;
     QString m_archivePath;
     std::vector<Member> *m_members = nullptr;
     std::vector<Member> *m_savedMembers = nullptr;

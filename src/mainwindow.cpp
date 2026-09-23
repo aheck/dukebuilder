@@ -11,6 +11,7 @@
 #include "settingsdialog.h"
 #include "texturebrowserwindow.h"
 #include "grpfilemanagerwindow.h"
+#include <QTemporaryFile>
 
 #include "info.h"
 #include "tags.h"
@@ -1110,9 +1111,38 @@ MainWindow::MainWindow(QWidget *parent)
 
     auto *toolsMenu = menuBar()->addMenu("&Tools");
     auto *grpFileManagerAction = toolsMenu->addAction("GRP File Manager");
-    connect(grpFileManagerAction, &QAction::triggered, this, [this] {
+    connect(grpFileManagerAction, &QAction::triggered, this, [this, editor, confirmMapReplacement] {
         if (!m_grpFileManager) {
             m_grpFileManager = std::make_unique<GrpFileManagerWindow>(this);
+            m_grpFileManager->openMapRequested = [this, editor, confirmMapReplacement](const QString &name, const QByteArray &data) {
+                QTemporaryFile file;
+                if (!file.open() || file.write(data) != data.size() || !file.flush()) {
+                    QMessageBox::warning(this, "Open archive map", "Unable to prepare the map for opening.");
+                    return;
+                }
+                QString error;
+                MapDocument check;
+                if (!check.openMap(file.fileName(), error)) {
+                    QMessageBox::warning(this, "Open archive map", error);
+                    return;
+                }
+                if (!confirmMapReplacement()) {
+                    return;
+                }
+                if (!editor->openMap(file.fileName(), error, true)) {
+                    QMessageBox::warning(this, "Open archive map", error);
+                    return;
+                }
+                m_recovery->remove();
+                m_recoveryOrigin.clear();
+                m_mapFilename.clear();
+                setWindowFilePath({});
+                setWindowTitle(name + " (archive copy) - Duke Builder");
+                statusBar()->showMessage("Opened archive copy; use Save As to save it separately.", 5000);
+                raise();
+                activateWindow();
+                editor->setFocus();
+            };
         }
         m_grpFileManager->show();
         m_grpFileManager->raise();

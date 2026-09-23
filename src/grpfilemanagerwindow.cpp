@@ -1,6 +1,13 @@
 #include "grpfilemanagerwindow.h"
 
 #include <libduke/grp.h>
+#include <libduke/art.h>
+#include <libduke/map.h>
+#include <QPlainTextEdit>
+#include <QListWidget>
+#include <QSpinBox>
+#include <QSplitter>
+#include <QTemporaryFile>
 
 #include <QCloseEvent>
 #include <QCheckBox>
@@ -191,7 +198,7 @@ GrpFileManagerWindow::GrpFileManagerWindow(QWidget *parent)
     setAttribute(Qt::WA_DeleteOnClose, false);
     setAcceptDrops(true);
     setWindowTitle("GRP File Manager");
-    resize(720, 520);
+    resize(1040, 600);
 
     auto *central = new QWidget(this);
     auto *layout = new QVBoxLayout(central);
@@ -217,7 +224,43 @@ GrpFileManagerWindow::GrpFileManagerWindow(QWidget *parent)
     m_files->header()->resizeSection(1, 100);
     m_files->header()->resizeSection(2, 100);
     fileList->dragRequested = [this] { dragSelected(); };
-    layout->addWidget(m_files, 1);
+    auto *splitter = new QSplitter(central);
+    splitter->addWidget(m_files);
+    auto *preview = new QWidget(splitter);
+    auto *previewLayout = new QVBoxLayout(preview);
+    m_previewInfo = new QLabel(preview);
+    m_previewInfo->setObjectName("grpPreviewInfo");
+    m_previewInfo->setTextFormat(Qt::PlainText);
+    m_previewInfo->setWordWrap(true);
+    previewLayout->addWidget(m_previewInfo);
+    m_textPreview = new QPlainTextEdit(preview);
+    m_textPreview->setObjectName("grpTextPreview");
+    m_textPreview->setReadOnly(true);
+    previewLayout->addWidget(m_textPreview, 1);
+    m_artPage = new QSpinBox(preview);
+    m_artPage->setPrefix("Tile page ");
+    previewLayout->addWidget(m_artPage);
+    m_artPreview = new QListWidget(preview);
+    m_artPreview->setObjectName("grpArtPreview");
+    m_artPreview->setViewMode(QListView::IconMode);
+    m_artPreview->setResizeMode(QListView::Adjust);
+    m_artPreview->setMovement(QListView::Static);
+    m_artPreview->setIconSize(QSize(64, 64));
+    m_artPreview->setGridSize(QSize(110, 110));
+    previewLayout->addWidget(m_artPreview, 1);
+    splitter->addWidget(preview);
+    splitter->setSizes({640, 400});
+    layout->addWidget(splitter, 1);
+    connect(m_artPage, &QSpinBox::valueChanged, this, [this] { updatePreview(false); });
+    connect(m_files, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) {
+        const int row = m_files->indexOfTopLevelItem(item);
+        if (row >= 0 && row < static_cast<int>(m_members->size())) {
+            const auto member = m_members->at(row);
+            if (member.name.endsWith(".MAP", Qt::CaseInsensitive) && openMapRequested) {
+                openMapRequested(member.name, member.data);
+            }
+        }
+    });
 
     setCentralWidget(central);
     const auto action = [this](const QString &name, const QString &id, QStyle::StandardPixmap icon) {
@@ -681,6 +724,7 @@ QString GrpFileManagerWindow::selectedMemberName() const
 
 void GrpFileManagerWindow::updateActions()
 {
+    updatePreview();
     const bool hasArchive = !m_archivePath.isEmpty();
     const bool hasSelection = !m_files->selectedItems().isEmpty();
     m_saveAction->setEnabled(hasArchive && m_dirty);
@@ -696,6 +740,123 @@ void GrpFileManagerWindow::updateActions()
     statusBar()->showMessage(QString("%1 files · %2 · %3 selected%4")
         .arg(m_members->size()).arg(QLocale().formattedDataSize(bytes))
         .arg(m_files->selectedItems().size()).arg(m_pendingChanges));
+}
+
+void GrpFileManagerWindow::updatePreview(bool resetPage)
+{
+    m_textPreview->hide();
+    m_artPreview->hide();
+    m_artPage->hide();
+    m_textPreview->clear();
+    m_artPreview->clear();
+    const auto selected = m_files->selectedItems();
+    if (selected.size() != 1) {
+        m_previewInfo->setText("Select one file to preview its contents.");
+        return;
+    }
+    const int row = m_files->indexOfTopLevelItem(selected.front());
+    if (row < 0 || row >= static_cast<int>(m_members->size())) {
+        return;
+    }
+    const auto &member = m_members->at(row);
+    const QString extension = QFileInfo(member.name).suffix().toUpper();
+    m_previewInfo->setText(member.name);
+    if (QStringList{"CON", "TXT", "DEF", "CFG", "INI", "LOG"}.contains(extension)) {
+        constexpr qsizetype limit = 256 * 1024;
+        const QByteArray contents = member.data.left(limit);
+        QString text = QString::fromUtf8(contents);
+        if (text.contains(QChar::ReplacementCharacter)) {
+            text = QString::fromLatin1(contents);
+        }
+        m_textPreview->setPlainText(text);
+        m_textPreview->show();
+        if (member.data.size() > limit) {
+            m_previewInfo->setText(member.name + " — preview limited to first 256 KiB");
+        }
+    } else if (extension == "MAP") {
+        QTemporaryFile file;
+        std::unique_ptr<DukeMapFile, decltype(&duke_map_file_free)> map(duke_map_file_new(), duke_map_file_free);
+        if (!file.open() || file.write(member.data) != member.data.size() || !file.flush()
+            || !map || !duke_map_file_read_from_filename(map.get(), QFile::encodeName(file.fileName()).constData())) {
+            m_previewInfo->setText(member.name + "\nUnable to preview this MAP file.");
+            return;
+        }
+        m_previewInfo->setText(QString("%1\nMAP version %2\n%3 sectors · %4 walls · %5 sprites\n"
+            "Player start: %6, %7, %8\nStarting sector: %9\n\nDouble-click to open an unsaved copy in DukeBuilder.")
+            .arg(member.name).arg(map->mapversion).arg(map->numsectors).arg(map->numwalls)
+            .arg(map->numsprites).arg(map->posx).arg(map->posy).arg(map->posz).arg(map->cursectnum));
+    } else if (extension == "ART") {
+        std::unique_ptr<DukeArtFile, decltype(&duke_art_free)> art(duke_art_new(), duke_art_free);
+        if (!art || !duke_art_open_memory(art.get(), member.data.constData(), member.data.size())
+            || !duke_art_read_tiles_sparse(art.get())) {
+            m_previewInfo->setText(member.name + "\nUnable to preview this ART file.");
+            return;
+        }
+        // Bound both work and memory per page, even for very large tile dimensions.
+        const int count = art->header.localtileend - art->header.localtilestart + 1;
+        const QSignalBlocker blocker(m_artPage);
+        m_artPage->setRange(1, std::max(1, (count + 127) / 128));
+        if (resetPage) {
+            m_artPage->setValue(1);
+        }
+        QVector<QRgb> palette;
+        const auto paletteMember = std::find_if(m_members->begin(), m_members->end(), [](const Member &entry) {
+            return entry.name.compare("PALETTE.DAT", Qt::CaseInsensitive) == 0 && entry.data.size() >= 768;
+        });
+        bool hasPalette = paletteMember != m_members->end();
+        if (hasPalette) {
+            for (int i = 0; i < 768; ++i) {
+                if (static_cast<unsigned char>(paletteMember->data[i]) > 63) {
+                    hasPalette = false;
+                    break;
+                }
+            }
+        }
+        for (int i = 0; i < 256; ++i) {
+            const auto channel = [&](int c) {
+                const int value = static_cast<unsigned char>(paletteMember->data[3 * i + c]);
+                return (value << 2) | (value >> 4);
+            };
+            palette.append(i == 255 ? qRgba(0, 0, 0, 0) : hasPalette
+                ? qRgb(channel(0), channel(1), channel(2)) : qRgb(i, i, i));
+        }
+        m_previewInfo->setText(QString("%1 — %2 tiles\n%3").arg(member.name).arg(count)
+            .arg(hasPalette ? "Archive palette" : "Grayscale preview (no valid PALETTE.DAT)"));
+        const int begin = (m_artPage->value() - 1) * 128;
+        for (int i = begin; i < std::min(count, begin + 128); ++i) {
+            const auto *tile = duke_art_get_tile_by_index(art.get(), i);
+            if (!tile) {
+                continue;
+            }
+            auto *item = new QListWidgetItem(QString("Tile %1\n%2 × %3")
+                .arg(tile->tile_number).arg(tile->width).arg(tile->height), m_artPreview);
+            if (tile->width <= 0 || tile->height <= 0) {
+                continue;
+            }
+            // Sample directly from the archive; do not allocate full-resolution tiles.
+            const qint64 start = qint64(art->data_section_offset) + tile->data_offset;
+            const qint64 end = start + qint64(tile->width) * tile->height;
+            if (end > member.data.size()) {
+                item->setToolTip("Truncated tile data");
+                continue;
+            }
+            const QSize size = QSize(tile->width, tile->height).scaled(64, 64, Qt::KeepAspectRatio);
+            QImage image(size.expandedTo(QSize(1, 1)), QImage::Format_ARGB32);
+            for (int y = 0; y < image.height(); ++y) {
+                for (int x = 0; x < image.width(); ++x) {
+                    const qint64 offset = start + qint64(x * tile->width / image.width()) * tile->height
+                        + y * tile->height / image.height();
+                    image.setPixel(x, y, palette[static_cast<unsigned char>(member.data[offset])]);
+                }
+            }
+            item->setIcon(QPixmap::fromImage(image));
+        }
+        m_artPage->show();
+        m_artPreview->show();
+    } else {
+        m_previewInfo->setText(QString("%1\n%2\nNo preview available for this file type.")
+            .arg(member.name, QLocale().formattedDataSize(member.data.size())));
+    }
 }
 
 void GrpFileManagerWindow::closeEvent(QCloseEvent *event)

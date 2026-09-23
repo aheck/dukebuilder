@@ -2,6 +2,11 @@
 #include <libduke/grp.h>
 #include <QApplication>
 #include <QAction>
+#include <QDataStream>
+#include <QPlainTextEdit>
+#include <QLabel>
+#include <QListWidget>
+#include <QSpinBox>
 #include <QMenu>
 #include <QAbstractButton>
 #include <QCheckBox>
@@ -295,5 +300,60 @@ int main(int argc, char **argv)
     require(saveAction->isEnabled(), "Editing enables shared Save action");
     saveAction->trigger();
     require(!saveAction->isEnabled() && members(archive)[1].second == "original", "Save action commits archive and updates state");
-    std::cout << "GRP conflict handling, history, change markers and view preservation passed\n";
+    GrpFileManagerWindow previews;
+    require(GrpFileManagerTest::create(previews, path("preview.grp")), "Create preview archive");
+    QByteArray art;
+    QDataStream artStream(&art, QIODevice::WriteOnly);
+    artStream.setByteOrder(QDataStream::LittleEndian);
+    artStream << qint32(1) << qint32(129) << qint32(0) << qint32(128);
+    for (int i = 0; i < 129; ++i) { artStream << qint16(1); }
+    for (int i = 0; i < 129; ++i) { artStream << qint16(1); }
+    for (int i = 0; i < 129; ++i) { artStream << quint32(0); }
+    art.append(QByteArray(129, char(1)));
+    write(path("TILES.ART"), art);
+    write(path("BAD.ART"), "invalid");
+    write(path("GAME.CON"), "// <b>plain text</b>\n");
+    write(path("BIG.TXT"), QByteArray(300 * 1024, 'a'));
+    QByteArray map;
+    QDataStream mapStream(&map, QIODevice::WriteOnly);
+    mapStream.setByteOrder(QDataStream::LittleEndian);
+    mapStream << qint32(7) << qint32(100) << qint32(200) << qint32(300)
+              << qint16(0) << qint16(-1) << qint16(0) << quint16(0) << quint16(0);
+    write(path("TEST.MAP"), map);
+    require(GrpFileManagerTest::append(previews, {path("GAME.CON"), path("TILES.ART"),
+        path("BAD.ART"), path("BIG.TXT"), path("TEST.MAP")}), "Append preview fixtures");
+    auto *previewList = GrpFileManagerTest::list(previews);
+    auto *textPreview = previews.findChild<QPlainTextEdit *>("grpTextPreview");
+    auto *info = previews.findChild<QLabel *>("grpPreviewInfo");
+    auto *tiles = previews.findChild<QListWidget *>("grpArtPreview");
+    auto *page = previews.findChild<QSpinBox *>();
+    previewList->setCurrentItem(previewList->topLevelItem(0));
+    require(textPreview->toPlainText() == "// <b>plain text</b>\n" && textPreview->isReadOnly(), "Plain read-only CON preview");
+    previewList->setCurrentItem(previewList->topLevelItem(1));
+    require(tiles->count() == 128 && page->maximum() == 2 && info->text().contains("Grayscale"), "Paged grayscale ART preview");
+    require(tiles->item(0)->icon().pixmap(64, 64).toImage().pixelColor(0, 0) == QColor(1, 1, 1), "ART pixel offset and grayscale");
+    page->setValue(2);
+    require(tiles->count() == 1 && tiles->item(0)->text().contains("128"), "Final ART page");
+    QByteArray palette(768, char(0));
+    palette[3] = 63;
+    write(path("PALETTE.DAT"), palette);
+    require(GrpFileManagerTest::append(previews, {path("PALETTE.DAT")}), "Append palette");
+    previewList->setCurrentItem(previewList->topLevelItem(1));
+    require(info->text().contains("Archive palette")
+        && tiles->item(0)->icon().pixmap(64, 64).toImage().pixelColor(0, 0) == QColor(255, 0, 0), "Archive palette colors");
+    previewList->setCurrentItem(previewList->topLevelItem(2));
+    require(info->text().contains("Unable to preview"), "Malformed ART preview is non-modal");
+    previewList->setCurrentItem(previewList->topLevelItem(3));
+    require(textPreview->toPlainText().size() == 256 * 1024 && info->text().contains("limited"), "Bounded text preview");
+    previewList->setCurrentItem(previewList->topLevelItem(4));
+    require(info->text().contains("MAP version 7") && info->text().contains("100, 200, 300"), "MAP information preview");
+    bool opened = false;
+    previews.openMapRequested = [&](const QString &name, const QByteArray &data) {
+        opened = name == "TEST.MAP" && data == map;
+    };
+    previewList->itemDoubleClicked(previewList->topLevelItem(4), 0);
+    require(opened, "Double-click opens current unsaved MAP contents");
+    previewList->topLevelItem(0)->setSelected(true);
+    require(info->text().contains("Select one") && textPreview->isHidden() && tiles->isHidden(), "Multi-selection clears preview");
+    std::cout << "GRP manager tests passed\n";
 }
