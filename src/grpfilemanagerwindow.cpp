@@ -497,8 +497,11 @@ void GrpFileManagerWindow::dropEvent(QDropEvent *event)
         if (url.isLocalFile()) paths.append(url.toLocalFile());
     }
     if (paths.isEmpty()) return;
-    if (paths.size() == 1 && QFileInfo(paths.first()).suffix().compare("grp", Qt::CaseInsensitive) == 0
-        && maybeDiscardChanges()) {
+    if (paths.size() == 1 && QFileInfo(paths.first()).suffix().compare("grp", Qt::CaseInsensitive) == 0) {
+        if (!maybeDiscardChanges()) {
+            event->ignore();
+            return;
+        }
         loadArchive(paths.first());
     } else if (!m_archivePath.isEmpty()) {
         appendFiles(paths);
