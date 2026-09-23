@@ -380,7 +380,13 @@ message and remain in 2D. The renderer currently uses the first configured GRP
 it can render with; it does not combine multiple archives.
 
 - **W/S:** fly forward/backward along the viewing direction, including pitch.
-- **A/D:** strafe horizontally. **Shift:** move faster.
+- **A/D:** strafe horizontally. With a multi-selection containing walls, **A**
+  instead aligns connected selected wall textures to the pointed-at selected
+  wall. The reference and texture scales stay unchanged; the operation is one
+  undoable edit. Different textures, incompatible vertical scales/flips,
+  disconnected walls, and ambiguous portal sides are skipped with a status
+  message. Integer panning can leave small errors, and closed loops may retain
+  a seam. **Shift:** move faster.
 - **Mouse:** look around (captured on entry).
 - **Escape:** release the mouse. **Left click:** capture it again.
 - **H:** toggle surface highlighting (enabled on entry). A crosshair marks the

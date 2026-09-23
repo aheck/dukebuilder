@@ -2,6 +2,8 @@
 #include "mapview3d.h"
 #include "mapsave.h"
 #include "previewcamera.h"
+#include "walltexturealignment.h"
+#include <libduke/art.h>
 #include <QCursor>
 #include <QFile>
 #include <QFocusEvent>
@@ -14,6 +16,7 @@
 #include <QResizeEvent>
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
 namespace {
 class Crosshair final : public QWidget
@@ -233,6 +236,12 @@ void MapView3D::keyPressEvent(QKeyEvent *event)
     if (event->modifiers() == Qt::ControlModifier
         && (event->key() == Qt::Key_C || event->key() == Qt::Key_V)) {
         if (!event->isAutoRepeat()) { editTexture(event->key(), false); }
+    } else if (event->key() == Qt::Key_A && event->modifiers() == Qt::NoModifier && m_selection.size() > 1
+               && std::any_of(m_selection.begin(), m_selection.end(), [](const auto &entry) {
+                   return entry.kind == DUKE_SURFACE_WALL;
+               })) {
+        m_keys.remove(Qt::Key_A);
+        if (!event->isAutoRepeat()) { alignSelectedWallTextures(); }
     } else if (event->key() == Qt::Key_Q && !event->isAutoRepeat()) {
         if (leave3D) { leave3D(); }
     } else if (event->key() == Qt::Key_O) {
@@ -734,6 +743,93 @@ void MapView3D::editTexture(int key, bool scale)
     }
     commitSurfaceEdit(std::move(candidate), key == Qt::Key_R ? "Reset texture scale"
         : tile ? "Change texture" : scale ? "Change texture size" : "Change texture offset");
+}
+
+QSize MapView3D::alignmentTextureSize(int tile) const
+{
+    // Use the archive actually rendered, not the browser's merged archive set.
+    // Like the renderer, later ART entries override earlier tile definitions.
+    std::unique_ptr<DukeGrpFile, decltype(&duke_grp_free)> grp(duke_grp_new(), duke_grp_free);
+    if (!grp || !duke_grp_open_filename(grp.get(), QFile::encodeName(m_archive).constData())
+        || !duke_grp_read_entries_sparse(grp.get())) {
+        return {};
+    }
+    for (auto index = grp->header.entry_count; index > 0; --index) {
+        const auto *entry = duke_grp_get_entry_by_index(grp.get(), index - 1);
+        if (!entry || !QString::fromLatin1(entry->filename).endsWith(".ART", Qt::CaseInsensitive)) {
+            continue;
+        }
+        void *bytes = nullptr;
+        const auto size = duke_grp_get_file_data_by_index(grp.get(), index - 1, &bytes);
+        std::unique_ptr<DukeArtFile, decltype(&duke_art_free)> art(duke_art_new(), duke_art_free);
+        if (!bytes || size == size_t(-1) || !art || !duke_art_open_memory(art.get(), bytes, size)
+            || !duke_art_read_tiles_sparse(art.get())) {
+            continue;
+        }
+        const auto *texture = duke_art_get_tile_by_number(art.get(), tile);
+        if (texture && texture->width > 0 && texture->height > 0) {
+            void *pixels = nullptr;
+            if (duke_art_get_tile_data_by_number(art.get(), tile, &pixels) == size_t(-1)) {
+                return {};
+            }
+            return {texture->width, texture->height};
+        }
+    }
+    return {};
+}
+
+void MapView3D::alignSelectedWallTextures()
+{
+    if (!m_active || !m_renderer) {
+        return;
+    }
+    repaint();
+    DukeSurfaceHit hit{};
+    const auto reference = duke_renderer_get_hovered_surface(m_renderer, &hit)
+        ? selectionFromHit(hit) : std::optional<SurfaceSelection>{};
+    const auto report = [this](const QString &message) {
+        if (statusMessage) { statusMessage(message); }
+    };
+    if (!reference || reference->kind != DUKE_SURFACE_WALL
+        || std::find(m_selection.begin(), m_selection.end(), *reference) == m_selection.end()) {
+        report("Point at a selected wall to use it as the alignment reference.");
+        return;
+    }
+    std::vector<WallTextureTarget> targets;
+    int otherSurfaces = 0;
+    for (const auto &entry : m_selection) {
+        if (entry.kind == DUKE_SURFACE_WALL) {
+            targets.push_back({entry.id, entry.reversed});
+        } else {
+            ++otherSurfaces;
+        }
+    }
+    const auto &wall = m_snapshot.walls()[reference->id];
+    const int tile = (reference->reversed ? wall.reverseSide : wall.forwardSide).texture;
+    auto candidate = m_snapshot;
+    auto result = alignWallTextures(candidate, targets, {reference->id, reference->reversed},
+        alignmentTextureSize(tile));
+    if (!result.error.isEmpty()) {
+        report(result.error);
+        return;
+    }
+    if (result.changed) {
+        if (continuousEditChanged) { continuousEditChanged({}); }
+        if (!commitSurfaceEdit(std::move(candidate), "Align wall textures")) {
+            return;
+        }
+    }
+    QString message = QString("Aligned %1 wall(s); reference and texture scales preserved.").arg(result.aligned);
+    if (otherSurfaces) {
+        result.skipped += otherSurfaces;
+        result.reasons.append("non-wall surfaces");
+    }
+    if (result.skipped) {
+        message += QString(" Skipped %1: %2.").arg(result.skipped).arg(result.reasons.join(", "));
+    }
+    if (result.approximate) { message += " Some offsets are approximate (Build panning limits)."; }
+    if (result.closingSeam) { message += " A closing seam remains; scale was not stretched."; }
+    report(message);
 }
 
 void MapView3D::stickSpriteToWall()

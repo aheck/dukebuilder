@@ -34,6 +34,21 @@ static void require(bool ok, const char *message)
 {
     if (!ok) { std::cerr << message << '\n'; std::exit(1); }
 }
+struct MapView3DTest {
+    static void selectRoomWalls(MapView3D &view) {
+        view.m_selection.clear();
+        const auto &sector = view.m_snapshot.sectors()[0];
+        for (std::size_t i = 0; i < sector.walls.size(); ++i) {
+            const auto wall = sector.walls[i];
+            view.m_selection.push_back({DUKE_SURFACE_WALL, wall,
+                view.m_snapshot.walls()[wall].start != sector.vertices[i]});
+        }
+        ++view.m_selectionRevision;
+        view.syncSelection();
+    }
+    static bool strafingLeft(const MapView3D &view) { return view.m_keys.contains(Qt::Key_A); }
+    static std::size_t selected(const MapView3D &view) { return view.m_selection.size(); }
+};
 int main(int argc, char **argv)
 {
     if (argc != 2 && argc != 3) { return 2; }
@@ -231,6 +246,48 @@ int main(int argc, char **argv)
         QTest::mouseClick(view, Qt::LeftButton, modifiers, point);
         view->releaseMouseLook();
     };
+    {
+        auto fixture = editor->document();
+        const auto &sector = fixture.sectors()[0];
+        for (std::size_t i = 0; i < sector.walls.size(); ++i) {
+            const auto id = sector.walls[i];
+            const bool reversed = fixture.walls()[id].start != sector.vertices[i];
+            auto side = reversed ? fixture.walls()[id].reverseSide : fixture.walls()[id].forwardSide;
+            side.xpanning = 13 + int(i) * 7;
+            side.ypanning = 17 + int(i) * 13;
+            fixture.setWallSide(id, reversed, side);
+        }
+        editor->setSurfaceValues(fixture, "Alignment fixture");
+        require(view->refreshDocument(editor->document()), "Refresh alignment fixture");
+        MapView3DTest::selectRoomWalls(*view);
+        QCursor::setPos(view->mapToGlobal(QPoint(view->width()/2, view->height()/2)));
+        QTest::qWait(50);
+        const int historyIndex = editor->undoStack()->index();
+        QTest::keyPress(view, Qt::Key_A);
+        require(!MapView3DTest::strafingLeft(*view), "A aligns instead of moving during wall multi-selection");
+        QTest::keyRelease(view, Qt::Key_A);
+        const auto aligned = editor->document();
+        require(!(aligned == fixture) && editor->undoStack()->index() == historyIndex + 1,
+            "A aligns wall multi-selection as one edit");
+        QTest::keyClick(view, Qt::Key_A);
+        require(editor->document() == aligned && editor->undoStack()->index() == historyIndex + 1,
+            "Repeating alignment adds no empty undo command");
+        editor->undo();
+        require(editor->document() == fixture && MapView3DTest::selected(*view) == 4, "Alignment undo preserves selection");
+        editor->redo();
+        require(editor->document() == aligned && MapView3DTest::selected(*view) == 4, "Alignment redo preserves selection");
+        QCursor::setPos(view->mapToGlobal(QPoint(view->width()/2, int(view->height()*0.9))));
+        QTest::qWait(50);
+        QTest::keyClick(view, Qt::Key_A);
+        require(editor->document() == aligned, "Non-wall reference cannot change alignment");
+        editor->undo();
+        editor->undo();
+        require(editor->document() == original, "Undo alignment fixture");
+        QTest::keyClick(view, Qt::Key_Escape);
+        QTest::keyPress(view, Qt::Key_A);
+        require(MapView3DTest::strafingLeft(*view), "A retains navigation without wall multi-selection");
+        QTest::keyRelease(view, Qt::Key_A);
+    }
     {
         // Different starting shades must retain their relative difference.
         wheel(0.9,120,Qt::ControlModifier);

@@ -137,6 +137,7 @@ if host_machine.system() == 'linux'
 endif
 
 app_sources = [
+    'src/walltexturealignment.cpp',
     'src/shortcuthelp.cpp',
     'src/recovery.cpp',
     'src/mapview3d.cpp',
@@ -190,6 +191,12 @@ previewcamera_test = executable('previewcamera-test',
   include_directories: [include_directories('src'), libduke_inc],
   dependencies: qt_dependencies + [libduke])
 test('previewcamera', previewcamera_test)
+
+walltexturealignment_test = executable('walltexturealignment-test',
+  ['tests/walltexturealignment_test.cpp', 'src/walltexturealignment.cpp', 'src/mapdocument.cpp'],
+  include_directories: include_directories('src'),
+  dependencies: qt_dependencies)
+test('walltexturealignment', walltexturealignment_test)
 
 # Optional manual GPU smoke test: pass a DUKE3D.GRP path on a desktop display.
 qt_test = dependency('qt6', modules: ['Test'])

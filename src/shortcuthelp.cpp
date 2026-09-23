@@ -26,7 +26,7 @@ QString content(bool threeD)
     if (threeD) {
         html += section("Navigation", {
             {"W / S", "Fly forward/backward along the viewing direction, including pitch."},
-            {"A / D", "Strafe left/right."}, {"Shift", "Move faster."},
+            {"A / D", "Strafe left/right. A aligns textures instead when a multi-selection includes walls."}, {"Shift", "Move faster."},
             {"Mouse", "Look around while the mouse is captured."},
             {"Escape", "Clear the selection and release the mouse."}, {"Left click in viewport", "Select the highlighted surface or sprite and capture the mouse. Click it again or click empty space to clear selection."},
             {"Shift + left click", "Add or remove a surface or sprite from the selection. A plain click replaces the selection. Returning to 2D clears it."},
@@ -46,6 +46,7 @@ QString content(bool threeD)
             {"Shift + arrows", "Resize its texture. Right/Up enlarges; Left/Down shrinks. Floors and ceilings support two uniform sizes."},
             {"Ctrl+C / Ctrl+V", "Copy/paste the highlighted wall, floor, or ceiling texture tile. Other properties stay unchanged."},
             {"R", "Reset the highlighted wall side to the default texture scale."},
+            {"A (wall multi-selection)", "Align connected selected walls to the pointed-at selected wall, preserving texture scale. Different textures and incompatible sides are skipped. One undo restores the batch."},
             {"O", "Stick the highlighted sprite to the nearest wall of its sector. Position and alignment change; height and tags are retained."}
         });
         html += "<p>Wheel edits keep targeting the orange selection when you look away. Multi-selection supports shade, height, slope, and texture edits as one undoable batch. Heights skip walls; slopes affect only floors and ceilings; surface panning/scaling skip sprites. Ctrl+C samples the highlight; Ctrl+V applies the copied tile to the multi-selection. "

@@ -1055,7 +1055,7 @@ MainWindow::MainWindow(QWidget *parent)
     auto *help3DLabel = new QLabel(
         "WASD move · Mouse look · Shift faster · "
         "Wheel height · Ctrl+wheel shade · Alt+wheel slope · "
-        "Arrows pan · Shift+Arrows scale · H highlight · Esc release · Q 2D", this);
+        "Arrows pan · Shift+Arrows scale · A align selection · H highlight · Esc release · Q 2D", this);
     help3DLabel->setObjectName("help3DStatusLabel");
     help3DLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     help3DLabel->setToolTip(help3DLabel->text());

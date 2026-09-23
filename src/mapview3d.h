@@ -43,6 +43,7 @@ protected:
     void focusOutEvent(QFocusEvent *event) override;
     void hideEvent(QHideEvent *event) override;
 private:
+    friend struct MapView3DTest;
     struct SurfaceSelection {
         DukeSurfaceKind kind;
         std::size_t id;
@@ -61,6 +62,8 @@ private:
     void cleanup();
     bool applySnapshot(MapDocument candidate);
     void editTexture(int key, bool scale);
+    void alignSelectedWallTextures();
+    QSize alignmentTextureSize(int tile) const;
     void editShade(const DukeSurfaceHit &hit, int steps);
     void editSelectedHeights(int steps, bool fine, bool slope);
     bool commitSurfaceEdit(MapDocument candidate, const QString &label);
