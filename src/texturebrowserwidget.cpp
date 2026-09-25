@@ -148,6 +148,7 @@ void TextureBrowserWidget::reload()
     m_textureList->clear();
     m_images.clear();
     m_rawTextures.clear();
+    m_paletteNumbers = {0};
     m_loadStatus.clear();
     const QStringList grpPaths = QSettings().value(grpFilesSettingsKey).toStringList();
     if (grpPaths.isEmpty()) {
@@ -201,6 +202,10 @@ void TextureBrowserWidget::reload()
             || !lookupLoaded || !m_lookup) {
         m_statusLabel->setText("No valid PALETTE.DAT found in the configured GRP files.");
         return;
+    }
+
+    for (int i = 0; i < m_lookup->count; ++i) {
+        m_paletteNumbers.insert(m_lookup->palettes[i].id);
     }
 
     QMap<int, Texture> textures;

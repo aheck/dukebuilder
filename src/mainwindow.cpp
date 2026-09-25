@@ -540,7 +540,7 @@ MainWindow::MainWindow(QWidget *parent)
         [propertiesControl, propertyDelegate, editor, wallTexturePreview, wallTexturePreviews, sectorTexturePreviews,
          spriteTexturePreview, spriteTexturePreviews, reorientGridAction,
          wallTextureLabel, oppositeTexturePanel, oppositeTextureLabel, oppositeTexturePreview,
-         ceilingTexturePreview, floorTexturePreview, updateTexturePreview](std::optional<MapEditor::SelectionProperties> properties) {
+         ceilingTexturePreview, floorTexturePreview, updateTexturePreview, textureBrowserWindow](std::optional<MapEditor::SelectionProperties> properties) {
             const QSignalBlocker blocker(propertiesControl);
             reorientGridAction->setEnabled(properties && properties->wall.has_value());
             // Clearing the rows can finish an edit while its widget is being retired.
@@ -738,7 +738,13 @@ MainWindow::MainWindow(QWidget *parent)
                 addChoice("Alignment", (sprite.cstat >> 4) & 3, MapEditor::Property::Alignment,
                           {{0,"Face camera"},{1,"Wall aligned"},{2,"Floor aligned"}});
                 addProperty("Shade", QString::number(sprite.shade), MapEditor::Property::Shade);
-                addProperty("Palette", QString::number(sprite.palette), MapEditor::Property::Palette);
+                auto paletteNumbers = textureBrowserWindow->paletteNumbers();
+                paletteNumbers.insert(sprite.palette);
+                std::vector<std::pair<int, QString>> paletteChoices;
+                for (int palette : paletteNumbers) {
+                    paletteChoices.emplace_back(palette, QString::number(palette));
+                }
+                addChoice("Palette", sprite.palette, MapEditor::Property::Palette, paletteChoices);
                 addProperty("Collision size", QString::number(sprite.clipdist), MapEditor::Property::Clipdist);
                 addProperty("X repeat", QString::number(sprite.xrepeat), MapEditor::Property::XRepeat);
                 addProperty("Y repeat", QString::number(sprite.yrepeat), MapEditor::Property::YRepeat);

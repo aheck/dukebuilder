@@ -23,6 +23,7 @@ public:
     void reload();
     [[nodiscard]] std::optional<int> selectedTile() const;
     [[nodiscard]] QImage textureImage(int tile, int palette = 0) const;
+    [[nodiscard]] const std::set<int> &paletteNumbers() const { return m_paletteNumbers; }
     void selectTile(int tile);
     void setUsedTiles(const std::set<int> &tiles) { m_usedTiles = tiles; }
     void setTextureActivationCallback(std::function<void()> callback)
@@ -44,5 +45,6 @@ private:
     struct DukePaletteLookupFile *m_lookup = nullptr;
     std::function<void()> m_textureActivationCallback;
     std::set<int> m_usedTiles;
+    std::set<int> m_paletteNumbers{0};
     QString m_loadStatus;
 };

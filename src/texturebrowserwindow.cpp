@@ -50,6 +50,11 @@ std::optional<TextureBrowserWindow::Selection> TextureBrowserWindow::chooseTextu
     return Selection{*tile, m_browser->textureImage(*tile)};
 }
 
+const std::set<int> &TextureBrowserWindow::paletteNumbers() const
+{
+    return m_browser->paletteNumbers();
+}
+
 QImage TextureBrowserWindow::textureImage(int tile, int palette)
 {
     QImage image = m_browser->textureImage(tile, palette);

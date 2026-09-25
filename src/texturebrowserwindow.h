@@ -29,6 +29,7 @@ public:
 
     [[nodiscard]] std::optional<Selection> chooseTexture(std::optional<int> currentTexture = std::nullopt);
     [[nodiscard]] QImage textureImage(int tile, int palette = 0);
+    [[nodiscard]] const std::set<int> &paletteNumbers() const;
 
 private:
     std::function<std::set<int>()> m_usedTexturesProvider;
