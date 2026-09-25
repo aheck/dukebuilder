@@ -20,12 +20,14 @@
 #include <QAction>
 #include <QCursor>
 #include <QWheelEvent>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QTreeWidget>
 #include <QComboBox>
 #include <QLineEdit>
 #include <QtPlugin>
 #include <iostream>
+#include <cmath>
 #ifdef DUKE_BUILDER_STATIC_XCB_PLUGIN
 Q_IMPORT_PLUGIN(QXcbIntegrationPlugin)
 Q_IMPORT_PLUGIN(QXcbGlxIntegrationPlugin)
@@ -48,6 +50,9 @@ struct MapView3DTest {
     }
     static bool strafingLeft(const MapView3D &view) { return view.m_keys.contains(Qt::Key_A); }
     static std::size_t selected(const MapView3D &view) { return view.m_selection.size(); }
+    static std::size_t selectionRevision(const MapView3D &view) { return view.m_selectionRevision; }
+    static DukeCamera camera(const MapView3D &view) { return view.m_camera; }
+    static void setCamera(MapView3D &view, const DukeCamera &camera) { view.m_camera = camera; }
 };
 int main(int argc, char **argv)
 {
@@ -191,8 +196,9 @@ int main(int argc, char **argv)
             QTest::qWait(50);
             require(QWidget::mouseGrabber() != view, "closing help does not recapture mouse");
             QTest::mouseClick(view,Qt::LeftButton,Qt::NoModifier,view->rect().center());
-            require(QWidget::mouseGrabber() == view && editor->document() == original,
-                    "viewport click resumes 3D after help without map changes");
+            require(QWidget::mouseGrabber() == view && editor->document() == original
+                    && MapView3DTest::selected(*view) == 0,
+                    "viewport click resumes 3D after help without selecting anything");
             bool checked3D = false;
             QTimer responder;
             QObject::connect(&responder, &QTimer::timeout, &window, [&] {
@@ -226,8 +232,35 @@ int main(int argc, char **argv)
     QCursor::setPos(editor->viewport()->mapToGlobal(editor->viewport()->rect().center()));
     QTest::keyClick(editor, Qt::Key_Q);
     QTest::qWait(150);
+    MapView3DTest::selectRoomWalls(*view);
+    require(MapView3DTest::selected(*view) > 0 && QWidget::mouseGrabber() == view
+            && view->hasFocus(), "Selection starts with active 3D controls");
     QTest::keyClick(view, Qt::Key_Escape);
+    require(MapView3DTest::selected(*view) == 0 && QWidget::mouseGrabber() == view
+            && view->hasFocus(), "First Escape clears selection and keeps 3D controls active");
+    QKeyEvent repeatEscape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier, {}, true);
+    QApplication::sendEvent(view, &repeatEscape);
+    require(QWidget::mouseGrabber() == view, "Holding Escape does not release mouse look after clearing selection");
+    QTest::keyClick(view, Qt::Key_Escape);
+    require(QWidget::mouseGrabber() != view, "Second Escape releases mouse look with no selection");
     require(view->cursor().shape() == Qt::CrossCursor, "released cross cursor");
+    for (auto modifiers : {Qt::NoModifier, Qt::ShiftModifier}) {
+        auto revision = MapView3DTest::selectionRevision(*view);
+        QTest::mouseClick(view, Qt::LeftButton, modifiers, view->rect().center());
+        require(QWidget::mouseGrabber() == view && MapView3DTest::selected(*view) == 0
+                && MapView3DTest::selectionRevision(*view) == revision,
+                "First click after Escape restores mouse look without selecting");
+        QTest::mouseClick(view, Qt::LeftButton, modifiers, view->rect().center());
+        require(MapView3DTest::selected(*view) == 1, "Subsequent captured click selects the surface");
+        view->releaseMouseLook();
+        revision = MapView3DTest::selectionRevision(*view);
+        QTest::mouseClick(view, Qt::LeftButton, modifiers, view->rect().center());
+        require(QWidget::mouseGrabber() == view && MapView3DTest::selected(*view) == 1
+                && MapView3DTest::selectionRevision(*view) == revision,
+                "Recapturing mouse look preserves an existing selection");
+        QTest::keyClick(view, Qt::Key_Escape);
+        QTest::keyClick(view, Qt::Key_Escape);
+    }
     const auto wheel = [&](double y, int delta, Qt::KeyboardModifiers modifiers = Qt::NoModifier,
                            bool horizontal = false) {
         QPoint point(view->width()/2, int(view->height()*y));
@@ -240,11 +273,24 @@ int main(int argc, char **argv)
         QTest::qWait(100);
     };
     const auto selectAt = [&](double y, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
-        QPoint point(view->width()/2, int(view->height()*y));
-        QCursor::setPos(view->mapToGlobal(point));
-        QTest::qWait(50);
-        QTest::mouseClick(view, Qt::LeftButton, modifiers, point);
+        // Aim the captured crosshair along the ray previously picked with the
+        // released pointer, then restore the camera for the remaining checks.
         view->releaseMouseLook();
+        window.activateWindow();
+        view->setFocus();
+        QTest::qWait(50);
+        const auto camera = MapView3DTest::camera(*view);
+        QTest::mouseClick(view, Qt::LeftButton, Qt::NoModifier, view->rect().center());
+        QTest::qWait(50);
+        auto aimed = camera;
+        aimed.pitch += std::atan((1.0 - 2.0 * int(view->height() * y) / view->height())
+                                 * std::tan(camera.vertical_fov / 2.0));
+        MapView3DTest::setCamera(*view, aimed);
+        QTest::qWait(50);
+        require(QWidget::mouseGrabber() == view, "Selection helper has active mouse look before selecting");
+        QTest::mouseClick(view, Qt::LeftButton, modifiers, view->rect().center());
+        view->releaseMouseLook();
+        MapView3DTest::setCamera(*view, camera);
     };
     {
         auto fixture = editor->document();
@@ -549,8 +595,13 @@ int main(int argc, char **argv)
         require(opened, "right click opens existing chooser");
         if (captured) {
             require(QWidget::mouseGrabber() == view, "closing chooser restores mouse look");
+            if (MapView3DTest::selected(*view) > 0) {
+                QTest::keyClick(view, Qt::Key_Escape);
+                require(MapView3DTest::selected(*view) == 0 && QWidget::mouseGrabber() == view,
+                        "Escape clears the texture selection while preserving mouse look");
+            }
             QTest::keyClick(view, Qt::Key_Escape);
-            require(QWidget::mouseGrabber() == nullptr, "Escape releases mouse for menu access");
+            require(QWidget::mouseGrabber() == nullptr, "Escape without a selection releases mouse for menu access");
         }
     };
     aim(0.1);

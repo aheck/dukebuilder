@@ -355,7 +355,9 @@ after extraction begins can still leave earlier files successfully extracted.
 ## 3D preview
 
 Configure a game archive containing ART tiles and PALETTE.DAT (normally
-DUKE3D.GRP) in **Settings → Game Data**. Left-click a highlighted surface or sprite to select it in orange; click it again to deselect.
+DUKE3D.GRP) in **Settings → Game Data**. While mouse look is active, left-click a
+highlighted surface or sprite to select it in orange; click it again to deselect.
+After mouse look is released, the first left click resumes it without changing the selection.
 **Shift+click** adds or removes a surface or sprite. A plain click replaces a
 multi-selection. **Ctrl+wheel** shades the entire selection relative to each
 surface's current value, as one undoable edit. Wheel height, Alt+wheel slope,
@@ -368,7 +370,8 @@ the highlighted texture. Relative heights and texture offsets are preserved.
 Selection survives property edits and undo/redo, but clears when returning to 2D
 or when restored geometry changes invalidate its identities.
 Mouse-wheel edits keep targeting the selection when you look away. Escape clears
-the selection and releases the mouse. Press **Q** over the map to enter 3D,
+the selection while keeping mouse look active. Press Escape with no selection to
+release the mouse. Press **Q** over the map to enter 3D,
 and **Q** again to return to the same 2D view. **View → 3D Mode** also switches
 views; when the pointer is outside the viewport it uses the 2D view's center.
 
@@ -394,7 +397,8 @@ it can render with; it does not combine multiple archives.
   message. Integer panning can leave small errors, and closed loops may retain
   a seam. **Shift:** move faster.
 - **Mouse:** look around (captured on entry).
-- **Escape:** release the mouse. **Left click:** capture it again.
+- **Escape:** clear the selection; with no selection, release the mouse.
+  **Left click:** capture it again.
 - **H:** toggle surface highlighting (enabled on entry). A crosshair marks the
   aim point while captured; a cross cursor follows the released mouse.
 - **Mouse wheel:** raise/lower the highlighted sprite, floor or ceiling by 1024 Build Z

@@ -28,7 +28,7 @@ QString content(bool threeD)
             {"W / S", "Fly forward/backward along the viewing direction, including pitch."},
             {"A / D", "Strafe left/right. A aligns textures instead when a multi-selection includes walls."}, {"Shift", "Move faster."},
             {"Mouse", "Look around while the mouse is captured."},
-            {"Escape", "Clear the selection and release the mouse."}, {"Left click in viewport", "Select the highlighted surface or sprite and capture the mouse. Click it again or click empty space to clear selection."},
+            {"Escape", "Clear the selection while keeping mouse look active. With no selection, release the mouse."}, {"Left click in viewport", "Resume mouse look if released. While mouse look is active, select the highlighted surface or sprite; click it again or click empty space to clear selection."},
             {"Shift + left click", "Add or remove a surface or sprite from the selection. A plain click replaces the selection. Returning to 2D clears it."},
             {"Q", "Return to 2D mode."}, {"H", "Toggle surface and sprite highlighting."}
         });

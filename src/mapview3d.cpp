@@ -249,11 +249,16 @@ void MapView3D::keyPressEvent(QKeyEvent *event)
     } else if (event->key() == Qt::Key_R) {
         resetTextureScale();
     } else if (event->key() == Qt::Key_Escape) {
-        m_selection.clear();
-        ++m_selectionRevision;
-        syncSelection();
-        m_wheelRemainder = 0;
-        releaseLook();
+        if (!event->isAutoRepeat()) {
+            if (!m_selection.empty()) {
+                m_selection.clear();
+                ++m_selectionRevision;
+                syncSelection();
+                m_wheelRemainder = 0;
+            } else {
+                releaseLook();
+            }
+        }
     } else if (event->key() == Qt::Key_H && !event->isAutoRepeat()) {
         m_hover = !m_hover;
         duke_renderer_set_hover_enabled(m_renderer, m_hover);
@@ -272,7 +277,8 @@ void MapView3D::keyReleaseEvent(QKeyEvent *event)
 void MapView3D::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
-        if (m_active && m_renderer) {
+        // The first click after releasing mouse look only resumes 3D controls.
+        if (m_active && m_renderer && m_captured) {
             // Resolve the clicked object before capture moves the pointer.
             repaint();
             DukeSurfaceHit hit{};
