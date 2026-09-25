@@ -80,6 +80,7 @@ QString content(bool threeD)
             {"J", "Join selected adjacent sectors. Select the donor sector first, then Shift-click the others; its properties are retained."}
         });
         html += section("Sprites", {
+            {"Ctrl+C / Ctrl+V", "Copy selected sprites and paste duplicates one grid cell down and right. Requires Sprites mode."},
             {"Right click empty space", "Create a sprite in Sprites mode."},
             {"Right click a sprite", "Choose its texture in Sprites mode."},
             {"O", "Stick one selected sprite to the nearest wall of its sector. Requires Sprites mode; preserves height and tags."},

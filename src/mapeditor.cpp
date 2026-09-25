@@ -2207,6 +2207,70 @@ void MapEditor::stickSelectedSpriteToWall()
 
 void MapEditor::keyPressEvent(QKeyEvent *event)
 {
+    const bool controlCopy = event->modifiers().testFlag(Qt::ControlModifier)
+        && event->key() == Qt::Key_C;
+    const bool controlPaste = event->modifiers().testFlag(Qt::ControlModifier)
+        && event->key() == Qt::Key_V;
+    if (m_mode == Mode::Sprites && controlCopy) {
+        m_spriteClipboard.clear();
+        std::vector<MapDocument::SpriteId> selectedIds;
+        for (QGraphicsItem *item : m_scene->selectedItems()) {
+            if (dynamic_cast<SpriteItem *>(item)) {
+                selectedIds.push_back(static_cast<MapDocument::SpriteId>(
+                    item->data(spriteIdRole).toULongLong()));
+            }
+        }
+        std::sort(selectedIds.begin(), selectedIds.end());
+        for (const auto id : selectedIds) {
+            if (id < m_document.sprites().size()) {
+                m_spriteClipboard.push_back(m_document.sprites()[id]);
+            }
+        }
+        m_spritePasteCount = 0;
+        if (m_spriteClipboard.empty()) {
+            reportStatus("Select one or more sprites to copy");
+        } else {
+            reportStatus(QString("%1 sprite(s) copied").arg(m_spriteClipboard.size()));
+        }
+        event->accept();
+        return;
+    }
+    if (m_mode == Mode::Sprites && controlPaste) {
+        if (m_spriteClipboard.empty()) {
+            reportStatus("No copied sprites to paste");
+            event->accept();
+            return;
+        }
+        Edit edit(this, "Paste sprites");
+        const qreal offset = m_scene->gridSize() * ++m_spritePasteCount;
+        std::vector<MapDocument::SpriteId> pasted;
+        pasted.reserve(m_spriteClipboard.size());
+        for (auto sprite : m_spriteClipboard) {
+            sprite.position += QPointF(offset, offset);
+            const int key = sprite.texture * 256 + sprite.palette;
+            if (m_textureResolver && sprite.texture >= 0 && !m_spriteTextures.contains(key)) {
+                m_spriteTextures.insert(key, m_textureResolver(sprite.texture, sprite.palette));
+            }
+            const auto id = m_document.addSprite(sprite.position);
+            m_document.setSprite(id, sprite);
+            pasted.push_back(id);
+        }
+        rebuildScene();
+        m_scene->clearSelection();
+        for (QGraphicsItem *item : m_scene->items()) {
+            if (!dynamic_cast<SpriteItem *>(item)) continue;
+            const auto id = static_cast<MapDocument::SpriteId>(
+                item->data(spriteIdRole).toULongLong());
+            if (std::find(pasted.begin(), pasted.end(), id) != pasted.end()) {
+                item->setSelected(true);
+            }
+        }
+        updateProperties();
+        reportStatus(QString("%1 sprite(s) pasted").arg(pasted.size()));
+        event->accept();
+        return;
+    }
+
     std::unique_ptr<Edit> edit;
     if (event->key() == Qt::Key_Delete) edit = std::make_unique<Edit>(this, "Delete selection");
     if (event->key() == Qt::Key_Delete && m_mode == Mode::Vertices) {

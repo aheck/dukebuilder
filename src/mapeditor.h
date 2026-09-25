@@ -251,6 +251,8 @@ private:
     std::vector<MapDocument::WallId> m_draggedWalls;
     std::vector<std::size_t> m_draggedSectors;
     std::vector<std::pair<MapDocument::SpriteId, QPointF>> m_draggedSprites;
+    std::vector<MapDocument::Sprite> m_spriteClipboard;
+    unsigned m_spritePasteCount = 0;
     QMap<int, QImage> m_spriteTextures;
     QPointF m_vertexDragStart;
     QPointF m_vertexDragAnchor;
