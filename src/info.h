@@ -1,5 +1,5 @@
 #define PROGRAM_NAME "Duke Builder"
-#define PROGRAM_VERSION "0.2"
+#define PROGRAM_VERSION "0.3"
 #define PROGRAM_DESCRIPTION "A level editor for Duke 3D powered by Qt 6"
 #define PROGRAM_COPYRIGHT "Copyright 2026, Andreas Heck"
 #define PROGRAM_TERMS "This program is free software under the MIT license"
