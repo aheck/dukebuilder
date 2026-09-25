@@ -221,7 +221,7 @@ private:
     bool m_mouseEdit = false;
     QPointF snappedPosition(const QPoint &viewportPosition, bool disableSnapping) const;
     void addDrawingPoint(const QPointF &position);
-    void finishDrawing(bool close);
+    bool finishDrawing(bool close, bool discardOnFailure = true);
     void cancelDrawing();
     void updatePreview(const QPointF &cursorPosition);
     void updateSplitPreview(const QPoint &position, bool disableSnapping);

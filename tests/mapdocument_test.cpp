@@ -50,6 +50,36 @@ void checkSideReferences(const MapDocument &document)
 
 int main()
 {
+    for (bool closed : {false, true}) {
+        for (bool subdivided : {false, true}) {
+            MapDocument attached;
+            require(attached.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}}, true), "Wall attachment source");
+            attached.setSectorFloorZ(0, -4096);
+            attached.setSectorCeilingZ(0, -16384);
+            attached.setSectorLotag(0, 17);
+            if (subdivided) require(attached.splitWall(1, {1024,512}).has_value(), "Subdivide attachment wall");
+            const auto before = attached;
+            require(!attached.addPolyline({{1024,256},{1536,256}}, false), "Unfinished attachment creates no sector");
+            require(attached == before, "Unfinished attachment rolls back wall splits");
+            require(attached.addPolyline({{1024,256},{1536,256},{1536,768},{1024,768}}, closed),
+                    "Attach room to two points inside the same wall");
+            require(attached.sectors().size() == 2, "Attachment creates exactly one new room");
+            require(attached.walls().size() == (subdivided ? 10u : 9u), "Attachment reuses shared wall segments");
+            require(attached.sectors()[0].lotag == 17, "Splitting boundary preserves source properties");
+            require(attached.sectors()[1].floorz == -4096 && attached.sectors()[1].ceilingz == -16384,
+                    "New room inherits heights at wall attachment");
+            int portals = 0;
+            for (const auto &wall : attached.walls()) {
+                if (!wall.isTwoSided()) continue;
+                ++portals;
+                require(attached.vertices()[wall.start].position.x() == 1024
+                        && attached.vertices()[wall.end].position.x() == 1024,
+                        "Shared wall becomes the portal");
+            }
+            require(portals == (subdivided ? 2 : 1), "Every shared segment is two-sided");
+            checkSideReferences(attached);
+        }
+    }
     {
         MapDocument attached;
         require(attached.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}}, true), "Attachment source");

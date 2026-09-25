@@ -118,6 +118,14 @@ grpfilemanager_test = executable('grpfilemanager-test',
   dependencies: grp_test_dependencies)
 test('grpfilemanager', grpfilemanager_test, env: ['QT_QPA_PLATFORM=minimal'])
 
+mapeditor_drawing_test = executable('mapeditor-drawing-test',
+  ['tests/mapeditor_drawing_test.cpp', 'src/mapeditor.cpp', 'src/mapdocument.cpp',
+   'src/mapsave.cpp', 'src/mapload.cpp'],
+  include_directories: [include_directories('src'), libduke_inc],
+  cpp_args: grp_test_args,
+  dependencies: grp_test_dependencies)
+test('mapeditor-drawing', mapeditor_drawing_test, env: ['QT_QPA_PLATFORM=minimal'])
+
 texturecatalog_test = executable(
   'texturecatalog-test',
   ['tests/texturecatalog_test.cpp', 'src/texturecatalog.cpp', 'src/mapdocument.cpp'],

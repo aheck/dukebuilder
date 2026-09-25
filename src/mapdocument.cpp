@@ -160,6 +160,15 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed, Q
     }
 
     const auto original = *this;
+    // Join drawing points to the existing boundary before creating new edges.
+    // A coincident vertex alone does not connect a new room to an unsplit wall.
+    for (const auto &point : points) {
+        const auto wallCount = m_walls.size();
+        for (WallId wall = 0; wall < wallCount; ++wall) {
+            (void)splitWall(wall, point);
+        }
+    }
+    const auto attachmentSectors = m_sectors;
     auto voidSides = voidWallSides();
     const std::size_t originalSectorCount = m_sectors.size();
 
@@ -178,19 +187,36 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed, Q
             continue;
         }
 
-        const bool wallExists = std::any_of(
-            m_walls.begin(), m_walls.end(), [start, end](const Wall &wall) {
-                return (wall.start == start && wall.end == end)
-                    || (wall.start == end && wall.end == start);
-            });
-        if (wallExists) {
-            continue;
+        // A closing segment can follow several existing wall pieces. Reuse
+        // each piece instead of laying one long wall over the whole boundary.
+        const QPointF a = m_vertices[start].position;
+        const QPointF delta = m_vertices[end].position - a;
+        const qreal length = std::hypot(delta.x(), delta.y());
+        std::vector<std::pair<qreal, VertexId>> along{{0, start}, {length, end}};
+        for (VertexId vertex = 0; vertex < m_vertices.size(); ++vertex) {
+            if (vertex == start || vertex == end) continue;
+            const QPointF offset = m_vertices[vertex].position - a;
+            const qreal distance = QPointF::dotProduct(offset, delta) / length;
+            if (distance > coordinateEpsilon && distance < length - coordinateEpsilon
+                && std::abs(offset.x() * delta.y() - offset.y() * delta.x()) / length <= coordinateEpsilon) {
+                along.emplace_back(distance, vertex);
+            }
         }
+        std::sort(along.begin(), along.end());
+        for (std::size_t part = 1; part < along.size(); ++part) {
+            const auto from = along[part - 1].second, to = along[part].second;
+            const bool wallExists = std::any_of(
+                m_walls.begin(), m_walls.end(), [from, to](const Wall &wall) {
+                    return (wall.start == from && wall.end == to)
+                        || (wall.start == to && wall.end == from);
+                });
+            if (wallExists) continue;
 
-        m_walls.push_back({start, end});
-        const int density = defaultWallXRepeat(m_walls.size() - 1);
-        m_walls.back().forwardSide.xrepeat = density;
-        m_walls.back().reverseSide.xrepeat = density;
+            m_walls.push_back({from, to});
+            const int density = defaultWallXRepeat(m_walls.size() - 1);
+            m_walls.back().forwardSide.xrepeat = density;
+            m_walls.back().reverseSide.xrepeat = density;
+        }
     }
 
     voidSides.resize(m_walls.size() * 2, false);
@@ -201,7 +227,7 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed, Q
         // Existing faces retain their properties; nested unattached faces have
         // already inherited their containing sector's heights in rebuildSectors.
         for (auto &sector : m_sectors) {
-            const bool survived = std::any_of(original.m_sectors.begin(), original.m_sectors.end(),
+            const bool survived = std::any_of(attachmentSectors.begin(), attachmentSectors.end(),
                 [&](const Sector &old) {
                     return std::is_permutation(sector.walls.begin(), sector.walls.end(),
                                                old.walls.begin(), old.walls.end());
@@ -211,7 +237,7 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed, Q
             for (const auto vertex : vertexIds) {
                 if (std::find(sector.vertices.begin(), sector.vertices.end(), vertex) == sector.vertices.end())
                     continue;
-                for (const auto &source : original.m_sectors) {
+                for (const auto &source : attachmentSectors) {
                     if (std::find(source.vertices.begin(), source.vertices.end(), vertex) == source.vertices.end())
                         continue;
                     sector.floorz = source.floorz;

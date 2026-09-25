@@ -2309,17 +2309,31 @@ void MapEditor::addDrawingPoint(const QPointF &position)
     }
 
     m_drawingPoints.push_back(position);
+    if (m_drawingPoints.size() >= 2) {
+        const bool onWall = std::any_of(m_document.walls().begin(), m_document.walls().end(),
+            [&](const MapDocument::Wall &wall) {
+                const auto a = m_document.vertices()[wall.start].position;
+                const auto b = m_document.vertices()[wall.end].position;
+                const auto delta = b - a, offset = position - a;
+                const qreal length = std::hypot(delta.x(), delta.y());
+                return length > 0 && QPointF::dotProduct(position - a, position - b) <= 0
+                    && std::abs(offset.x() * delta.y() - offset.y() * delta.x()) / length <= 0.001;
+            });
+        if (onWall && finishDrawing(false, false)) return;
+    }
     updatePreview(position);
 }
 
-void MapEditor::finishDrawing(bool close)
+bool MapEditor::finishDrawing(bool close, bool discardOnFailure)
 {
     Edit edit(this, "Draw geometry");
     QString error;
     const bool sectorCreated = m_document.addPolyline(m_drawingPoints, close, &error);
+    if (!sectorCreated && !discardOnFailure) return false;
     m_drawingPoints.clear();
     rebuildScene();
     reportStatus(sectorCreated ? "Sector created" : error.isEmpty() ? "Drawing discarded" : error);
+    return sectorCreated;
 }
 
 void MapEditor::cancelDrawing()

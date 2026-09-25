@@ -65,6 +65,7 @@ QString content(bool threeD)
         html += section("Drawing", {
             {"Left click", "Place a connected wall vertex."},
             {"Click the first vertex", "Close the shape and create a sector (at least three vertices)."},
+            {"Click an existing wall", "Connect to the wall; finish automatically when the chain forms a sector with existing walls."},
             {"Right click / Enter", "Finish the line chain. It is retained when it forms a sector with existing walls."},
             {"Backspace", "Remove the last point from the unfinished drawing."},
             {"Escape", "Cancel the unfinished drawing."},

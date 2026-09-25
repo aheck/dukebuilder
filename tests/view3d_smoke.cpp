@@ -937,7 +937,7 @@ int main(int argc, char **argv)
     editor->setZoomPercent(25);
     editor->centerOn(2048,2048);
     for (QPointF point : {QPointF(4096,0), QPointF(5120,0), QPointF(5120,4096),
-                         QPointF(4096,4096), QPointF(4096,0)}) {
+                         QPointF(4096,4096)}) {
         QTest::mouseClick(editor->viewport(), Qt::LeftButton, Qt::NoModifier, editor->mapFromScene(point));
     }
     require(editor->document().sectors().size() == 2

@@ -136,6 +136,8 @@ as saved. New edits after undo discard the redo branch. History retains at most
 
 - **Left click:** place connected wall vertices. Lines can be drawn at any angle.
 - **Click the first vertex:** close the current shape and create a sector.
+- **Click an existing wall:** connect to it, splitting it at the connection if needed.
+  The drawing finishes automatically when the chain and existing walls form a sector.
 - **Right click or Enter:** finish the current line chain. It is kept only if its
   walls, together with existing walls, create a sector.
 - **Backspace:** remove the last point from the active drawing.
@@ -196,13 +198,13 @@ bundled; no game archive is needed to build the catalog. Original tiles
 without a known name or family remain searchable by number in Others. Custom
 GRPs may replace the artwork at those IDs, so names describe the original game.
 
-To add a neighboring sector, draw from existing boundary vertices and reuse a
-complete boundary edge, or finish an open chain between existing vertices with
-Enter. Boundaries shared by two sectors automatically become two-sided walls
+To add a neighboring sector, start on an existing wall, draw the new boundary,
+and click back on the existing boundary. The sector finishes automatically;
+there is no need to retrace the shared wall. Connection points split existing
+walls as needed. Boundaries shared by two sectors automatically become two-sided walls
 and appear red; outer boundaries remain light gray. Shared vertices move both
 sides together. Hover and selection highlighting still apply to either kind of
-wall. To join partway along an existing edge, first split it by inserting a vertex
-in Vertices mode.
+wall.
 
 New rooms attached to existing sector vertices inherit that sector's floor and
 ceiling heights and textures. If several sectors qualify, the first attachment point in
