@@ -134,7 +134,7 @@ void MapDocument::clear()
     m_walls.clear();
     m_sectors.clear();
     m_sprites.clear();
-    m_playerStart = {{0.0, 0.0}, 0.0, 0.0};
+    m_playerStart = {{0.0, 0.0}, -4096.0, 0.0};
 }
 
 MapDocument::VertexId MapDocument::findOrAddVertex(const QPointF &position)

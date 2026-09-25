@@ -181,6 +181,6 @@ private:
     std::vector<Wall> m_walls;
     std::vector<Sector> m_sectors;
     std::vector<Sprite> m_sprites;
-    PlayerStart m_playerStart{{0.0, 0.0}, 0.0, 0.0};
+    PlayerStart m_playerStart{{0.0, 0.0}, -4096.0, 0.0};
     bool m_complexTopology = false;
 };
