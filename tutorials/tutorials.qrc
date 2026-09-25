@@ -1,0 +1,8 @@
+<RCC>
+  <qresource prefix="/tutorials">
+    <!-- Add each tutorial page and its images here, using aliases that keep
+         the tutorial's folder structure inside the resource path. -->
+    <file alias="vertical-doors/index.html">vertical-doors/index.html</file>
+    <!-- Example: <file alias="vertical-doors/images/door.png">vertical-doors/images/door.png</file> -->
+  </qresource>
+</RCC>

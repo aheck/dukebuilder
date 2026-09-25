@@ -12,6 +12,8 @@ project(
 )
 
 qt6 = dependency('qt6', modules: ['Core', 'Widgets', 'OpenGLWidgets'])
+qt6_module = import('qt6')
+tutorial_resources = qt6_module.compile_resources(sources: 'tutorials/tutorials.qrc')
 cpp = meson.get_compiler('cpp')
 
 libduke_root = meson.current_source_dir() / '..' / 'libduke'
@@ -188,7 +190,7 @@ endif
 
 executable(
   'dukebuilder',
-  ['src/main.cpp'] + app_sources,
+  ['src/main.cpp'] + app_sources + tutorial_resources,
   cpp_args: app_cpp_args,
   dependencies: app_dependencies + renderer_dependencies + gui_entrypoint,
   win_subsystem: 'windows',
@@ -217,7 +219,7 @@ test('walltexturealignment', walltexturealignment_test)
 # Optional manual GPU smoke test: pass a DUKE3D.GRP path on a desktop display.
 qt_test = dependency('qt6', modules: ['Test'])
 executable('view3d-smoke',
-  ['tests/view3d_smoke.cpp'] + app_sources,
+  ['tests/view3d_smoke.cpp'] + app_sources + tutorial_resources,
   cpp_args: app_cpp_args,
   include_directories: [include_directories('src'), libduke_inc],
   dependencies: app_dependencies + renderer_dependencies + [qt_test])

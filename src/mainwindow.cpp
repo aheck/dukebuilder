@@ -52,8 +52,10 @@
 #include <QStyledItemDelegate>
 #include <QToolBar>
 #include <QTreeWidget>
+#include <QTextBrowser>
 #include <QVBoxLayout>
 #include <QWindow>
+#include <QUrl>
 
 #include <algorithm>
 #include <cmath>
@@ -1439,6 +1441,23 @@ MainWindow::MainWindow(QWidget *parent)
     auto *help3DAction = helpMenu->addAction("3D Mode Shortcuts");
     connect(help2DAction, &QAction::triggered, this, [=] { showShortcuts(help2D); });
     connect(help3DAction, &QAction::triggered, this, [=] { showShortcuts(help3D); });
+    auto *tutorialsMenu = helpMenu->addMenu("Tutorials");
+    auto *verticalDoorsAction = tutorialsMenu->addAction("Vertical Doors");
+    connect(verticalDoorsAction, &QAction::triggered, this, [this, view3D] {
+        view3D->releaseMouseLook();
+        auto *dialog = new QDialog(this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->setWindowTitle("Tutorial: Vertical Doors");
+        dialog->resize(760, 560);
+        auto *layout = new QVBoxLayout(dialog);
+        auto *browser = new QTextBrowser(dialog);
+        browser->setOpenExternalLinks(true);
+        browser->setSource(QUrl("qrc:/tutorials/vertical-doors/index.html"));
+        layout->addWidget(browser);
+        dialog->show();
+        dialog->raise();
+        dialog->activateWindow();
+    });
     helpMenu->addSeparator();
     auto *aboutAction = helpMenu->addAction("&About");
     connect(aboutAction, &QAction::triggered, this, [this] {
