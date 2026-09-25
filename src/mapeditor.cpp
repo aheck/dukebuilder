@@ -47,6 +47,49 @@ const QColor hoverColor(80, 210, 255);
 const QColor selectedColor(255, 110, 92);
 const QColor sectorColor(50, 116, 158, 38);
 
+std::optional<MapDocument::SectorId> sectorAtPosition(
+    const MapDocument &document, const QPointF &position)
+{
+    std::optional<MapDocument::SectorId> found;
+    for (MapDocument::SectorId id = 0; id < document.sectors().size(); ++id) {
+        const auto &sector = document.sectors()[id];
+        QPainterPath path;
+        path.setFillRule(Qt::OddEvenFill);
+        for (std::size_t i = 0; i < sector.vertices.size(); ++i) {
+            const QPointF point = document.vertices()[sector.vertices[i]].position;
+            if (i == 0 || std::find(sector.loopStarts.begin(), sector.loopStarts.end(), i)
+                              != sector.loopStarts.end()) {
+                path.moveTo(point);
+            } else {
+                path.lineTo(point);
+            }
+            if (sector.nextWallIndex(i) <= i) path.closeSubpath();
+        }
+        if (!path.contains(position)) continue;
+        if (found) return std::nullopt;
+        found = id;
+    }
+    return found;
+}
+
+qreal sectorFloorZAt(const MapDocument &document, MapDocument::SectorId id,
+                     const QPointF &position)
+{
+    const auto &sector = document.sectors()[id];
+    qreal z = sector.floorz;
+    if ((sector.floorstat & 2) == 0 || sector.vertices.empty()) return z;
+    const QPointF a = document.vertices()[sector.vertices[0]].position;
+    const QPointF b = document.vertices()[sector.vertices[sector.nextWallIndex(0)]].position;
+    const QPointF delta = b - a;
+    const qreal length = std::hypot(delta.x(), delta.y());
+    if (length > 0.0) {
+        z += sector.floorheinum
+            * (delta.x() * (position.y() - a.y()) - delta.y() * (position.x() - a.x()))
+            / (length * 256.0);
+    }
+    return z;
+}
+
 class LineLengthItem final : public QGraphicsSimpleTextItem
 {
 public:
@@ -1548,8 +1591,15 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
             } else {
                 const bool disableSnapping = event->modifiers().testFlag(Qt::AltModifier);
                 m_editLabel = "Create sprite";
-                m_document.addSprite(snappedPosition(
-                    event->position().toPoint(), disableSnapping));
+                const QPointF position = snappedPosition(
+                    event->position().toPoint(), disableSnapping);
+                const auto spriteId = m_document.addSprite(position);
+                if (const auto sectorId = sectorAtPosition(m_document, position)) {
+                    auto sprite = m_document.sprites()[spriteId];
+                    sprite.sectorId = sectorId;
+                    sprite.z = sectorFloorZAt(m_document, *sectorId, position);
+                    m_document.setSprite(spriteId, sprite);
+                }
                 rebuildScene();
                 reportStatus("Sprite created");
             }

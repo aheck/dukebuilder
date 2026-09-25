@@ -35,6 +35,16 @@ int main(int argc, char **argv)
                             Qt::LeftButton, Qt::NoButton, modifiers);
         QApplication::sendEvent(editor.viewport(), &release);
     };
+    const auto rightClick = [&](QPointF point) {
+        const QPoint local = editor.mapFromScene(point);
+        const QPoint global = editor.viewport()->mapToGlobal(local);
+        QMouseEvent press(QEvent::MouseButtonPress, local, global,
+                          Qt::RightButton, Qt::RightButton, Qt::NoModifier);
+        QApplication::sendEvent(editor.viewport(), &press);
+        QMouseEvent release(QEvent::MouseButtonRelease, local, global,
+                            Qt::RightButton, Qt::NoButton, Qt::NoModifier);
+        QApplication::sendEvent(editor.viewport(), &release);
+    };
     MapDocument source;
     require(source.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}}, true), "Create source room");
     source.setPlayerStartPosition({512,512});
@@ -129,4 +139,28 @@ int main(int argc, char **argv)
     require(editor.document().sprites().size() == 2, "Undo removes the pasted sprites together");
     editor.redo();
     require(editor.document().sprites().size() == 4, "Redo restores the pasted sprites");
+
+    MapDocument raisedFloorMap;
+    require(raisedFloorMap.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}}, true),
+            "Create raised-floor sprite test room");
+    auto raisedFloor = raisedFloorMap.sectors()[0];
+    raisedFloor.floorz = -2048;
+    raisedFloorMap.setSector(0, raisedFloor);
+    editor.recoverDocument(raisedFloorMap, {});
+    editor.setMode(MapEditor::Mode::Sprites);
+    rightClick({512,512});
+    require(editor.document().sprites().size() == 1
+            && editor.document().sprites()[0].z == -2048
+            && editor.document().sprites()[0].sectorId == 0,
+            "New sprites inherit the flat floor height and sector at their placement point");
+
+    raisedFloor.floorstat |= 2;
+    raisedFloor.floorheinum = 256;
+    raisedFloorMap.setSector(0, raisedFloor);
+    editor.recoverDocument(raisedFloorMap, {});
+    editor.setMode(MapEditor::Mode::Sprites);
+    rightClick({512,512});
+    require(editor.document().sprites().size() == 1
+            && editor.document().sprites()[0].z == -1536,
+            "New sprites follow the local height of a sloped floor");
 }
