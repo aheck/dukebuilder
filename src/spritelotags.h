@@ -45,7 +45,8 @@ inline SpriteLotags spriteLotags(int tile)
     case 2: case 3: case 4: case 8: case 9:
         return {"Activation channel: match the lotag of the triggering switch or touchplate. For Respawn, hitag is the tile to spawn.", {}};
     case 5:
-        return {"MusicAndSFX: sound ID, or 1000 + reverb amount (1000-1999). Hitag and sector type determine sound behavior/range; sound IDs depend on the game's CON definitions.", {}};
+        return {"MusicAndSFX: sound ID or 1000 + echo amount (0-255). Hitag and sector type determine sound behavior/range. Standard Duke 3D sounds are suggested; mods may define others.",
+                {std::begin(musicAndSfxLotags), std::end(musicAndSfxLotags)}};
     case 6:
         return {"Locator: numbered waypoint in a vehicle path, starting at 0.",
                 {{0, "First waypoint"}}};
