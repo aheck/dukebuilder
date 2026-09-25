@@ -37,6 +37,7 @@ protected:
     void keyPressEvent(QKeyEvent *event) override;
     void keyReleaseEvent(QKeyEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
@@ -54,6 +55,8 @@ private:
     };
     std::optional<SurfaceSelection> selectionFromHit(const DukeSurfaceHit &hit) const;
     std::optional<DukeSurfaceHit> hitFromSelection(const SurfaceSelection &selection) const;
+    std::vector<SurfaceSelection> connectedSurfaceGroup(const SurfaceSelection &seed) const;
+    void selectConnectedSurfaces(const SurfaceSelection &seed);
     void syncSelection();
     std::vector<SurfaceSelection> m_selection;
     std::size_t m_selectionRevision = 0;
@@ -77,6 +80,7 @@ private:
     bool m_sokol = false;
     bool m_active = false;
     bool m_captured = false;
+    bool m_doubleClickSelectionArmed = false;
     bool m_hover = true;
     QWidget *m_crosshair = nullptr;
     MapDocument m_snapshot;

@@ -37,6 +37,17 @@ static void require(bool ok, const char *message)
     if (!ok) { std::cerr << message << '\n'; std::exit(1); }
 }
 struct MapView3DTest {
+    static std::vector<std::pair<int, std::size_t>> connectedGroup(
+        MapView3D &view, const MapDocument &document, DukeSurfaceKind kind,
+        std::size_t id, bool reversed = false) {
+        const auto previous = view.m_snapshot;
+        view.m_snapshot = document;
+        const auto group = view.connectedSurfaceGroup({kind, id, reversed});
+        view.m_snapshot = previous;
+        std::vector<std::pair<int, std::size_t>> result;
+        for (const auto &entry : group) result.emplace_back(int(entry.kind), entry.id);
+        return result;
+    }
     static void selectRoomWalls(MapView3D &view) {
         view.m_selection.clear();
         const auto &sector = view.m_snapshot.sectors()[0];
@@ -77,6 +88,38 @@ int main(int argc, char **argv)
         if (auto *v = dynamic_cast<MapView3D *>(widget)) { view = v; }
     }
     require(editor && view, "view widgets");
+    {
+        MapDocument adjacent;
+        require(adjacent.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}}, true),
+                "Mass-selection source sector");
+        require(adjacent.addPolyline({{1024,256},{1536,256},{1536,768},{1024,768}}, true),
+                "Mass-selection adjacent sector");
+        auto higher = adjacent.sectors()[1];
+        higher.floorz = -1024;
+        adjacent.setSector(1, higher);
+        require(MapView3DTest::connectedGroup(*view, adjacent, DUKE_SURFACE_FLOOR, 0).size() == 1,
+                "Floor mass selection stops at a height step");
+        require(MapView3DTest::connectedGroup(*view, adjacent, DUKE_SURFACE_CEILING, 0).size() == 2,
+                "Ceiling mass selection floods connected ceilings at the same height");
+
+        MapDocument wallRoom;
+        require(wallRoom.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}}, true),
+                "Mass-selection wall room");
+        const auto &wallSector = wallRoom.sectors()[0];
+        const int wallTiles[] = {5, 5, 8, 5};
+        for (std::size_t local = 0; local < wallSector.walls.size(); ++local) {
+            const auto id = wallSector.walls[local];
+            const bool reversed = wallRoom.walls()[id].start != wallSector.vertices[local];
+            auto side = reversed ? wallRoom.walls()[id].reverseSide : wallRoom.walls()[id].forwardSide;
+            side.texture = wallTiles[local];
+            wallRoom.setWallSide(id, reversed, side);
+        }
+        const auto seedWall = wallSector.walls[0];
+        const bool seedReversed = wallRoom.walls()[seedWall].start != wallSector.vertices[0];
+        require(MapView3DTest::connectedGroup(*view, wallRoom, DUKE_SURFACE_WALL,
+                                              seedWall, seedReversed).size() == 3,
+                "Wall mass selection follows connected sides with matching textures");
+    }
     // Optional original-game fixture: exercise entry and subsequent mesh rebuilds.
     if (argc == 3) {
         MapDocument imported;

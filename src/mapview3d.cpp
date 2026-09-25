@@ -277,6 +277,9 @@ void MapView3D::keyReleaseEvent(QKeyEvent *event)
 void MapView3D::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
+        m_doubleClickSelectionArmed = m_active && m_renderer && m_captured;
+    }
+    if (event->button() == Qt::LeftButton) {
         // The first click after releasing mouse look only resumes 3D controls.
         if (m_active && m_renderer && m_captured) {
             // Resolve the clicked object before capture moves the pointer.
@@ -305,6 +308,24 @@ void MapView3D::mousePressEvent(QMouseEvent *event)
         event->accept();
     }
     if (event->button() == Qt::RightButton) { editTexture(0, false); event->accept(); }
+}
+void MapView3D::mouseDoubleClickEvent(QMouseEvent *event)
+{
+    const bool wasCaptured = m_doubleClickSelectionArmed;
+    m_doubleClickSelectionArmed = false;
+    if (event->button() == Qt::LeftButton && event->modifiers() == Qt::ShiftModifier
+        && wasCaptured && m_active && m_renderer) {
+        repaint();
+        DukeSurfaceHit hit{};
+        if (duke_renderer_get_hovered_surface(m_renderer, &hit)) {
+            if (const auto seed = selectionFromHit(hit)) {
+                selectConnectedSurfaces(*seed);
+                event->accept();
+                return;
+            }
+        }
+    }
+    QOpenGLWidget::mouseDoubleClickEvent(event);
 }
 void MapView3D::mouseMoveEvent(QMouseEvent *event)
 {
@@ -543,6 +564,110 @@ std::optional<DukeSurfaceHit> MapView3D::hitFromSelection(const SurfaceSelection
         hit.sector_index = int(selection.id);
     }
     return hit;
+}
+
+std::vector<MapView3D::SurfaceSelection> MapView3D::connectedSurfaceGroup(
+    const SurfaceSelection &seed) const
+{
+    if (seed.kind != DUKE_SURFACE_FLOOR && seed.kind != DUKE_SURFACE_CEILING
+        && seed.kind != DUKE_SURFACE_WALL) return {};
+    if ((seed.kind == DUKE_SURFACE_WALL && seed.id >= m_snapshot.walls().size())
+        || ((seed.kind == DUKE_SURFACE_FLOOR || seed.kind == DUKE_SURFACE_CEILING)
+            && seed.id >= m_snapshot.sectors().size())) return {};
+
+    std::vector<SurfaceSelection> group{seed};
+    const auto appendUnique = [&](const SurfaceSelection &candidate) {
+        if (std::find(group.begin(), group.end(), candidate) == group.end()) {
+            group.push_back(candidate);
+        }
+    };
+    const auto surfaceZ = [&](MapDocument::SectorId id, bool floor, const QPointF &point) {
+        const auto &sector = m_snapshot.sectors()[id];
+        qreal z = floor ? sector.floorz : sector.ceilingz;
+        const int flags = floor ? sector.floorstat : sector.ceilingstat;
+        const int heinum = floor ? sector.floorheinum : sector.ceilingheinum;
+        if ((flags & 2) == 0 || sector.vertices.empty()) return z;
+        const QPointF a = m_snapshot.vertices()[sector.vertices[0]].position;
+        const QPointF b = m_snapshot.vertices()[sector.vertices[sector.nextWallIndex(0)]].position;
+        const QPointF delta = b - a;
+        const qreal length = std::hypot(delta.x(), delta.y());
+        if (length > 0.0) {
+            z += heinum * (delta.x() * (point.y() - a.y())
+                           - delta.y() * (point.x() - a.x())) / (length * 256.0);
+        }
+        return z;
+    };
+    const auto surfacesMeet = [&](MapDocument::SectorId a, MapDocument::SectorId b,
+                                  bool floor, const MapDocument::Wall &wall) {
+        const QPointF start = m_snapshot.vertices()[wall.start].position;
+        const QPointF end = m_snapshot.vertices()[wall.end].position;
+        constexpr qreal heightTolerance = 1.0;
+        return std::abs(surfaceZ(a, floor, start) - surfaceZ(b, floor, start)) <= heightTolerance
+            && std::abs(surfaceZ(a, floor, end) - surfaceZ(b, floor, end)) <= heightTolerance;
+    };
+
+    for (std::size_t cursor = 0; cursor < group.size(); ++cursor) {
+        const auto current = group[cursor];
+        if (current.kind == DUKE_SURFACE_FLOOR || current.kind == DUKE_SURFACE_CEILING) {
+            const bool floor = current.kind == DUKE_SURFACE_FLOOR;
+            const auto &sector = m_snapshot.sectors()[current.id];
+            for (const auto wallId : sector.walls) {
+                if (wallId >= m_snapshot.walls().size()) continue;
+                const auto &wall = m_snapshot.walls()[wallId];
+                std::optional<MapDocument::SectorId> neighbor;
+                if (wall.forwardSector == current.id) neighbor = wall.reverseSector;
+                else if (wall.reverseSector == current.id) neighbor = wall.forwardSector;
+                if (!neighbor || *neighbor >= m_snapshot.sectors().size()
+                    || *neighbor == current.id) continue;
+                if (surfacesMeet(current.id, *neighbor, floor, wall)) {
+                    appendUnique({current.kind, *neighbor});
+                }
+            }
+            continue;
+        }
+
+        const auto &currentWall = m_snapshot.walls()[current.id];
+        const auto owner = current.reversed ? currentWall.reverseSector : currentWall.forwardSector;
+        if (!owner || *owner >= m_snapshot.sectors().size()) continue;
+        const auto &currentSide = current.reversed ? currentWall.reverseSide : currentWall.forwardSide;
+        const auto &sector = m_snapshot.sectors()[*owner];
+        for (std::size_t local = 0; local < sector.walls.size(); ++local) {
+            const auto wallId = sector.walls[local];
+            if (wallId >= m_snapshot.walls().size()) continue;
+            const auto &wall = m_snapshot.walls()[wallId];
+            const bool reversed = wall.start != sector.vertices[local];
+            const auto &side = reversed ? wall.reverseSide : wall.forwardSide;
+            if (side.texture != currentSide.texture || side.overlayTexture != currentSide.overlayTexture
+                || side.palette != currentSide.palette) continue;
+            const bool sharesEndpoint = wall.start == currentWall.start || wall.start == currentWall.end
+                || wall.end == currentWall.start || wall.end == currentWall.end;
+            if (sharesEndpoint) appendUnique({DUKE_SURFACE_WALL, wallId, reversed});
+        }
+    }
+    return group;
+}
+
+void MapView3D::selectConnectedSurfaces(const SurfaceSelection &seed)
+{
+    const auto group = connectedSurfaceGroup(seed);
+    if (group.empty()) return;
+    std::size_t added = 0;
+    for (const auto &entry : group) {
+        if (std::find(m_selection.begin(), m_selection.end(), entry) == m_selection.end()) {
+            m_selection.push_back(entry);
+            ++added;
+        }
+    }
+    if (added) {
+        ++m_selectionRevision;
+        syncSelection();
+        if (statusMessage) {
+            const QString surface = seed.kind == DUKE_SURFACE_FLOOR ? "floor"
+                : seed.kind == DUKE_SURFACE_CEILING ? "ceiling" : "wall";
+            statusMessage(QString("Added %1 connected matching %2 surface(s) to selection")
+                          .arg(added).arg(surface));
+        }
+    }
 }
 
 void MapView3D::syncSelection()
