@@ -9,6 +9,7 @@
 #include <QFocusEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QMenu>
 #include <QOpenGLContext>
 #include <QSettings>
 #include <QPainter>
@@ -307,7 +308,14 @@ void MapView3D::mousePressEvent(QMouseEvent *event)
         captureLook();
         event->accept();
     }
-    if (event->button() == Qt::RightButton) { editTexture(0, false); event->accept(); }
+    if (event->button() == Qt::RightButton) {
+        if (event->modifiers().testFlag(Qt::ControlModifier)) {
+            editTexture(0, false);
+        } else {
+            showSurfaceContextMenu(event->globalPosition().toPoint());
+        }
+        event->accept();
+    }
 }
 void MapView3D::mouseDoubleClickEvent(QMouseEvent *event)
 {
@@ -767,7 +775,63 @@ bool MapView3D::applySnapshot(MapDocument candidate)
     return true;
 }
 
-void MapView3D::editTexture(int key, bool scale)
+void MapView3D::showSurfaceContextMenu(const QPoint &globalPosition)
+{
+    if (!m_active || !m_renderer || !hasFocus()) return;
+    repaint();
+    DukeSurfaceHit hit{};
+    if (!duke_renderer_get_hovered_surface(m_renderer, &hit)) return;
+    const auto target = selectionFromHit(hit);
+    if (!target) return;
+
+    QMenu menu(this);
+    QAction *changeTexture = menu.addAction("Change Texture...\tCtrl+Right Click");
+    QAction *resetTexture = menu.addAction("Reset Texture");
+    QAction *selectCeiling = nullptr;
+    QAction *selectFloor = nullptr;
+    std::optional<std::size_t> opposingSector;
+    if (target->kind == DUKE_SURFACE_WALL) {
+        const auto &wall = m_snapshot.walls()[target->id];
+        opposingSector = target->reversed ? wall.forwardSector : wall.reverseSector;
+        menu.addSeparator();
+        selectCeiling = menu.addAction("Select Sector Ceiling");
+        selectFloor = menu.addAction("Select Sector Floor");
+        selectCeiling->setEnabled(opposingSector.has_value());
+        selectFloor->setEnabled(opposingSector.has_value());
+    }
+
+    const bool captured = m_captured;
+    m_timer.stop();
+    releaseLook();
+    QAction *chosen = menu.exec(globalPosition);
+    if (m_active) {
+        setFocus();
+        if (captured) captureLook();
+        m_clock.restart();
+        m_timer.start();
+    }
+    if (!m_active) return;
+
+    if (chosen == changeTexture) {
+        editTexture(0, false, target);
+    } else if (chosen == resetTexture) {
+        editTexture(Qt::Key_R, false, target);
+    } else if (chosen == selectCeiling || chosen == selectFloor) {
+        if (!opposingSector) return;
+        const SurfaceSelection sectorSurface{
+            chosen == selectCeiling ? DUKE_SURFACE_CEILING : DUKE_SURFACE_FLOOR,
+            *opposingSector};
+        if (*opposingSector < m_snapshot.sectors().size()) {
+            m_selection = {sectorSurface};
+            ++m_selectionRevision;
+            syncSelection();
+            m_wheelRemainder = 0;
+        }
+    }
+}
+
+void MapView3D::editTexture(int key, bool scale,
+                            const std::optional<SurfaceSelection> &forcedTarget)
 {
     if (!m_active || !m_renderer || (!m_hover && m_selection.size() < 2)) return;
     if (key == Qt::Key_V && !m_copiedTexture) return;
@@ -777,8 +841,9 @@ void MapView3D::editTexture(int key, bool scale)
     const auto hovered = hasHover ? selectionFromHit(hit) : std::optional<SurfaceSelection>{};
     // Copy samples the pointed-at texture; edits use the multi-selection.
     // Retain the existing hover behavior for single-selection texture editing.
-    auto targets = m_selection.size() > 1 && key != Qt::Key_C
-        ? m_selection : std::vector<SurfaceSelection>{};
+    auto targets = forcedTarget ? std::vector<SurfaceSelection>{*forcedTarget}
+        : m_selection.size() > 1 && key != Qt::Key_C
+            ? m_selection : std::vector<SurfaceSelection>{};
     if (targets.empty()) {
         if (!hovered) return;
         targets.push_back(*hovered);
@@ -833,11 +898,18 @@ void MapView3D::editTexture(int key, bool scale)
     const auto wrap = [](int value) { return (value + 256) % 256; };
     for (const auto &target : targets) {
         if (target.kind == DUKE_SURFACE_SPRITE) {
-            // Sprite texture choice/paste is supported; surface UV shortcuts
-            // do not reinterpret sprite dimensions or offsets.
-            if (!tile) continue;
             auto sprite = candidate.sprites()[target.id];
-            sprite.texture = *tile;
+            if (key == Qt::Key_R) {
+                sprite.xrepeat = 64;
+                sprite.yrepeat = 64;
+                sprite.xoffset = 0;
+                sprite.yoffset = 0;
+            } else {
+                // Sprite texture choice/paste is supported; surface UV shortcuts
+                // do not reinterpret sprite dimensions or offsets.
+                if (!tile) continue;
+                sprite.texture = *tile;
+            }
             candidate.setSprite(target.id, sprite);
         } else if (target.kind == DUKE_SURFACE_WALL) {
             const auto &wall = candidate.walls()[target.id];
@@ -846,6 +918,8 @@ void MapView3D::editTexture(int key, bool scale)
             else if (key == Qt::Key_R) {
                 side.xrepeat = candidate.defaultWallXRepeat(target.id);
                 side.yrepeat = 8;
+                side.xpanning = 0;
+                side.ypanning = 0;
             } else if (scale) {
                 int &repeat = horizontal ? side.xrepeat : side.yrepeat;
                 repeat = std::clamp(repeat + (enlarge ? -1 : 1), 1, 255);
@@ -855,11 +929,15 @@ void MapView3D::editTexture(int key, bool scale)
             }
             candidate.setWallSide(target.id, target.reversed, side);
         } else {
-            if (key == Qt::Key_R) continue;
             auto sector = candidate.sectors()[target.id];
             const bool floor = target.kind == DUKE_SURFACE_FLOOR;
             if (tile) (floor ? sector.floorTexture : sector.ceilingTexture) = *tile;
-            else if (scale) {
+            else if (key == Qt::Key_R) {
+                int &flags = floor ? sector.floorstat : sector.ceilingstat;
+                flags &= ~8;
+                (floor ? sector.floorxpanning : sector.ceilingxpanning) = 0;
+                (floor ? sector.floorypanning : sector.ceilingypanning) = 0;
+            } else if (scale) {
                 int &flags = floor ? sector.floorstat : sector.ceilingstat;
                 if (enlarge) flags &= ~8;
                 else flags |= 8;
@@ -872,7 +950,7 @@ void MapView3D::editTexture(int key, bool scale)
             candidate.setSector(target.id, sector);
         }
     }
-    commitSurfaceEdit(std::move(candidate), key == Qt::Key_R ? "Reset texture scale"
+    commitSurfaceEdit(std::move(candidate), key == Qt::Key_R ? "Reset texture mapping"
         : tile ? "Change texture" : scale ? "Change texture size" : "Change texture offset");
 }
 

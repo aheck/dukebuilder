@@ -704,12 +704,13 @@ int main(int argc, char **argv)
     int resetSides = 0;
     for (const auto &wall : editor->document().walls()) {
         for (const auto &side : {wall.forwardSide, wall.reverseSide}) {
-            if (side.texture == 0 && side.xpanning == 255 && side.yrepeat == 8 && side.xrepeat == 64) {
+            if (side.texture == 0 && side.xpanning == 0 && side.ypanning == 0
+                && side.yrepeat == 8 && side.xrepeat == 64) {
                 ++resetSides;
             }
         }
     }
-    require(resetSides == 1, "reset restores wall scale and preserves panning");
+    require(resetSides == 1, "reset restores wall scale and clears panning");
     {
         const auto beforeTextures = editor->document();
         selectAt(0.9);
