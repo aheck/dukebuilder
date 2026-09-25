@@ -633,7 +633,7 @@ int main(int argc, char **argv)
             }
         });
         closer.start();
-        QTest::mouseClick(view, Qt::RightButton, Qt::NoModifier, view->mapFromGlobal(QCursor::pos()));
+        QTest::mouseClick(view, Qt::RightButton, Qt::ControlModifier, view->mapFromGlobal(QCursor::pos()));
         closer.stop();
         require(opened, "right click opens existing chooser");
         if (captured) {

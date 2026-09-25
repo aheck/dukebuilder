@@ -25,7 +25,7 @@ public:
     struct WallSide {
         bool operator==(const WallSide &other) const;
         int texture = 0;
-        int overlayTexture = 0;
+        int overlayTexture = -1;
         int shade = 0;
         int palette = 0;
         int xrepeat = 8;

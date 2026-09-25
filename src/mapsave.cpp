@@ -176,7 +176,9 @@ static bool buildMap(const MapDocument &document, QString &error,
                 record.point2 = static_cast<int16_t>(out.wallptr + source.nextWallIndex(j));
                 record.nextwall = record.nextsector = -1;
                 record.picnum = tile(side.texture, wallLabel + " texture");
-                record.overpicnum = tile(side.overlayTexture, wallLabel + " overlay texture");
+                require(side.overlayTexture == -1 || (side.overlayTexture >= 0 && side.overlayTexture < 6144),
+                        wallLabel + ": overlay texture must be -1 (none) or a Duke 3D texture (0–6143).");
+                record.overpicnum = static_cast<int16_t>(side.overlayTexture);
                 record.shade = number<decltype(record.shade)>(side.shade, wallLabel + " shade");
                 record.pal = number<decltype(record.pal)>(side.palette, wallLabel + " palette");
                 record.xrepeat = number<decltype(record.xrepeat)>(side.xrepeat, wallLabel + " xrepeat");

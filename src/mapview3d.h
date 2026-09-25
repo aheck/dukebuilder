@@ -65,7 +65,8 @@ private:
     void cleanup();
     bool applySnapshot(MapDocument candidate);
     void editTexture(int key, bool scale,
-                     const std::optional<SurfaceSelection> &forcedTarget = std::nullopt);
+                     const std::optional<SurfaceSelection> &forcedTarget = std::nullopt,
+                     bool maskedTexture = false);
     void showSurfaceContextMenu(const QPoint &globalPosition);
     void alignSelectedWallTextures();
     QSize alignmentTextureSize(int tile) const;

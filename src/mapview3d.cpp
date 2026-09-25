@@ -9,6 +9,7 @@
 #include <QFocusEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QActionGroup>
 #include <QMenu>
 #include <QOpenGLContext>
 #include <QSettings>
@@ -785,14 +786,40 @@ void MapView3D::showSurfaceContextMenu(const QPoint &globalPosition)
     if (!target) return;
 
     QMenu menu(this);
+    QActionGroup maskedRenderMode(&menu);
+    maskedRenderMode.setExclusive(true);
     QAction *changeTexture = menu.addAction("Change Texture...\tCtrl+Right Click");
     QAction *resetTexture = menu.addAction("Reset Texture");
+    QAction *changeMaskedTexture = nullptr;
+    QAction *removeMaskedTexture = nullptr;
+    QAction *renderMaskedBothSides = nullptr;
+    QAction *renderMaskedThisSide = nullptr;
     QAction *selectCeiling = nullptr;
     QAction *selectFloor = nullptr;
     std::optional<std::size_t> opposingSector;
     if (target->kind == DUKE_SURFACE_WALL) {
         const auto &wall = m_snapshot.walls()[target->id];
         opposingSector = target->reversed ? wall.forwardSector : wall.reverseSector;
+        const auto &side = target->reversed ? wall.reverseSide : wall.forwardSide;
+        const bool supportsMaskedTexture = wall.isTwoSided() && !(side.cstat & 32);
+        changeMaskedTexture = menu.addAction("Change Masked Texture...");
+        changeMaskedTexture->setEnabled(supportsMaskedTexture);
+        removeMaskedTexture = menu.addAction("Remove Masked Texture");
+        removeMaskedTexture->setEnabled(supportsMaskedTexture
+            && (side.overlayTexture >= 0 || (side.cstat & 16)));
+        auto *renderMaskedMenu = menu.addMenu("Render Masked Texture From");
+        renderMaskedThisSide = renderMaskedMenu->addAction("This Side Only");
+        renderMaskedBothSides = renderMaskedMenu->addAction("Both Sides");
+        renderMaskedThisSide->setCheckable(true);
+        renderMaskedBothSides->setCheckable(true);
+        maskedRenderMode.addAction(renderMaskedThisSide);
+        maskedRenderMode.addAction(renderMaskedBothSides);
+        const auto &oppositeSide = target->reversed ? wall.forwardSide : wall.reverseSide;
+        const bool hasMaskedTexture = side.overlayTexture >= 0;
+        renderMaskedThisSide->setEnabled(supportsMaskedTexture && hasMaskedTexture);
+        renderMaskedBothSides->setEnabled(supportsMaskedTexture && hasMaskedTexture);
+        renderMaskedThisSide->setChecked((side.cstat & 16) && !(oppositeSide.cstat & 16));
+        renderMaskedBothSides->setChecked((side.cstat & 16) && (oppositeSide.cstat & 16));
         menu.addSeparator();
         selectCeiling = menu.addAction("Select Sector Ceiling");
         selectFloor = menu.addAction("Select Sector Floor");
@@ -816,6 +843,30 @@ void MapView3D::showSurfaceContextMenu(const QPoint &globalPosition)
         editTexture(0, false, target);
     } else if (chosen == resetTexture) {
         editTexture(Qt::Key_R, false, target);
+    } else if (chosen == changeMaskedTexture) {
+        editTexture(0, false, target, true);
+    } else if (chosen == removeMaskedTexture) {
+        auto candidate = m_snapshot;
+        const auto &wall = candidate.walls()[target->id];
+        auto side = target->reversed ? wall.reverseSide : wall.forwardSide;
+        side.overlayTexture = -1;
+        side.cstat &= ~16;
+        candidate.setWallSide(target->id, target->reversed, side);
+        commitSurfaceEdit(std::move(candidate), "Remove masked texture");
+    } else if (chosen == renderMaskedThisSide || chosen == renderMaskedBothSides) {
+        auto candidate = m_snapshot;
+        const auto &wall = candidate.walls()[target->id];
+        auto side = target->reversed ? wall.reverseSide : wall.forwardSide;
+        auto oppositeSide = target->reversed ? wall.forwardSide : wall.reverseSide;
+        side.cstat |= 16;
+        if (chosen == renderMaskedBothSides) {
+            oppositeSide.cstat |= 16;
+            oppositeSide.overlayTexture = side.overlayTexture;
+        } else oppositeSide.cstat &= ~16;
+        candidate.setWallSide(target->id, target->reversed, side);
+        candidate.setWallSide(target->id, !target->reversed, oppositeSide);
+        commitSurfaceEdit(std::move(candidate), chosen == renderMaskedBothSides
+            ? "Render masked texture from both sides" : "Render masked texture from this side only");
     } else if (chosen == selectCeiling || chosen == selectFloor) {
         if (!opposingSector) return;
         const SurfaceSelection sectorSurface{
@@ -831,7 +882,8 @@ void MapView3D::showSurfaceContextMenu(const QPoint &globalPosition)
 }
 
 void MapView3D::editTexture(int key, bool scale,
-                            const std::optional<SurfaceSelection> &forcedTarget)
+                            const std::optional<SurfaceSelection> &forcedTarget,
+                            bool maskedTexture)
 {
     if (!m_active || !m_renderer || (!m_hover && m_selection.size() < 2)) return;
     if (key == Qt::Key_V && !m_copiedTexture) return;
@@ -851,11 +903,12 @@ void MapView3D::editTexture(int key, bool scale,
     for (const auto &target : targets) {
         if (!hitFromSelection(target)) return;
     }
-    const auto texture = [this](const SurfaceSelection &target) {
+    const auto texture = [this, maskedTexture](const SurfaceSelection &target) {
         if (target.kind == DUKE_SURFACE_SPRITE) return m_snapshot.sprites()[target.id].texture;
         if (target.kind == DUKE_SURFACE_WALL) {
             const auto &wall = m_snapshot.walls()[target.id];
-            return (target.reversed ? wall.reverseSide : wall.forwardSide).texture;
+            const auto &side = target.reversed ? wall.reverseSide : wall.forwardSide;
+            return maskedTexture ? side.overlayTexture : side.texture;
         }
         const auto &sector = m_snapshot.sectors()[target.id];
         return target.kind == DUKE_SURFACE_FLOOR ? sector.floorTexture : sector.ceilingTexture;
@@ -914,7 +967,10 @@ void MapView3D::editTexture(int key, bool scale,
         } else if (target.kind == DUKE_SURFACE_WALL) {
             const auto &wall = candidate.walls()[target.id];
             auto side = target.reversed ? wall.reverseSide : wall.forwardSide;
-            if (tile) side.texture = *tile;
+            if (tile) {
+                (maskedTexture ? side.overlayTexture : side.texture) = *tile;
+                if (maskedTexture) side.cstat |= 16;
+            }
             else if (key == Qt::Key_R) {
                 side.xrepeat = candidate.defaultWallXRepeat(target.id);
                 side.yrepeat = 8;

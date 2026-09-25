@@ -962,7 +962,7 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
         switch (property) {
         case Property::Texture:
         case Property::OppositeTexture: side.texture = integer(0, 32767); break;
-        case Property::OverlayTexture: side.overlayTexture = integer(0, 32767); break;
+        case Property::OverlayTexture: side.overlayTexture = integer(-1, 32767); break;
         case Property::Shade: side.shade = integer(-128, 127); break;
         case Property::Palette: side.palette = integer(0, 255); break;
         case Property::XRepeat: side.xrepeat = integer(0, 255); break;

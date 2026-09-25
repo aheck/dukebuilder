@@ -316,6 +316,19 @@ int main(int argc, char **argv)
             && p.statnum == 3 && p.owner == -1 && p.xvel == -20 && p.yvel == 21 && p.zvel == -22
             && p.lotag == -32768 && p.hitag == 32767 && p.extra == -123 && p.filler == 0, "Sprite properties roundtrip");
 
+    MapDocument withoutOverlay = room();
+    auto plainSide = withoutOverlay.walls()[0].forwardSide;
+    plainSide.overlayTexture = -1;
+    plainSide.cstat &= ~16;
+    withoutOverlay.setWallSide(0, false, plainSide);
+    const QString noOverlayPath = directory.filePath("no-overlay.map");
+    require(saveBuildMap(withoutOverlay, noOverlayPath, error), error);
+    MapDocument reloadedWithoutOverlay;
+    require(reloadedWithoutOverlay.openMap(noOverlayPath, error), error);
+    require(reloadedWithoutOverlay.walls()[0].forwardSide.overlayTexture == -1
+            && !(reloadedWithoutOverlay.walls()[0].forwardSide.cstat & 16),
+            "No masked texture survives save and reload");
+
     const auto rejected = [&](const MapDocument &invalid, const QString &diagnostic) {
         require(!saveBuildMap(invalid, path, error), "Invalid map must be rejected: " + diagnostic);
         require(error.contains(diagnostic, Qt::CaseInsensitive), "Expected diagnostic " + diagnostic + ", got: " + error);

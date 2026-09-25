@@ -1667,7 +1667,8 @@ std::set<int> MapDocument::usedTextureTiles() const
     const auto addSide = [&](const WallSide &side) {
         tiles.insert(side.texture);
         // Build uses the overlay only for masked or one-way walls.
-        if (side.cstat & (16 | 32)) tiles.insert(side.overlayTexture);
+        if ((side.cstat & (16 | 32)) && side.overlayTexture >= 0)
+            tiles.insert(side.overlayTexture);
     };
     for (const auto &wall : m_walls) {
         if (wall.forwardSector) addSide(wall.forwardSide);
