@@ -174,8 +174,10 @@ as saved. New edits after undo discard the redo branch. History retains at most
   containing ordinary sprites.
 - **Alt:** temporarily disable snapping while placing or previewing a point.
 
-Drawing snaps to existing vertices before snapping to the grid. Sector fills are
-shown when a chain is closed with three or more walls.
+Drawing snaps to existing vertices first, then to nearby walls, and otherwise to
+the grid. The wall preview shows where the new connection vertex will be placed;
+click to start or finish the sector there. Sector fills are shown when a chain is
+closed with three or more walls.
 
 The Editor toolbar's **Floor textures** and **Ceiling textures** buttons tile
 the corresponding images inside sectors. **Plain fill** restores the original

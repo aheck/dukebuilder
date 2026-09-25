@@ -1470,6 +1470,9 @@ QPointF MapEditor::snappedPosition(const QPoint &viewportPosition, bool disableS
     if (disableSnapping) {
         return scenePosition;
     }
+    if (m_mode == Mode::Draw && m_splitWall) {
+        return m_splitPosition;
+    }
 
     const qreal sceneTolerance = snapRadiusPixels / std::max(std::abs(transform().m11()), 0.0001);
     qreal nearestDistance = sceneTolerance;
@@ -1786,6 +1789,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
             event->accept();
             return;
         }
+        updateSplitPreview(event->position().toPoint(), disableSnapping);
         addDrawingPoint(snappedPosition(event->position().toPoint(), disableSnapping));
         event->accept();
         return;
@@ -1809,7 +1813,7 @@ void MapEditor::clearSplitPreview()
 void MapEditor::updateSplitPreview(const QPoint &position, bool disableSnapping)
 {
     clearSplitPreview();
-    if (m_mode != Mode::Vertices) return;
+    if (m_mode != Mode::Vertices && m_mode != Mode::Draw) return;
     const QPointF cursor = mapToScene(position);
     const qreal tolerance = snapRadiusPixels / std::abs(transform().m11());
     // Existing vertices take precedence over creating another nearby vertex.
@@ -1835,7 +1839,9 @@ void MapEditor::updateSplitPreview(const QPoint &position, bool disableSnapping)
             const qreal origin = useX ? gridStart.x() : gridStart.y();
             const qreal extent = useX ? gridDelta.x() : gridDelta.y();
             const qreal grid = m_scene->gridSize();
-            t = (std::round((origin + t * extent) / grid) * grid - origin) / extent;
+            if (std::abs(extent) > 0.001) {
+                t = (std::round((origin + t * extent) / grid) * grid - origin) / extent;
+            }
         }
         if (t <= 0.0 || t >= 1.0) continue;
         const QPointF candidate = start + t * delta;

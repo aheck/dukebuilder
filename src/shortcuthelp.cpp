@@ -69,7 +69,7 @@ QString content(bool threeD)
             {"Right click / Enter", "Finish the line chain. It is retained when it forms a sector with existing walls."},
             {"Backspace", "Remove the last point from the unfinished drawing."},
             {"Escape", "Cancel the unfinished drawing."},
-            {"Alt", "Temporarily disable grid snapping while placing or moving points."}
+            {"Alt", "Temporarily disable grid and wall snapping while placing or moving points."}
         });
         html += section("Selection and geometry", {
             {"Left click / left-drag rectangle", "Select objects in the active selection mode."},
