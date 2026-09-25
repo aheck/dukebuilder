@@ -171,6 +171,10 @@ public:
     bool openMap(const QString &filename, QString &error, bool asUnsavedCopy = false);
     void setMode(Mode mode);
     void setSpritesVisible(bool visible);
+    void setGameStartDifficulty(int difficulty);
+    void setGameStartEnemiesEnabled(bool enabled);
+    [[nodiscard]] int gameStartDifficulty() const { return m_gameStartDifficulty; }
+    [[nodiscard]] bool gameStartEnemiesEnabled() const { return m_gameStartEnemiesEnabled; }
     void setGridSize(qreal size);
     void reorientGridToSelectedLine();
     void resetGridOrientation();
@@ -262,6 +266,8 @@ private:
     bool m_clickedPlayerStart = false;
     Mode m_mode = Mode::Draw;
     bool m_spritesVisible = true;
+    int m_gameStartDifficulty = 0;
+    bool m_gameStartEnemiesEnabled = true;
     bool m_wallSideReversed = false;
     SectorFill m_sectorFill = SectorFill::Plain;
     std::function<void(const QString &)> m_statusCallback;

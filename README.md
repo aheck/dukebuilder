@@ -312,8 +312,10 @@ Textures are referenced by tile number; their artwork is supplied by the game.
 Configure the executable in **Settings → EDuke32**, then use
 **Testing → Run in eDuke32** (F9) to test the current map. New or modified maps
 are saved first; canceling or failing to save stops the launch. The executable
-receives `-usecwd -nosetup -j <map directory> -map <map filename>` and runs with its own
-directory as the working directory. On Windows, select `eduke32.exe`; the launcher
+receives `-usecwd -nosetup -j <map directory> -map <map filename> -s#`, where `-s#`
+comes from the selected difficulty. **Enemies: Off** adds EDuke32's `-m` option
+before the skill option, so the no-monsters flag and selected difficulty both take
+effect. On Windows, select `eduke32.exe`; the launcher
 uses its absolute path and passes arguments directly through Qt, supporting
 spaces in both the executable and map paths without a command shell.
 

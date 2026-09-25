@@ -134,6 +134,14 @@ texturecatalog_test = executable(
 )
 test('texturecatalog', texturecatalog_test)
 
+eduke32launch_test = executable(
+  'eduke32launch-test',
+  'tests/eduke32launch_test.cpp',
+  include_directories: include_directories('src'),
+  dependencies: qt_dependencies,
+)
+test('eduke32launch', eduke32launch_test)
+
 if host_machine.system() == 'linux'
   xcb_plugin = dependency('qt6-qtQXcbIntegrationPlugin')
   # Conan omits the static GLX integration plugin from its pkg-config metadata.

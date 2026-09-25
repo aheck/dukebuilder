@@ -6,6 +6,7 @@
 #include <QTimer>
 #include "mapeditor.h"
 #include "mapview3d.h"
+#include "eduke32launch.h"
 #include <QStackedWidget>
 #include <QCursor>
 #include "settingsdialog.h"
@@ -1020,6 +1021,36 @@ MainWindow::MainWindow(QWidget *parent)
     connect(views, &QStackedWidget::currentChanged, cursorStatusLabel, [=](int) {
         cursorStatusLabel->setVisible(views->currentWidget() == editor);
     });
+
+    editorToolBar->addSeparator();
+    auto *difficultyLabel = new QLabel("Testing:", editorToolBar);
+    difficultyLabel->setContentsMargins(6, 0, 0, 0);
+    editorToolBar->addWidget(difficultyLabel);
+    auto *difficultyCombo = new QComboBox(editorToolBar);
+    difficultyCombo->setObjectName("gameStartDifficultyCombo");
+    difficultyCombo->setToolTip("Difficulty used when starting the map in eDuke32");
+    difficultyCombo->setFixedWidth(155);
+    difficultyCombo->addItem("Piece of Cake", 0);
+    difficultyCombo->addItem("Let's Rock", 1);
+    difficultyCombo->addItem("Come Get Some", 2);
+    difficultyCombo->addItem("Damn I'm Good", 3);
+    editorToolBar->addWidget(difficultyCombo);
+    connect(difficultyCombo, &QComboBox::currentIndexChanged, editor,
+            [difficultyCombo, editor](int index) {
+                editor->setGameStartDifficulty(difficultyCombo->itemData(index).toInt());
+            });
+
+    auto *enemiesCombo = new QComboBox(editorToolBar);
+    enemiesCombo->setObjectName("gameStartEnemiesCombo");
+    enemiesCombo->setToolTip("Choose whether enemies are enabled when starting the map in eDuke32");
+    enemiesCombo->setFixedWidth(122);
+    enemiesCombo->addItem("Enemies: On", true);
+    enemiesCombo->addItem("Enemies: Off", false);
+    editorToolBar->addWidget(enemiesCombo);
+    connect(enemiesCombo, &QComboBox::currentIndexChanged, editor,
+            [enemiesCombo, editor](int index) {
+                editor->setGameStartEnemiesEnabled(enemiesCombo->itemData(index).toBool());
+            });
     statusBar()->addPermanentWidget(gridSizeCombo);
 
     const auto addGridShortcut = [this, gridSizeCombo](const QString &name, int key, int step) {
@@ -1223,7 +1254,9 @@ MainWindow::MainWindow(QWidget *parent)
 #else
         process.setProgram("./" + binaryFile.fileName());
 #endif
-        process.setArguments({"-usecwd", "-nosetup", "-j", mapFile.absolutePath(), "-map", mapFile.fileName()});
+        process.setArguments(eduke32MapArguments(
+            mapFile.absolutePath(), mapFile.fileName(), editor->gameStartDifficulty(),
+            editor->gameStartEnemiesEnabled()));
 #ifdef Q_OS_WIN
         qInfo() << "Launching eDuke32:" << process.program()
                 << "arguments:" << process.arguments()

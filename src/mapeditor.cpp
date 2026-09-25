@@ -1405,6 +1405,16 @@ void MapEditor::setSpritesVisible(bool visible)
     }
 }
 
+void MapEditor::setGameStartDifficulty(int difficulty)
+{
+    m_gameStartDifficulty = std::clamp(difficulty, 0, 3);
+}
+
+void MapEditor::setGameStartEnemiesEnabled(bool enabled)
+{
+    m_gameStartEnemiesEnabled = enabled;
+}
+
 void MapEditor::setGridSize(qreal size)
 {
     clearSplitPreview();
