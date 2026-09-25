@@ -17,6 +17,33 @@ int repeat(qreal value)
 {
     return static_cast<int>(std::round(std::clamp(value, qreal(1), qreal(255))));
 }
+
+QPainterPath sectorShape(const MapDocument &document, const MapDocument::Sector &sector)
+{
+    QPainterPath path;
+    path.setFillRule(Qt::OddEvenFill);
+    for (std::size_t i = 0; i < sector.vertices.size(); ++i) {
+        const auto p = document.vertices()[sector.vertices[i]].position;
+        if (i == 0 || std::find(sector.loopStarts.begin(), sector.loopStarts.end(), i)
+                      != sector.loopStarts.end()) path.moveTo(p);
+        else path.lineTo(p);
+        if (sector.nextWallIndex(i) <= i) path.closeSubpath();
+    }
+    return path;
+}
+
+bool interiorsOverlap(const QPainterPath &a, const QPainterPath &b)
+{
+    for (const auto &polygon : a.intersected(b).toFillPolygons()) {
+        qreal area = 0;
+        for (int i = 0; i < polygon.size(); ++i) {
+            const auto p = polygon[i], q = polygon[(i + 1) % polygon.size()];
+            area += p.x() * q.y() - q.x() * p.y();
+        }
+        if (std::abs(area) > coordinateEpsilon) return true;
+    }
+    return false;
+}
 }
 
 void MapDocument::setWallSide(WallId wallId, bool reversed, const WallSide &side)
@@ -179,6 +206,7 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed, Q
     }
 
     const std::size_t segmentCount = closed ? points.size() : points.size() - 1;
+    const std::size_t existingWallCount = m_walls.size();
 
     for (std::size_t index = 0; index < segmentCount; ++index) {
         const VertexId start = vertexIds[index];
@@ -222,7 +250,9 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed, Q
     voidSides.resize(m_walls.size() * 2, false);
     rebuildSectors(std::move(voidSides));
     if (m_sectors.size() > originalSectorCount) {
-        // Inherit from the first drawn attachment belonging to this new face.
+        // Prefer the attached sector whose interior is being subdivided.
+        // A boundary vertex can also belong to its neighbors or a parent's hole.
+        // For a new room outside existing interiors, use the first attachment.
         // Use vertex identity, not coordinates, to keep independent rooms apart.
         // Existing faces retain their properties; nested unattached faces have
         // already inherited their containing sector's heights in rebuildSectors.
@@ -233,21 +263,63 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed, Q
                                                old.walls.begin(), old.walls.end());
                 });
             if (survived) continue;
-            bool inherited = false;
+            const auto shape = sectorShape(*this, sector);
+            const Sector *source = nullptr;
+            bool subdivided = false;
             for (const auto vertex : vertexIds) {
                 if (std::find(sector.vertices.begin(), sector.vertices.end(), vertex) == sector.vertices.end())
                     continue;
-                for (const auto &source : attachmentSectors) {
-                    if (std::find(source.vertices.begin(), source.vertices.end(), vertex) == source.vertices.end())
+                for (const auto &candidate : attachmentSectors) {
+                    if (std::find(candidate.vertices.begin(), candidate.vertices.end(), vertex) == candidate.vertices.end())
                         continue;
-                    sector.floorz = source.floorz;
-                    sector.ceilingz = source.ceilingz;
-                    sector.floorTexture = source.floorTexture;
-                    sector.ceilingTexture = source.ceilingTexture;
-                    inherited = true;
-                    break;
+                    if (!source) source = &candidate;
+                    if (interiorsOverlap(shape, sectorShape(*this, candidate))) {
+                        source = &candidate;
+                        subdivided = true;
+                        break;
+                    }
                 }
-                if (inherited) break;
+                if (subdivided) break;
+            }
+            if (source) {
+                sector.floorz = source->floorz;
+                sector.ceilingz = source->ceilingz;
+                sector.floorTexture = source->floorTexture;
+                sector.ceilingTexture = source->ceilingTexture;
+
+                const auto sourceId = static_cast<SectorId>(source - attachmentSectors.data());
+                for (const auto wallId : sector.walls) {
+                    if (wallId < existingWallCount) continue;
+                    auto &newWall = m_walls[wallId];
+                    const QPointF a = m_vertices[newWall.start].position;
+                    const QPointF b = m_vertices[newWall.end].position;
+                    const QPointF midpoint = (a + b) / 2.0;
+                    qreal nearestDistance = std::numeric_limits<qreal>::infinity();
+                    std::optional<int> texture;
+                    for (const auto connectedWallId : source->walls) {
+                        const auto &connectedWall = m_walls[connectedWallId];
+                        const auto start = m_vertices[connectedWall.start].position;
+                        const auto delta = m_vertices[connectedWall.end].position - start;
+                        const qreal lengthSquared = QPointF::dotProduct(delta, delta);
+                        if (lengthSquared <= 0) continue;
+                        const qreal t = std::clamp(QPointF::dotProduct(midpoint - start, delta)
+                                                   / lengthSquared, qreal(0), qreal(1));
+                        const qreal distance = QLineF(midpoint, start + t * delta).length();
+                        if (distance >= nearestDistance) continue;
+                        if (connectedWall.forwardSector == sourceId) {
+                            texture = connectedWall.forwardSide.texture;
+                        } else if (connectedWall.reverseSector == sourceId) {
+                            texture = connectedWall.reverseSide.texture;
+                        } else {
+                            continue;
+                        }
+                        nearestDistance = distance;
+                    }
+                    if (texture) {
+                        newWall.forwardSide.texture = *texture;
+                        newWall.reverseSide.texture = *texture;
+                    }
+                }
             }
         }
         return true;
@@ -267,29 +339,6 @@ bool MapDocument::addScopedPolyline(const std::vector<QPointF> &points, bool clo
     for (const auto &p : points) {
         if (!std::isfinite(p.x()) || !std::isfinite(p.y())) return fail("Invalid drawing coordinates.");
     }
-    const auto shape = [](const MapDocument &document, const Sector &sector) {
-        QPainterPath path;
-        path.setFillRule(Qt::OddEvenFill);
-        for (std::size_t i = 0; i < sector.vertices.size(); ++i) {
-            const auto p = document.m_vertices[sector.vertices[i]].position;
-            if (i == 0 || std::find(sector.loopStarts.begin(), sector.loopStarts.end(), i)
-                          != sector.loopStarts.end()) path.moveTo(p);
-            else path.lineTo(p);
-            if (sector.nextWallIndex(i) <= i) path.closeSubpath();
-        }
-        return path;
-    };
-    const auto overlaps = [](const QPainterPath &a, const QPainterPath &b) {
-        for (const auto &polygon : a.intersected(b).toFillPolygons()) {
-            qreal area = 0;
-            for (int i = 0; i < polygon.size(); ++i) {
-                const auto p = polygon[i], q = polygon[(i + 1) % polygon.size()];
-                area += p.x() * q.y() - q.x() * p.y();
-            }
-            if (std::abs(area) > coordinateEpsilon) return true;
-        }
-        return false;
-    };
     const auto onSegment = [](const QPointF &p, const QPointF &a, const QPointF &b) {
         const auto d = b - a, v = p - a;
         return std::abs(d.x() * v.y() - d.y() * v.x()) < coordinateEpsilon
@@ -303,7 +352,7 @@ bool MapDocument::addScopedPolyline(const std::vector<QPointF> &points, bool clo
     std::vector<QPainterPath> shapes;
     std::vector<bool> affected(m_sectors.size(), false);
     for (SectorId s = 0; s < m_sectors.size(); ++s) {
-        shapes.push_back(shape(*this, m_sectors[s]));
+        shapes.push_back(sectorShape(*this, m_sectors[s]));
         affected[s] = shapes.back().intersects(drawing);
     }
     const auto segmentCount = closed ? points.size() : points.size() - 1;
@@ -353,7 +402,7 @@ bool MapDocument::addScopedPolyline(const std::vector<QPointF> &points, bool clo
     for (SectorId a = 0; a < m_sectors.size(); ++a) {
         if (!affected[a]) continue;
         for (SectorId b = 0; b < m_sectors.size(); ++b) {
-            if (a != b && overlaps(shapes[a], shapes[b]))
+            if (a != b && interiorsOverlap(shapes[a], shapes[b]))
                 return fail("Drawing affects overlapping sectors. Only non-overlapping areas can be edited.");
         }
     }
@@ -420,10 +469,10 @@ bool MapDocument::addScopedPolyline(const std::vector<QPointF> &points, bool clo
     // Splits inherit their source sector's properties. Do not silently change
     // the first-wall basis of slopes or relative texture alignment.
     for (auto &sector : local.m_sectors) {
-        const auto path = shape(local, sector);
+        const auto path = sectorShape(local, sector);
         for (SectorId s = 0; s < before.m_sectors.size(); ++s) {
             const auto &source = before.m_sectors[s];
-            if (!overlaps(path, shapes[sectorIds[s]])) continue;
+            if (!interiorsOverlap(path, shapes[sectorIds[s]])) continue;
             if ((((source.floorstat & 2) && source.floorheinum)
                  || ((source.ceilingstat & 2) && source.ceilingheinum)
                  || ((source.floorstat | source.ceilingstat) & 64))
@@ -495,7 +544,7 @@ bool MapDocument::addScopedPolyline(const std::vector<QPointF> &points, bool clo
         if (!id || !affected[*id]) return;
         id.reset();
         for (SectorId s = 0; s < local.m_sectors.size(); ++s) {
-            bool contains = shape(local, local.m_sectors[s]).contains(p);
+            bool contains = sectorShape(local, local.m_sectors[s]).contains(p);
             for (auto w : local.m_sectors[s].walls) {
                 const auto &wall = local.m_walls[w];
                 contains = contains || onSegment(p, local.m_vertices[wall.start].position,

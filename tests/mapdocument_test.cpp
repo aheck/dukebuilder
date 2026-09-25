@@ -81,6 +81,32 @@ int main()
         }
     }
     {
+        MapDocument textured;
+        require(textured.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}}, true), "Textured attachment source");
+        for (std::size_t wall = 0; wall < textured.walls().size(); ++wall) {
+            auto front = textured.walls()[wall].forwardSide;
+            auto back = textured.walls()[wall].reverseSide;
+            front.texture = 100 + static_cast<int>(wall);
+            back.texture = 200 + static_cast<int>(wall);
+            textured.setWallSide(wall, false, front);
+            textured.setWallSide(wall, true, back);
+        }
+        auto closest = textured.walls()[1].forwardSide;
+        closest.texture = 701;
+        textured.setWallSide(1, false, closest);
+        require(textured.addPolyline({{1024,400},{1300,400},{1300,600},{1024,600}}, true),
+                "Draw neighboring room beside textured wall");
+        require(textured.sectors().size() == 2, "Neighboring room attaches to source sector");
+        int inheritedWalls = 0;
+        for (std::size_t wall = 6; wall < textured.walls().size(); ++wall) {
+            ++inheritedWalls;
+            require(textured.walls()[wall].forwardSide.texture == 701
+                    && textured.walls()[wall].reverseSide.texture == 701,
+                    "New boundary inherits texture from its closest connected wall");
+        }
+        require(inheritedWalls == 3, "All three new boundary walls inherit a texture");
+    }
+    {
         MapDocument attached;
         require(attached.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}}, true), "Attachment source");
         attached.setSectorFloorZ(0, -4096);
@@ -342,6 +368,34 @@ int main()
             "Collapsed triangle cleanup must preserve the neighbor's boundary");
     checkSideReferences(adjacentTriangle);
 
+    for (const auto &cut : std::vector<std::pair<std::vector<QPointF>, bool>>{
+             {{{1024,1024},{3072,3072}}, false},
+             {{{2048,1024},{2048,3072}}, false},
+             {{{1024,1024},{3072,1024},{2048,2048}}, true}}) {
+        for (bool reverse : {false, true}) {
+            MapDocument raised;
+            require(raised.addPolyline({{0,0},{4096,0},{4096,4096},{0,4096}}, true), "Raised subdivision outer room");
+            require(raised.addPolyline({{1024,1024},{3072,1024},{3072,3072},{1024,3072}}, true), "Raised subdivision inner room");
+            raised.setSectorFloorZ(1, -2048);
+            raised.setSectorCeilingZ(1, -6144);
+            raised.setSectorFloorTexture(1, 123);
+            raised.setSectorCeilingTexture(1, 456);
+            auto points = cut.first;
+            if (reverse) std::reverse(points.begin(), points.end());
+            require(raised.addPolyline(points, cut.second), "Subdivide raised inner sector");
+            require(raised.sectors().size() == 3, "Inner subdivision produces two pieces and the surrounding room");
+            require(raised.sectors()[0].floorz == 0 && raised.sectors()[0].ceilingz == -8192,
+                    "Inner subdivision preserves surrounding room heights");
+            for (std::size_t s = 1; s < raised.sectors().size(); ++s) {
+                require(raised.sectors()[s].floorz == -2048 && raised.sectors()[s].ceilingz == -6144,
+                        "Both inner pieces retain the original floor and ceiling heights");
+                require(raised.sectors()[s].floorTexture == 123 && raised.sectors()[s].ceilingTexture == 456,
+                        "Inner pieces inherit textures from the subdivided sector");
+            }
+            checkSideReferences(raised);
+        }
+    }
+
     MapDocument nestedHeights;
     require(nestedHeights.addPolyline({{0,0},{1000,0},{1000,1000},{0,1000}}, true), "Parent room");
     nestedHeights.setSectorFloorZ(0, 4096);
@@ -360,6 +414,17 @@ int main()
     require(nestedHeights.sectors()[0].floorz == 4096
             && nestedHeights.sectors()[1].floorz == 2048
             && nestedHeights.sectors()[2].ceilingz == -12288, "Rebuild preserves existing heights");
+    checkSideReferences(nestedHeights);
+
+    nestedHeights.setSectorFloorZ(2, -2048);
+    nestedHeights.setSectorCeilingZ(2, -6144);
+    require(nestedHeights.addPolyline({{200,500},{800,500}}, false), "Split raised sector nested two levels deep");
+    require(std::count_if(nestedHeights.sectors().begin(), nestedHeights.sectors().end(),
+                         [](const auto &sector) { return sector.floorz == -2048 && sector.ceilingz == -6144; }) == 2,
+            "Deeply nested subdivision preserves both inner pieces' heights");
+    require(nestedHeights.sectors()[0].floorz == 4096 && nestedHeights.sectors()[0].ceilingz == -16384
+            && nestedHeights.sectors()[1].floorz == 2048 && nestedHeights.sectors()[1].ceilingz == -12288,
+            "Deep subdivision preserves both enclosing sectors' heights");
     checkSideReferences(nestedHeights);
 
     MapDocument density;

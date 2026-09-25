@@ -206,6 +206,9 @@ and appear red; outer boundaries remain light gray. Shared vertices move both
 sides together. Hover and selection highlighting still apply to either kind of
 wall.
 
+When a drawn line splits an existing sector, both pieces keep that sector's floor
+and ceiling heights and textures. This also applies to raised inner sectors.
+
 New rooms attached to existing sector vertices inherit that sector's floor and
 ceiling heights and textures. If several sectors qualify, the first attachment point in
 drawing order chooses the source, with the lowest sector number breaking ties.

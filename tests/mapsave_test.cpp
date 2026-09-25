@@ -67,6 +67,24 @@ int main(int argc, char **argv)
     require(saveBuildMap(reopenedBox, directory.filePath("box-copy.map"), error), error);
     require(read(boxPath) == read(directory.filePath("box-copy.map")), "Box portals survive round trip");
     {
+        MapDocument subdivided = reopenedBox;
+        subdivided.setSectorCeilingZ(1, -6144);
+        require(subdivided.addPolyline({{-256,0},{256,0}}, false), "Subdivide imported raised box");
+        require(subdivided.addPolyline({{0,-256},{0,0}}, false), "Subdivide raised box a second time");
+        require(subdivided.sectors().size() == 4, "Repeated subdivision produces three inner pieces");
+        const QString subdividedPath = directory.filePath("subdivided-box.map");
+        require(saveBuildMap(subdivided, subdividedPath, error), error);
+        MapDocument loaded;
+        require(loaded.openMap(subdividedPath, error), error);
+        require(loaded.sectors().size() == 4 && loaded.sectors()[0].floorz == 0
+                && loaded.sectors()[0].ceilingz == -8192, "Subdivision preserves enclosing room after reload");
+        for (std::size_t s = 1; s < loaded.sectors().size(); ++s) {
+            require(loaded.sectors()[s].floorz == -2048 && loaded.sectors()[s].ceilingz == -6144
+                    && loaded.sectors()[s].floorTexture == 899,
+                    "All subdivided inner sectors retain heights and texture after save/reload");
+        }
+    }
+    {
         MapDocument splitBox = reopenedBox;
         const auto id = splitBox.sectors()[1].walls.front();
         const auto &wall = splitBox.walls()[id];
