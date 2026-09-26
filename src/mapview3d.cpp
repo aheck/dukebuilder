@@ -235,7 +235,15 @@ void MapView3D::updateSurfaceStatus()
 }
 void MapView3D::keyPressEvent(QKeyEvent *event)
 {
-    if (event->modifiers() == Qt::ControlModifier
+    if (event->key() == Qt::Key_PageUp || event->key() == Qt::Key_PageDown) {
+        const QPoint position = rect().center();
+        const auto modifiers = event->modifiers().testFlag(Qt::ShiftModifier)
+            ? Qt::ShiftModifier : Qt::NoModifier;
+        QWheelEvent wheel(QPointF(position), QPointF(mapToGlobal(position)), {},
+                          QPoint(0, event->key() == Qt::Key_PageUp ? 120 : -120),
+                          Qt::NoButton, modifiers, Qt::NoScrollPhase, false);
+        wheelEvent(&wheel);
+    } else if (event->modifiers() == Qt::ControlModifier
         && (event->key() == Qt::Key_C || event->key() == Qt::Key_V)) {
         if (!event->isAutoRepeat()) { editTexture(event->key(), false); }
     } else if (event->key() == Qt::Key_A && event->modifiers() == Qt::NoModifier && m_selection.size() > 1

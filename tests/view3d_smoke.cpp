@@ -398,6 +398,12 @@ int main(int argc, char **argv)
                 "Height wheel moves all selected surfaces preserving room clearance");
         editor->undo();
         require(editor->document() == batch, "Batch height is one undoable edit separate from shading");
+        QTest::keyClick(view, Qt::Key_PageUp, Qt::ShiftModifier);
+        require(editor->document().sectors()[0].floorz == batch.sectors()[0].floorz - 128
+                && editor->document().sectors()[0].ceilingz == batch.sectors()[0].ceilingz - 128,
+                "Shift+Page Up applies one fine height step to selected surfaces");
+        editor->undo();
+        require(editor->document() == batch, "Page Up height adjustment is undoable");
         wheel(0.5,120,Qt::AltModifier | Qt::ShiftModifier);
         require(editor->document().sectors()[0].floorheinum == batch.sectors()[0].floorheinum + 16
                 && editor->document().sectors()[0].ceilingheinum == batch.sectors()[0].ceilingheinum + 16,
