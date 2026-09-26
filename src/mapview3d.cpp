@@ -796,6 +796,8 @@ void MapView3D::showSurfaceContextMenu(const QPoint &globalPosition)
     QAction *renderMaskedThisSide = nullptr;
     QAction *selectCeiling = nullptr;
     QAction *selectFloor = nullptr;
+    QAction *snapCeilingToFloor = nullptr;
+    QAction *snapFloorToCeiling = nullptr;
     std::optional<std::size_t> opposingSector;
     if (target->kind == DUKE_SURFACE_WALL) {
         const auto &wall = m_snapshot.walls()[target->id];
@@ -823,8 +825,14 @@ void MapView3D::showSurfaceContextMenu(const QPoint &globalPosition)
         menu.addSeparator();
         selectCeiling = menu.addAction("Select Sector Ceiling");
         selectFloor = menu.addAction("Select Sector Floor");
-        selectCeiling->setEnabled(opposingSector.has_value());
-        selectFloor->setEnabled(opposingSector.has_value());
+        if (opposingSector && *opposingSector < m_snapshot.sectors().size()) {
+            menu.addSeparator();
+            snapCeilingToFloor = menu.addAction("Snap Ceiling to Floor");
+            snapFloorToCeiling = menu.addAction("Snap Floor to Ceiling");
+        } else {
+            selectCeiling->setEnabled(false);
+            selectFloor->setEnabled(false);
+        }
     }
 
     const bool captured = m_captured;
@@ -867,6 +875,15 @@ void MapView3D::showSurfaceContextMenu(const QPoint &globalPosition)
         candidate.setWallSide(target->id, !target->reversed, oppositeSide);
         commitSurfaceEdit(std::move(candidate), chosen == renderMaskedBothSides
             ? "Render masked texture from both sides" : "Render masked texture from this side only");
+    } else if (chosen == snapCeilingToFloor || chosen == snapFloorToCeiling) {
+        if (!opposingSector || *opposingSector >= m_snapshot.sectors().size()) return;
+        auto candidate = m_snapshot;
+        auto sector = candidate.sectors()[*opposingSector];
+        if (chosen == snapCeilingToFloor) sector.ceilingz = sector.floorz;
+        else sector.floorz = sector.ceilingz;
+        candidate.setSector(*opposingSector, sector);
+        commitSurfaceEdit(std::move(candidate), chosen == snapCeilingToFloor
+            ? "Snap opposing sector ceiling to floor" : "Snap opposing sector floor to ceiling");
     } else if (chosen == selectCeiling || chosen == selectFloor) {
         if (!opposingSector) return;
         const SurfaceSelection sectorSurface{
