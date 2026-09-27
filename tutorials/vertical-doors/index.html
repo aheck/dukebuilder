@@ -5,16 +5,94 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Vertical Doors</title>
   <style>
-    body { font: 16px sans-serif; line-height: 1.55; margin: 2em auto; max-width: 48em; padding: 0 1.5em; }
+    body { font: 16px sans-serif; line-height: 1; margin: 2em auto; max-width: 48em; padding: 0 1.5em; }
     .placeholder { border-left: 4px solid #7b9dbb; margin-top: 1.5em; padding: .8em 1em; background: #f2f5f7; }
   </style>
 </head>
 <body>
   <h1>Vertical Doors</h1>
-  <p>This tutorial will explain how to build and configure vertical doors in Duke Builder.</p>
-  <div class="placeholder">
-    <strong>Tutorial coming soon.</strong>
-    <p>Step-by-step instructions and illustrations will be added here.</p>
-  </div>
+  <p>This tutorial explains how to build vertical doors (or &quot;Doom Doors&quot;) in Duke Builder.</p>
+  <h2>Basic Layout</h2>
+  <p>First draw two rooms that are connected by three sectors. The size of the
+  rooms doesn't matter but the connection between them should be 2048 units long
+  (8 squares on a 256 grid) and each sector should have a width of 256 (or one
+  grid).</p>
+
+  <p>
+  <img src="images/layout.png" alt="Vertical door layout">
+  </p>
+
+  <p>Now enter 3D mode with <strong>q</strong> and select all ceiling surfaces
+  by holding <strong>Shift</strong> and double-clicking one of them. You can now
+  make the room bigger by scrolling up on the scroll wheel of your mouse.</p>
+
+  <h2>Making the Door</h2>
+  <p>Still in 3D mode, select the middle sector of the three passageway
+  sectors.</p>
+
+  <p>
+  <img src="images/door-sector-select.jpg" alt="Selecting the middle sector">
+  </p>
+
+  <p>Pull it down by scrolling down on the scroll wheel. Select the wall that just
+  came down and press <strong>Ctrl + Right mouse button</strong> to change its
+  texture. Choose texture <strong>150</strong>.</p>
+
+  <p>
+  <img src="images/door-texture.jpg" alt="Setting the door sector">
+  </p>
+
+  <p>Apply the same texture to the
+  other side of the door by copying it with <strong>Ctrl + C</strong>, then
+  select the other side of the door and press <strong>Ctrl + V</strong>.</p>
+
+  <p>Lower the door fully by right clicking it and selecting <strong>Snap
+      Ceiling to Floor</strong>. You can always raise it again by right clicking
+  it and selecting <strong>Select Sector Ceiling</strong>. This selects the
+  surface at the underside of the door and you can then just pull it up with the
+  mouse wheel.</p>
+
+  <p>Now go back to 2D mode by pressing <strong>Q</strong>. Then go to sector
+  mode by pressing <strong>S</strong> and select the middle sector of the
+  passageway. In the property editor on the left change the Lotag to <strong>20
+      - Ceiling door</strong>.</p>
+
+  <p>Now start the game by pressing <strong>F9</strong> and you should have a
+  functional door that slides into the ceiling when you press <strong>E</strong>.</p>
+
+  <h2>Auto-close and Door Sound</h2>
+
+  <p>The door opens but you might have noticed that it never closes and that
+  there is no typical door sound when it opens.</p>
+
+  <p>Let's fix this!</p>
+
+  <p>We need to add two sprites to the sector that represents the door.</p>
+
+  <p>First we add a sector effector sprite. Go to sprite mode by pressing
+  <strong>T</strong>. Then right click on the door sector to create a new sprite
+  and right click on this sprite to select texture number <strong>1</strong>.
+  Now go to the properties on the left side of the screen and set the Lotag to
+  <strong>10 - Automatic door closing</strong> and set the Hitag to
+  <strong>200</strong> (this is the duration until the door closes).</p>
+
+  <p>
+  <img src="images/sector-effector-properties.png" alt="Sector effector properties">
+  </p>
+
+  <p>Then create a second sprite in the door sector and set its texture to
+  number <strong>5</strong> (MUSICANDSFX)</p>
+
+  <p>
+  <img src="images/sprites.png" alt="Sprites">
+  </p>
+
+  <p>Change the Lotag of this sprite to <strong>256 - Space door (fast, soft
+      hydraulic)</strong>.</p>
+
+  <p>Start the game again with <strong>F9</strong>. This time you should hear a
+  door sound when the door opens and it should close after a short period of
+  time.</p>
+
 </body>
 </html>

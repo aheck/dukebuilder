@@ -8,6 +8,9 @@
 Q_IMPORT_PLUGIN(QXcbIntegrationPlugin)
 Q_IMPORT_PLUGIN(QXcbGlxIntegrationPlugin)
 #endif
+#ifdef DUKE_BUILDER_STATIC_JPEG_PLUGIN
+Q_IMPORT_PLUGIN(QJpegPlugin)
+#endif
 
 int main(int argc, char *argv[])
 {

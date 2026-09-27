@@ -103,7 +103,7 @@ def deploy_qt(stage, tool):
                     '--dir', str(stage), str(stage / 'dukebuilder.exe')], check=True)
     # The platform plugin is loaded dynamically and cannot be inferred just by
     # looking for linked Qt DLLs. Fail instead of distributing a broken GUI.
-    for required in ['Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'platforms/qwindows.dll']:
+    for required in ['Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'platforms/qwindows.dll', 'imageformats/qjpeg.dll']:
         if not (stage / required).is_file():
             raise ValueError(f'Qt deployment did not produce {required}. Use the matching dynamic Qt 6 Windows installation.')
 

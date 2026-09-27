@@ -94,7 +94,7 @@ class InstallerTests(unittest.TestCase):
                     payload = Path(command[command.index('--dir') + 1])
                     self.assertNotEqual(payload, stage)
                     self.assertIn('--release', command)
-                    for name in ['Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'platforms/qwindows.dll']:
+                    for name in ['Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'platforms/qwindows.dll', 'imageformats/qjpeg.dll']:
                         target = payload / name
                         target.parent.mkdir(parents=True, exist_ok=True)
                         write_pe(target)
@@ -123,6 +123,14 @@ class InstallerTests(unittest.TestCase):
                     installer.deploy_qt(stage, 'missing')
             with mock.patch.object(installer.shutil, 'which', return_value='qt-tool'), mock.patch.object(installer.subprocess, 'run') as run:
                 with self.assertRaisesRegex(ValueError, 'Qt6Core.dll'):
+                    installer.deploy_qt(stage, 'qt-tool')
+                def deploy_without_jpeg(command, check):
+                    for name in ['Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'platforms/qwindows.dll']:
+                        target = stage / name
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        write_pe(target)
+                run.side_effect = deploy_without_jpeg
+                with self.assertRaisesRegex(ValueError, 'imageformats/qjpeg.dll'):
                     installer.deploy_qt(stage, 'qt-tool')
                 run.side_effect = subprocess.CalledProcessError(1, 'qt-tool')
                 with self.assertRaises(subprocess.CalledProcessError):

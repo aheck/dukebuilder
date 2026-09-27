@@ -45,17 +45,17 @@ elif host_machine.system() == 'darwin'
 endif
 
 qt_dependencies = [qt6]
+qt_is_static = cpp.compiles('''
+  #include <QtCore/qglobal.h>
+  #ifndef QT_STATIC
+  #error Qt is not static
+  #endif
+  int main() { return 0; }
+''', dependencies: qt6, name: 'Qt is statically built')
 # Some Linux static Qt packages omit BLAKE2 from their dependency metadata.
 # Probe the actual Qt configuration and link interface rather than requiring a
 # system library on Windows, shared Qt, or correctly packaged static Qt builds.
 if host_machine.system() == 'linux'
-  qt_is_static = cpp.compiles('''
-    #include <QtCore/qglobal.h>
-    #ifndef QT_STATIC
-    #error Qt is not static
-    #endif
-    int main() { return 0; }
-  ''', dependencies: qt6, name: 'Qt is statically built')
   if qt_is_static
     qt_hash_probe = '''
       #include <QtCore/QCryptographicHash>
@@ -82,6 +82,15 @@ if host_machine.system() == 'linux'
 endif
 app_dependencies = qt_dependencies + [libduke]
 app_cpp_args = []
+image_format_dependencies = qt_dependencies
+image_format_cpp_args = []
+if qt_is_static
+  jpeg_plugin = dependency('qt6-qtQJpegPlugin', required: true)
+  app_dependencies += [jpeg_plugin]
+  app_cpp_args += '-DDUKE_BUILDER_STATIC_JPEG_PLUGIN'
+  image_format_dependencies += [jpeg_plugin]
+  image_format_cpp_args += '-DDUKE_BUILDER_STATIC_JPEG_PLUGIN'
+endif
 
 mapdocument_test = executable(
   'mapdocument-test',
@@ -233,3 +242,9 @@ test('recovery', recovery_test)
 spritelotags_test = executable('spritelotags-test', 'tests/spritelotags_test.cpp',
   include_directories: include_directories('src'))
 test('spritelotags', spritelotags_test)
+
+tutorial_resource_test = executable('tutorial-resource-test',
+  ['tests/tutorial_resource_test.cpp'] + tutorial_resources,
+  cpp_args: image_format_cpp_args,
+  dependencies: image_format_dependencies)
+test('tutorial-resource', tutorial_resource_test)

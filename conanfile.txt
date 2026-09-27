@@ -1,6 +1,9 @@
 [requires]
 qt/6.8.3
 
+[options]
+qt/*:with_libjpeg=libjpeg
+
 [generators]
 PkgConfigDeps
 MesonToolchain
