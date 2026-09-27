@@ -501,7 +501,7 @@ int main(int argc, char **argv)
         checked.setSector(0,rotated);
         checked.setVertexPositions({{1,checked.vertices()[0].position + QPointF(0.4,0)}});
         result = checkMap(checked);
-        require(!result.valid && result.target == MapCheckResult::Target::Wall && result.id == 3,
+        require(!result.valid && result.target == MapCheckResult::Target::Wall && result.id == 0,
                 QString("Map library wall index is translated to editor line after first-wall rotation: %1 (target %2, id %3)").arg(result.message).arg(int(result.target)).arg(result.id));
         result = checkMap(MapDocument{});
         require(!result.valid && result.target == MapCheckResult::Target::Map,
@@ -535,6 +535,24 @@ int main(int argc, char **argv)
         consumed = false;
         require(!withBuildMap(crossing, error, consume, BuildMapValidation::Preview) && !consumed,
                 "Preview rejects invalid references before calling the renderer");
+    }
+
+    {
+        MapDocument source;
+        require(source.addPolyline({{0,0},{1024,0},{1536,512},{1024,1024},{0,1024}}, true),
+                "Create a sector for the legacy collinear-wall fixture");
+        bool accepted = false;
+        require(withBuildMap(source, error, [&](DukeMapFile &map, QString &) {
+            const int32_t x[] = {0, 1024, 800, 1024, 1024};
+            const int32_t y[] = {0, 0, 0, 0, 1024};
+            for (int wall = 0; wall < 5; ++wall) {
+                map.walls[wall]->x = x[wall];
+                map.walls[wall]->y = y[wall];
+            }
+            accepted = duke_map_file_validate_geometry(&map);
+            return true;
+        }, BuildMapValidation::Preview), error);
+        require(accepted, "Geometry validation accepts Build-compatible collinear backtracking walls");
     }
 
     // Optional local fixtures permit checking original maps without bundling
