@@ -2,7 +2,13 @@
 
 An experimental level editor for Duke 3D built with Qt.
 
+2D mode:
+
 ![Duke Builder in 2D mode](./pics/DukeBuilder2D.png)
+
+3D mode:
+
+![Duke Builder in 3D mode](./pics/DukeBuilder3D.jpg)
 
 ## Requirements
 
