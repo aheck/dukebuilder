@@ -307,15 +307,18 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed, Q
         resolveMembership(candidate.m_playerStart);
         for (auto &sprite : candidate.m_sprites) { resolveMembership(sprite); }
         auto resolvedPoints = points;
-        if (editable && points.size() >= 2) {
+        const auto wallInScope = [&editable](const Wall &wall) {
+            return !editable || (wall.forwardSector && editable->count(*wall.forwardSector))
+                || (wall.reverseSector && editable->count(*wall.reverseSector));
+        };
+        if (points.size() >= 2) {
             resolvedPoints.clear();
             const auto segments = closed ? points.size() : points.size() - 1;
             for (std::size_t i = 0; i < segments; ++i) {
                 const auto a = points[i], b = points[(i + 1) % points.size()];
                 std::vector<std::pair<qreal, QPointF>> intersections{{0, a}};
                 for (const auto &wall : m_walls) {
-                    if (!(wall.forwardSector && editable->count(*wall.forwardSector))
-                        && !(wall.reverseSector && editable->count(*wall.reverseSector))) { continue; }
+                    if (!wallInScope(wall)) { continue; }
                     QPointF hit;
                     if (QLineF(a,b).intersects(QLineF(m_vertices[wall.start].position,
                         m_vertices[wall.end].position), &hit) == QLineF::BoundedIntersection
@@ -333,15 +336,15 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed, Q
             }
             if (!closed) { resolvedPoints.push_back(points.back()); }
         }
-        // An explicit scope resolves which coincident walls are intended. Split
-        // those boundaries on the transaction copy, including real portal peers.
-        if (editable) {
+        // Split eligible boundaries on the transaction copy, including real
+        // portal peers. Scoped preflight below still rejects ambiguous overlaps
+        // when no explicit filter resolves the intended target.
+        {
             for (const auto &point : resolvedPoints) {
                 const auto count = candidate.m_walls.size();
                 for (WallId w = 0; w < count; ++w) {
                     const auto &wall = candidate.m_walls[w];
-                    if ((wall.forwardSector && editable->count(*wall.forwardSector))
-                        || (wall.reverseSector && editable->count(*wall.reverseSector))) {
+                    if (wallInScope(wall)) {
                         (void)candidate.splitWall(w, point);
                     }
                 }

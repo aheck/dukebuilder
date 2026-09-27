@@ -172,6 +172,24 @@ int main(int argc, char **argv)
         require(saveBuildMap(scoped, scopedPath, error), error);
         require(scoped.openMap(scopedPath, error), error);
         checkProtected();
+        // With no filter, attachments inside existing walls still insert vertices
+        // automatically, even when unrelated stacked rooms make the map complex.
+        require(scoped.addPolyline({{4096,256},{4608,256},{4608,768},{4096,768}}, false, &error), error);
+        require(scoped.sectors().size() == 4 && scoped.sectors()[2].walls.size() == 6,
+                "Unfiltered attachment splits the existing wall at both endpoints");
+        bool attachedPortal = false;
+        for (const auto &wall : scoped.walls()) {
+            attachedPortal = attachedPortal || (wall.forwardSector && wall.reverseSector
+                && ((*wall.forwardSector == 2 && *wall.reverseSector == 3)
+                    || (*wall.forwardSector == 3 && *wall.reverseSector == 2)));
+        }
+        require(attachedPortal, "Unfiltered mid-wall attachment creates a portal");
+        checkProtected();
+        require(scoped.openMap(scopedPath, error), error);
+        require(scoped.addPolyline({{3000,-512},{3500,-512},{3500,512},{3000,512}}, true, &error), error);
+        require(scoped.sectors().size() > 3, "Unfiltered wall crossings insert intersection vertices");
+        checkProtected();
+        require(scoped.openMap(scopedPath, error), error);
         // Extend an ordinary room after reloading a map containing stacked rooms.
         scoped.setSectorFloorZ(2, 1024);
         scoped.setSectorCeilingZ(2, -12288);
@@ -231,7 +249,7 @@ int main(int argc, char **argv)
                  {{-900,-900},{900,-900},{900,900},{-900,900}}, // inside overlapping outer room
                  {{-2048,-2048},{1536,-2048},{1536,1536},{-2048,1536}}, // encloses stacked rooms
                  {{-256,-256},{-512,-256},{-512,-512},{-256,-512}}, // touches stacked boundary
-                 {{3000,-512},{3500,-512},{3500,512},{3000,512}}, // crosses an existing wall
+                 {{-1024,0},{-1536,0},{-1536,512},{-1024,512}}, // mid-wall attachment to overlapping room
                  {{8000,0},{9000,1024},{8000,1024},{9000,0}}}) { // self intersection
             require(!scoped.addPolyline(drawing, true, &error) && !error.isEmpty(),
                     "Unsafe drawing returns an explanation");
