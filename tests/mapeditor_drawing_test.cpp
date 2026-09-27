@@ -5,6 +5,10 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QTemporaryDir>
+#include <QInputDialog>
+#include <QTimer>
+#include <QGraphicsItem>
+#include <QSpinBox>
 #include <QtPlugin>
 #include <algorithm>
 #include <cstdlib>
@@ -163,4 +167,95 @@ int main(int argc, char **argv)
     require(editor.document().sprites().size() == 1
             && editor.document().sprites()[0].z == -1536,
             "New sprites follow the local height of a sloped floor");
+
+    MapDocument stacked = source;
+    require(stacked.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}},true,&error,
+        std::set<MapDocument::SectorId>{}), "Create independent overlapping fixture");
+    stacked.setSectorCeilingZ(1,-32768);
+    stacked.setSectorFloorZ(1,-24576);
+    editor.recoverDocument(stacked,{});
+    editor.setMode(MapEditor::Mode::Draw);
+    QString scopeStatus;
+    editor.editingScopeChanged = [&](const QString &text) { scopeStatus = text; };
+    editor.centerOn(512,512);
+    QApplication::processEvents();
+    const auto choose = [&](int index, const std::function<void()> &operation) {
+        bool prompted = false;
+        QTimer timer;
+        QObject::connect(&timer,&QTimer::timeout,[&] {
+            auto *dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
+            if (!dialog) { return; }
+            prompted = true;
+            if (index < 0) { dialog->reject(); }
+            else {
+                require(index < dialog->comboBoxItems().size(), "Target choice exists");
+                dialog->setTextValue(dialog->comboBoxItems()[index]);
+                dialog->accept();
+            }
+        });
+        timer.start(1);
+        operation();
+        timer.stop();
+        require(prompted,"Ambiguous target prompts instead of guessing");
+    };
+    choose(-1,[&] { click({512,0}); });
+    require(editor.document() == stacked && editor.drawingPoints().empty(), "Cancelled target chooser changes nothing");
+    choose(0,[&] { click({512,0}); });
+    click({512,1024});
+    require(editor.document().sectors().size() == 3 && editor.document().sectors()[1] == stacked.sectors()[1],
+        "Scoped UI drawing splits lower room only");
+    for (auto w : stacked.sectors()[1].walls) { require(editor.document().walls()[w] == stacked.walls()[w], "UI drawing preserves upper wall"); }
+    require(editor.undoStack()->count() == 1, "Scoped drawing and boundary splits form one undo command");
+    const auto split = editor.document();
+    editor.undo();
+    require(editor.document() == stacked && scopeStatus == "1 editable sector(s)","Undo restores independent overlapping topology and scope");
+    editor.redo();
+    require(editor.document() == split && scopeStatus == "2 editable sector(s)","Redo restores only intended edit and both child sectors in scope");
+
+    editor.recoverDocument(stacked,{});
+    editor.setMode(MapEditor::Mode::Vertices);
+    bool heightPrompted = false;
+    QTimer heightTimer;
+    QObject::connect(&heightTimer,&QTimer::timeout,[&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        if (!dialog || !dialog->windowTitle().startsWith("Editable height")) { return; }
+        auto fields = dialog->findChildren<QSpinBox *>();
+        require(fields.size() == 2,"Height range fields exist");
+        fields[0]->setValue(-32768);
+        fields[1]->setValue(-24576);
+        heightPrompted = true;
+        dialog->accept();
+    });
+    heightTimer.start(1);
+    editor.filterEditingHeight();
+    heightTimer.stop();
+    require(heightPrompted && editor.document() == stacked && editor.undoStack()->count() == 0,
+        "Height filtering is view state, not a map edit");
+    click({0,0});
+    require(editor.scene()->selectedItems().size() == 1,"Scope makes coincident vertex selection unambiguous");
+    const auto drag = [&](QPointF from, QPointF to) {
+        const QPoint start = editor.mapFromScene(from), end = editor.mapFromScene(to);
+        QMouseEvent press(QEvent::MouseButtonPress,start,editor.viewport()->mapToGlobal(start),Qt::RightButton,Qt::RightButton,Qt::NoModifier);
+        QApplication::sendEvent(editor.viewport(),&press);
+        QMouseEvent move(QEvent::MouseMove,end,editor.viewport()->mapToGlobal(end),Qt::NoButton,Qt::RightButton,Qt::NoModifier);
+        QApplication::sendEvent(editor.viewport(),&move);
+        QMouseEvent release(QEvent::MouseButtonRelease,end,editor.viewport()->mapToGlobal(end),Qt::RightButton,Qt::NoButton,Qt::NoModifier);
+        QApplication::sendEvent(editor.viewport(),&release);
+    };
+    drag({0,0},{-256,0});
+    require(editor.document().sectors()[0] == stacked.sectors()[0], "Dragging upper geometry keeps lower boundary");
+    for (auto v : stacked.sectors()[0].vertices) { require(editor.document().vertices()[v] == stacked.vertices()[v],"Dragging upper vertex leaves coincident lower vertex unchanged"); }
+    require(!(editor.document() == stacked),"Intended upper vertex moved");
+    editor.undo();
+    require(editor.document() == stacked,"Vertex move undo restores map");
+    require(editor.setEditingScope(std::set<MapDocument::SectorId>{1}),"Restore upper editing scope");
+    click({0,0});
+    drag({0,0},{1024,1024});
+    require(editor.document() == stacked,"Invalid collapsing drag is rolled back instead of deleting geometry");
+    editor.recoverDocument(stacked,{});
+    editor.setMode(MapEditor::Mode::Sprites);
+    choose(1,[&] { rightClick({768,768}); });
+    require(editor.document().sprites().size() == 1 && editor.document().sprites()[0].sectorId == 1
+        && editor.document().sprites()[0].z == -24576,"Sprite placement resolves overlapping sector and inherits its floor");
+    editor.editingScopeChanged = {};
 }

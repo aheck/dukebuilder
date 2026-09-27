@@ -50,6 +50,50 @@ void checkSideReferences(const MapDocument &document)
 
 int main()
 {
+    {
+        MapDocument stacked;
+        QString error;
+        const std::vector<QPointF> outline{{0,0},{1024,0},{1024,1024},{0,1024}};
+        require(stacked.addPolyline(outline,true), "Create lower room");
+        stacked.setPlayerStartPosition({256,256});
+        require(stacked.addPolyline(outline,true,&error,std::set<MapDocument::SectorId>{}), "Create independent coincident room");
+        stacked.setSectorCeilingZ(1,-16384);
+        stacked.setSectorFloorZ(1,-12288);
+        require(stacked.sectorsAt({512,512}).size() == 2, "Picking reports both overlapping sectors");
+        require(stacked.vertices().size() == 8 && stacked.walls().size() == 8, "Independent drawing does not weld coincident geometry");
+        auto sprite = MapDocument::Sprite{};
+        sprite.position = {256,512}; sprite.z = -14000; sprite.texture = 1; sprite.sectorId = 1;
+        const auto spriteId = stacked.addSprite(sprite.position);
+        stacked.setSprite(spriteId,sprite);
+        const auto before = stacked;
+        require(!stacked.addPolyline({{512,0},{512,1024}},false,&error) && stacked == before,
+            "Unfiltered ambiguous split fails transactionally");
+        require(!stacked.addPolyline({{512,0},{512,1024}},false,&error,std::set<MapDocument::SectorId>{0,1}) && stacked == before,
+            "An ambiguous filter cannot merge independent rooms");
+        require(stacked.addPolyline({{512,0},{512,1024}},false,&error,std::set<MapDocument::SectorId>{0}), "Split only lower room");
+        require(stacked.sectors().size() == 3 && stacked.sectors()[1] == before.sectors()[1], "Upper room boundary and properties unchanged");
+        for (auto w : before.sectors()[1].walls) { require(stacked.walls()[w] == before.walls()[w], "Upper walls unchanged"); }
+        for (auto v : before.sectors()[1].vertices) { require(stacked.vertices()[v] == before.vertices()[v], "Upper vertices unchanged"); }
+        require(stacked.sprites()[spriteId] == before.sprites()[spriteId], "Upper sprite membership unchanged");
+        checkSideReferences(stacked);
+        const auto split = stacked;
+        require(!stacked.addPolyline({{100,100},{900,900},{100,900},{900,100}},true,&error,std::set<MapDocument::SectorId>{0})
+            && stacked == split, "Invalid drawing rolls back inserted boundary points too");
+        require(!stacked.addPolyline(outline,true,&error,std::set<MapDocument::SectorId>{999}) && stacked == split, "Stale scope is rejected");
+
+        MapDocument portal;
+        require(portal.addPolyline(outline,true), "Portal source");
+        require(portal.addPolyline({{1024,0},{2048,0},{2048,1024},{1024,1024}},true), "Portal neighbor");
+        require(portal.addPolyline(outline,true,&error,std::set<MapDocument::SectorId>{}), "Independent room over portal source");
+        const auto protectedSector = portal.sectors()[2];
+        const auto protectedWalls = portal.walls();
+        const auto neighborCount = portal.sectors()[1].walls.size();
+        require(portal.addPolyline({{512,0},{1024,512}},false,&error,std::set<MapDocument::SectorId>{0}), "Split attached to a real portal midpoint");
+        require(portal.sectors()[1].walls.size() == neighborCount + 1, "Real portal counterpart is split consistently even outside filter");
+        require(portal.sectors()[2] == protectedSector, "Independent overlapping room is not a portal counterpart");
+        for (auto w : protectedSector.walls) { require(portal.walls()[w] == protectedWalls[w], "Portal edit preserves independent wall"); }
+        checkSideReferences(portal);
+    }
     for (bool closed : {false, true}) {
         for (bool subdivided : {false, true}) {
             MapDocument attached;
@@ -295,13 +339,15 @@ int main()
             && document.sectors()[2].walls == neighborWalls, "Rejected geometry must preserve numbers");
     checkSideReferences(document);
 
-    // Removing a face through degenerate geometry compacts surviving indices.
+    // Moving geometry must never silently delete a sector or rebuild its neighbors.
+    const auto beforeCollapse = document;
     std::vector<std::pair<MapDocument::VertexId, QPointF>> collapsed;
     for (const auto vertex : document.sectors()[1].vertices) collapsed.push_back({vertex, {300, 0}});
     document.setVertexPositions(collapsed);
-    require(document.sectors().size() == 2, "Collapsed sector should disappear");
-    require(document.sectors()[0].walls == first.walls
-            && document.sectors()[1].walls == neighborWalls, "Surviving sectors must compact in order");
+    require(document.sectors().size() == beforeCollapse.sectors().size(), "Moving coordinates retains explicit sectors");
+    QString collapseError;
+    require(!document.validateTopologyChange(beforeCollapse, collapseError), "Reject collapsing a sector before committing the edit");
+    document = beforeCollapse;
     checkSideReferences(document);
 
     MapDocument deletion;

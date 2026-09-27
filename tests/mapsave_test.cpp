@@ -130,6 +130,22 @@ int main(int argc, char **argv)
     require(!legacy.supportsTopologyEditing() && legacy.supportsLineDeletion(),
             "Overlapping single-loop sectors support local deletion without rebuilding faces");
     {
+        auto editable = legacy;
+        editable.setSectorCeilingZ(1,-16384);
+        editable.setSectorFloorZ(1,-12288);
+        const auto before = editable;
+        require(editable.addPolyline({{-256,0},{256,0}},false,&error,std::set<MapDocument::SectorId>{1}), error);
+        require(editable.sectors().size() == 3 && editable.sectors()[0] == before.sectors()[0], "Split overlapping upper sector without touching lower sector");
+        for (auto w : before.sectors()[0].walls) { require(editable.walls()[w] == before.walls()[w], "Lower walls survive upper edit"); }
+        const auto editedPath = directory.filePath("edited-overlap.map");
+        require(saveBuildMap(editable,editedPath,error),error);
+        MapDocument reopened;
+        require(reopened.openMap(editedPath,error),error);
+        require(reopened.sectors().size() == 3, "Overlapping edit reloads");
+        const auto saved = read(editedPath);
+        require(saveBuildMap(reopened,editedPath,error) && read(editedPath) == saved, "Edited overlapping topology roundtrips exactly");
+    }
+    {
         MapDocument scoped = legacy;
         scoped.setSectorCeilingZ(1, -16384);
         scoped.setSectorFloorZ(1, -12288);

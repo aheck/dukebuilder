@@ -88,6 +88,13 @@ QString content(bool threeD)
             {"O", "Stick one selected sprite to the nearest wall of its sector. Requires Sprites mode; preserves height and tags."},
             {"Player-start arrow", "Select and right-drag in Sprites mode. It has no selectable texture."}
         });
+        html += section("Overlapping geometry", {
+            {"Ambiguous click", "Choose the intended object instead of selecting an arbitrary overlapping object. Cancel leaves the map unchanged."},
+            {"Tools → Isolate selected sectors", "Limit picking, snapping, and drawing to selected sectors; other geometry is gray."},
+            {"Tools → Edit height range", "Filter editable sectors by Build Z, including slopes. An ambiguous range still cannot merge independent rooms."},
+            {"Tools → Show all sectors", "Reset the editing filter. The status bar shows the current scope."},
+            {"Tools → Draw independent sector", "Draw a separate room without attaching to existing walls, even at identical coordinates."}
+        });
     }
     html += section("Files, history, and help", {
         {standard(QKeySequence::New), "New map."}, {standard(QKeySequence::Open), "Open map."},

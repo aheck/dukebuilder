@@ -178,10 +178,185 @@ MapDocument::VertexId MapDocument::findOrAddVertex(const QPointF &position)
     return m_vertices.size() - 1;
 }
 
-bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed, QString *error)
+std::vector<MapDocument::SectorId> MapDocument::sectorsAt(const QPointF &position) const
+{
+    std::vector<SectorId> result;
+    for (SectorId s = 0; s < m_sectors.size(); ++s) {
+        bool contains = sectorShape(*this, m_sectors[s]).contains(position);
+        for (const auto id : m_sectors[s].walls) {
+            const auto &wall = m_walls[id];
+            const auto a = m_vertices[wall.start].position, b = m_vertices[wall.end].position;
+            const auto d = b - a, p = position - a;
+            contains |= QPointF::dotProduct(position - a, position - b) <= 0
+                && std::abs(d.x()*p.y() - d.y()*p.x()) <= coordinateEpsilon;
+        }
+        if (contains) { result.push_back(s); }
+    }
+    return result;
+}
+
+bool MapDocument::validateTopologyChange(const MapDocument &before, QString &error) const
+{
+    const auto fail = [&](const QString &why) { error = why; return false; };
+    for (SectorId s = 0; s < m_sectors.size(); ++s) {
+        const auto &sector = m_sectors[s];
+        if (sector.walls.size() != sector.vertices.size() || sector.walls.empty()) {
+            return fail("A sector boundary is incomplete.");
+        }
+        std::vector<QPointF> points;
+        for (std::size_t i = 0; i < sector.walls.size(); ++i) {
+            const auto w = sector.walls[i], v = sector.vertices[i];
+            if (w >= m_walls.size() || v >= m_vertices.size() || sector.nextWallIndex(i) >= sector.vertices.size()) {
+                return fail("A sector boundary contains an invalid reference.");
+            }
+            const auto &wall = m_walls[w];
+            const auto end = sector.vertices[sector.nextWallIndex(i)];
+            const bool forward = wall.start == v && wall.end == end;
+            const bool reverse = wall.end == v && wall.start == end;
+            if ((!forward && !reverse) || (forward ? wall.forwardSector : wall.reverseSector) != s) {
+                return fail("The edit would break a wall's sector connection.");
+            }
+            points.push_back(m_vertices[v].position);
+        }
+        const auto sameBoundary = [&](const Sector &old) {
+            if (old.vertices.size() != points.size() || old.loopStarts != sector.loopStarts) { return false; }
+            for (std::size_t i = 0; i < points.size(); ++i) {
+                if (before.m_vertices[old.vertices[i]].position != points[i]) { return false; }
+            }
+            return true;
+        };
+        const bool unchanged = (s < before.m_sectors.size() && sameBoundary(before.m_sectors[s]))
+            || std::any_of(before.m_sectors.begin(), before.m_sectors.end(), sameBoundary);
+        if (unchanged) { continue; }
+        auto loops = sector.loopStarts;
+        if (loops.empty()) { loops.push_back(0); }
+        if (loops.front() != 0) { return fail("A sector has an invalid first loop."); }
+        loops.push_back(points.size());
+        for (std::size_t loop = 0; loop + 1 < loops.size(); ++loop) {
+            const auto first = loops[loop], last = loops[loop + 1];
+            if (last <= first + 2 || last > points.size()) { return fail("An edited loop must have at least three walls."); }
+            double area = 0;
+            for (auto i = first; i < last; ++i) {
+                const auto a = points[i], b = points[sector.nextWallIndex(i)];
+                if (!std::isfinite(a.x()) || !std::isfinite(a.y()) || QLineF(a,b).length() < coordinateEpsilon) {
+                    return fail("The edit would create an invalid or zero-length wall.");
+                }
+                area += a.x()*b.y() - b.x()*a.y();
+            }
+            if ((loop == 0 && area <= coordinateEpsilon) || (loop != 0 && area >= -coordinateEpsilon)) {
+                return fail("The edit would collapse or reverse a sector loop.");
+            }
+        }
+        for (std::size_t i = 0; i < points.size(); ++i) {
+            const auto a = points[i], b = points[sector.nextWallIndex(i)];
+            for (std::size_t j = i + 1; j < points.size(); ++j) {
+                const auto c = points[j], d = points[sector.nextWallIndex(j)];
+                if ((a == c && b == d) || (a == d && b == c)) {
+                    return fail("The edit would retrace a sector wall.");
+                }
+                QPointF intersection;
+                const bool adjacent = sector.nextWallIndex(i) == j || sector.nextWallIndex(j) == i;
+                if (QLineF(a,b).intersects(QLineF(c,d), &intersection) == QLineF::BoundedIntersection && !adjacent) {
+                    return fail("The edit would make a sector boundary cross itself or another of its loops.");
+                }
+                const auto inside = [](QPointF p, QPointF x, QPointF y) {
+                    const auto u = y-x, v = p-x;
+                    return std::abs(u.x()*v.y()-u.y()*v.x()) < coordinateEpsilon
+                        && QPointF::dotProduct(p-x,p-y) < -coordinateEpsilon;
+                };
+                if (inside(c,a,b) || inside(d,a,b) || inside(a,c,d) || inside(b,c,d)) {
+                    return fail("The edit would make walls within a sector overlap.");
+                }
+            }
+        }
+        const auto outerEnd = loops[1];
+        QPainterPath outer(points.front());
+        for (std::size_t i = 1; i < outerEnd; ++i) { outer.lineTo(points[i]); }
+        outer.closeSubpath();
+        std::vector<QPainterPath> holes;
+        for (std::size_t loop = 1; loop + 1 < loops.size(); ++loop) {
+            if (!outer.contains(points[loops[loop]])) { return fail("An inner loop would leave its owning sector."); }
+            QPainterPath hole(points[loops[loop]]);
+            for (auto i = loops[loop] + 1; i < loops[loop + 1]; ++i) { hole.lineTo(points[i]); }
+            hole.closeSubpath();
+            for (const auto &other : holes) {
+                if (interiorsOverlap(hole, other)) { return fail("Inner loops within a sector would overlap."); }
+            }
+            holes.push_back(hole);
+        }
+    }
+    return true;
+}
+
+bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed, QString *error,
+                              const std::optional<std::set<SectorId>> &editable)
 {
     if (error) error->clear();
-    if (m_complexTopology) return addScopedPolyline(points, closed, error);
+    if (editable || m_complexTopology) {
+        if (editable && std::any_of(editable->begin(), editable->end(), [this](auto id) { return id >= m_sectors.size(); })) {
+            if (error) { *error = "The editing scope is stale. Choose the sectors again."; }
+            return false;
+        }
+        auto candidate = *this;
+        const auto resolveMembership = [this](auto &member) {
+            if (!member.sectorId) {
+                const auto owners = sectorsAt(member.position);
+                if (owners.size() == 1) { member.sectorId = owners.front(); }
+            }
+        };
+        resolveMembership(candidate.m_playerStart);
+        for (auto &sprite : candidate.m_sprites) { resolveMembership(sprite); }
+        auto resolvedPoints = points;
+        if (editable && points.size() >= 2) {
+            resolvedPoints.clear();
+            const auto segments = closed ? points.size() : points.size() - 1;
+            for (std::size_t i = 0; i < segments; ++i) {
+                const auto a = points[i], b = points[(i + 1) % points.size()];
+                std::vector<std::pair<qreal, QPointF>> intersections{{0, a}};
+                for (const auto &wall : m_walls) {
+                    if (!(wall.forwardSector && editable->count(*wall.forwardSector))
+                        && !(wall.reverseSector && editable->count(*wall.reverseSector))) { continue; }
+                    QPointF hit;
+                    if (QLineF(a,b).intersects(QLineF(m_vertices[wall.start].position,
+                        m_vertices[wall.end].position), &hit) == QLineF::BoundedIntersection
+                        && QLineF(hit,a).length() > coordinateEpsilon && QLineF(hit,b).length() > coordinateEpsilon) {
+                        intersections.emplace_back(QLineF(a,hit).length(), hit);
+                    }
+                }
+                std::sort(intersections.begin(), intersections.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
+                for (const auto &[distance, point] : intersections) {
+                    Q_UNUSED(distance);
+                    if (resolvedPoints.empty() || QLineF(resolvedPoints.back(), point).length() > coordinateEpsilon) {
+                        resolvedPoints.push_back(point);
+                    }
+                }
+            }
+            if (!closed) { resolvedPoints.push_back(points.back()); }
+        }
+        // An explicit scope resolves which coincident walls are intended. Split
+        // those boundaries on the transaction copy, including real portal peers.
+        if (editable) {
+            for (const auto &point : resolvedPoints) {
+                const auto count = candidate.m_walls.size();
+                for (WallId w = 0; w < count; ++w) {
+                    const auto &wall = candidate.m_walls[w];
+                    if ((wall.forwardSector && editable->count(*wall.forwardSector))
+                        || (wall.reverseSector && editable->count(*wall.reverseSector))) {
+                        (void)candidate.splitWall(w, point);
+                    }
+                }
+            }
+        }
+        if (!candidate.addScopedPolyline(resolvedPoints, closed, error, editable)) { return false; }
+        QString validationError;
+        if (!candidate.validateTopologyChange(*this, validationError)) {
+            if (error) { *error = validationError; }
+            return false;
+        }
+        candidate.m_complexTopology = true;
+        *this = std::move(candidate);
+        return true;
+    }
     if (points.size() < 2) {
         return false;
     }
@@ -329,7 +504,8 @@ bool MapDocument::addPolyline(const std::vector<QPointF> &points, bool closed, Q
     return false;
 }
 
-bool MapDocument::addScopedPolyline(const std::vector<QPointF> &points, bool closed, QString *error)
+bool MapDocument::addScopedPolyline(const std::vector<QPointF> &points, bool closed, QString *error,
+                                    const std::optional<std::set<SectorId>> &editable)
 {
     const auto fail = [&](const QString &message) {
         if (error) *error = message;
@@ -353,7 +529,7 @@ bool MapDocument::addScopedPolyline(const std::vector<QPointF> &points, bool clo
     std::vector<bool> affected(m_sectors.size(), false);
     for (SectorId s = 0; s < m_sectors.size(); ++s) {
         shapes.push_back(sectorShape(*this, m_sectors[s]));
-        affected[s] = shapes.back().intersects(drawing);
+        affected[s] = (!editable || editable->count(s)) && shapes.back().intersects(drawing);
     }
     const auto segmentCount = closed ? points.size() : points.size() - 1;
     for (std::size_t i = 0; i < segmentCount; ++i) {
@@ -377,6 +553,8 @@ bool MapDocument::addScopedPolyline(const std::vector<QPointF> &points, bool clo
     // Include every touched boundary, including collinear edges and endpoints.
     // The face builder requires explicit vertices at intersections.
     for (const auto &wall : m_walls) {
+        if (editable && !(wall.forwardSector && editable->count(*wall.forwardSector))
+            && !(wall.reverseSector && editable->count(*wall.reverseSector))) { continue; }
         const auto a = m_vertices[wall.start].position, b = m_vertices[wall.end].position;
         for (std::size_t i = 0; i < segmentCount; ++i) {
             const auto p = points[i], q = points[(i + 1) % points.size()];
@@ -388,8 +566,8 @@ bool MapDocument::addScopedPolyline(const std::vector<QPointF> &points, bool clo
             if (!touches) continue;
             if (!wall.forwardSector && !wall.reverseSector)
                 return fail("Drawing touches an unsupported loose wall.");
-            if (wall.forwardSector) affected[*wall.forwardSector] = true;
-            if (wall.reverseSector) affected[*wall.reverseSector] = true;
+            if (wall.forwardSector && (!editable || editable->count(*wall.forwardSector))) affected[*wall.forwardSector] = true;
+            if (wall.reverseSector && (!editable || editable->count(*wall.reverseSector))) affected[*wall.reverseSector] = true;
             if ((crosses && ((intersection != a && intersection != b)
                              || (intersection != p && intersection != q)))
                 || (onSegment(p, a, b) && p != a && p != b)
@@ -402,8 +580,8 @@ bool MapDocument::addScopedPolyline(const std::vector<QPointF> &points, bool clo
     for (SectorId a = 0; a < m_sectors.size(); ++a) {
         if (!affected[a]) continue;
         for (SectorId b = 0; b < m_sectors.size(); ++b) {
-            if (a != b && interiorsOverlap(shapes[a], shapes[b]))
-                return fail("Drawing affects overlapping sectors. Only non-overlapping areas can be edited.");
+            if (a != b && (!editable || affected[b]) && interiorsOverlap(shapes[a], shapes[b]))
+                return fail("Drawing affects overlapping sectors. Choose an editing scope to resolve the target.");
         }
     }
 
@@ -1177,7 +1355,29 @@ void MapDocument::setVertexPositions(
             wall.reverseSide.xrepeat = resized(old.reverseSide.xrepeat);
         }
     }
-    if (!m_complexTopology) rebuildSectors();
+    // Moving coordinates must not infer new connections or reconstruct faces.
+    // Imported loops and independent coincident vertices remain authoritative.
+    if (!m_complexTopology) {
+        std::set<std::pair<qreal,qreal>> positions;
+        for (const auto &vertex : m_vertices) {
+            if (!std::isfinite(vertex.position.x()) || !std::isfinite(vertex.position.y())
+                || !positions.emplace(vertex.position.x(),vertex.position.y()).second) {
+                m_complexTopology = true;
+                break;
+            }
+        }
+    }
+    if (!m_complexTopology) {
+        std::vector<QPainterPath> shapes;
+        for (const auto &sector : m_sectors) {
+            const auto shape = sectorShape(*this, sector);
+            for (const auto &other : shapes) {
+                if (interiorsOverlap(shape, other)) { m_complexTopology = true; break; }
+            }
+            if (m_complexTopology) { break; }
+            shapes.push_back(shape);
+        }
+    }
 }
 
 int MapDocument::defaultWallXRepeat(WallId id) const

@@ -1,4 +1,8 @@
 #include "mapeditor.h"
+#include <QInputDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
+#include <QSpinBox>
 #include "mapsave.h"
 
 #include <QApplication>
@@ -48,10 +52,12 @@ const QColor selectedColor(255, 110, 92);
 const QColor sectorColor(50, 116, 158, 38);
 
 std::optional<MapDocument::SectorId> sectorAtPosition(
-    const MapDocument &document, const QPointF &position)
+    const MapDocument &document, const QPointF &position,
+    const std::optional<std::set<MapDocument::SectorId>> &scope = std::nullopt)
 {
     std::optional<MapDocument::SectorId> found;
     for (MapDocument::SectorId id = 0; id < document.sectors().size(); ++id) {
+        if (scope && !scope->count(id)) { continue; }
         const auto &sector = document.sectors()[id];
         QPainterPath path;
         path.setFillRule(Qt::OddEvenFill);
@@ -73,17 +79,17 @@ std::optional<MapDocument::SectorId> sectorAtPosition(
 }
 
 qreal sectorFloorZAt(const MapDocument &document, MapDocument::SectorId id,
-                     const QPointF &position)
+                     const QPointF &position, bool floor = true)
 {
     const auto &sector = document.sectors()[id];
-    qreal z = sector.floorz;
-    if ((sector.floorstat & 2) == 0 || sector.vertices.empty()) return z;
+    qreal z = floor ? sector.floorz : sector.ceilingz;
+    if (((floor ? sector.floorstat : sector.ceilingstat) & 2) == 0 || sector.vertices.empty()) return z;
     const QPointF a = document.vertices()[sector.vertices[0]].position;
     const QPointF b = document.vertices()[sector.vertices[sector.nextWallIndex(0)]].position;
     const QPointF delta = b - a;
     const qreal length = std::hypot(delta.x(), delta.y());
     if (length > 0.0) {
-        z += sector.floorheinum
+        z += (floor ? sector.floorheinum : sector.ceilingheinum)
             * (delta.x() * (position.y() - a.y()) - delta.y() * (position.x() - a.x()))
             / (length * 256.0);
     }
@@ -602,6 +608,7 @@ private:
 MapEditor::Selection MapEditor::selection() const
 {
     Selection result{{}, m_sectorSelectionOrder, m_mode, m_wallSideReversed};
+    result.editingScope = m_editingScope;
     for (auto *item : m_scene->selectedItems()) {
         int role = dynamic_cast<VertexItem *>(item) ? vertexIdRole
             : dynamic_cast<WallItem *>(item) ? wallIdRole
@@ -619,6 +626,8 @@ void MapEditor::restore(const Snapshot &snapshot)
     m_draggedVertices.clear(); m_draggedWalls.clear(); m_draggedSectors.clear();
     m_draggedSprites.clear();
     m_document = snapshot.document;
+    m_editingScope = snapshot.selection.editingScope;
+    rememberScopeTopology();
     m_wallSideReversed = snapshot.selection.reversed;
     for (const auto &sprite : m_document.sprites()) {
         const int key = sprite.texture * 256 + sprite.palette;
@@ -657,6 +666,12 @@ void MapEditor::endEdit()
     auto before = std::move(*m_beforeEdit);
     m_beforeEdit.reset();
     if (before.document == m_document) return;
+    QString topologyError;
+    if (!m_document.validateTopologyChange(before.document, topologyError)) {
+        restore(before);
+        reportStatus("Edit rejected: " + topologyError);
+        return;
+    }
     auto afterSelection = selection();
     if (m_editLabel.startsWith("Change") && afterSelection.items.empty())
         afterSelection = before.selection;
@@ -1331,6 +1346,7 @@ bool MapEditor::openMap(const QString &filename, QString &error, bool asUnsavedC
     finishPendingEdit();
     m_undoStack.clear();
     m_document = std::move(loaded);
+    m_editingScope.reset();
     m_savedDocument = m_document;
     m_recoveredDirty = asUnsavedCopy;
     m_spriteTextures.clear();
@@ -1394,6 +1410,7 @@ void MapEditor::showMapIssue(const MapCheckResult &issue)
 
 void MapEditor::newMap()
 {
+    m_editingScope.reset();
     finishPendingEdit();
     m_undoStack.clear();
     cancelDrawing();
@@ -1435,6 +1452,7 @@ void MapEditor::setMode(Mode mode)
             playerStart->setInteractive(mode == Mode::Sprites);
         }
     }
+    applyEditingScope();
     updateProperties();
 }
 
@@ -1446,6 +1464,7 @@ void MapEditor::setSpritesVisible(bool visible)
             sprite->setVisible(visible || m_mode == Mode::Sprites);
         }
     }
+    applyEditingScope();
 }
 
 void MapEditor::setGameStartDifficulty(int difficulty)
@@ -1517,6 +1536,199 @@ void MapEditor::setZoomCallback(std::function<void(qreal)> callback)
     }
 }
 
+bool MapEditor::wallEditable(MapDocument::WallId id) const
+{
+    return !m_editingScope || (id < m_editableWalls.size() && m_editableWalls[id]);
+}
+
+bool MapEditor::vertexEditable(MapDocument::VertexId id) const
+{
+    return !m_editingScope || (id < m_editableVertices.size() && m_editableVertices[id]);
+}
+
+void MapEditor::rememberScopeTopology()
+{
+    m_scopeTopology.clear();
+    for (const auto &sector : m_document.sectors()) { m_scopeTopology.push_back(sector.walls); }
+}
+
+bool MapEditor::setEditingScope(std::optional<std::set<MapDocument::SectorId>> sectors)
+{
+    if (!m_drawingPoints.empty()) {
+        reportStatus("Finish or cancel drawing before changing the editing scope.");
+        return false;
+    }
+    finishPendingEdit();
+    if (sectors && std::any_of(sectors->begin(), sectors->end(), [this](auto s) { return s >= m_document.sectors().size(); })) {
+        reportStatus("Invalid editing scope.");
+        return false;
+    }
+    m_editingScope = std::move(sectors);
+    rememberScopeTopology();
+    m_scene->clearSelection();
+    clearSplitPreview();
+    applyEditingScope();
+    reportStatus(!m_editingScope ? "All sectors editable"
+        : m_editingScope->empty() ? "Independent drawing: no existing geometry will be attached"
+        : QString("Editing %1 sector(s); gray geometry is excluded. Real portal connections remain linked.").arg(m_editingScope->size()));
+    return true;
+}
+
+void MapEditor::applyEditingScope()
+{
+    if (editingScopeChanged) {
+        editingScopeChanged(!m_editingScope ? "All sectors" : m_editingScope->empty() ? "Independent drawing"
+            : QString("%1 editable sector(s)").arg(m_editingScope->size()));
+    }
+    m_editableWalls.assign(m_document.walls().size(), !m_editingScope);
+    m_editableVertices.assign(m_document.vertices().size(), !m_editingScope);
+    if (m_editingScope) {
+        for (const auto s : *m_editingScope) {
+            if (s >= m_document.sectors().size()) { continue; }
+            for (const auto w : m_document.sectors()[s].walls) { m_editableWalls[w] = true; }
+            for (const auto v : m_document.sectors()[s].vertices) { m_editableVertices[v] = true; }
+        }
+    }
+    const auto memberVisible = [this](std::optional<MapDocument::SectorId> sector, const QPointF &position) {
+        if (!m_editingScope) { return true; }
+        if (sector) { return m_editingScope->count(*sector) != 0; }
+        const auto candidates = m_document.sectorsAt(position);
+        return candidates.size() == 1 && m_editingScope->count(candidates.front());
+    };
+    for (auto *item : m_scene->items()) {
+        bool visible = true;
+        if (dynamic_cast<WallItem *>(item)) {
+            visible = wallEditable(item->data(wallIdRole).toULongLong());
+        } else if (dynamic_cast<VertexItem *>(item)) {
+            visible = vertexEditable(item->data(vertexIdRole).toULongLong());
+        } else if (dynamic_cast<SectorItem *>(item)) {
+            visible = !m_editingScope || m_editingScope->count(item->data(sectorIdRole).toULongLong());
+        } else if (dynamic_cast<SpriteItem *>(item)) {
+            const auto &sprite = m_document.sprites()[item->data(spriteIdRole).toULongLong()];
+            visible = (m_spritesVisible || m_mode == Mode::Sprites) && memberVisible(sprite.sectorId, sprite.position);
+        } else if (dynamic_cast<PlayerStartItem *>(item)) {
+            visible = memberVisible(m_document.playerStart().sectorId, m_document.playerStart().position);
+        } else { continue; }
+        if (!visible) { item->setSelected(false); }
+        item->setVisible(visible);
+    }
+    viewport()->update();
+}
+
+void MapEditor::clearEditingScope() { setEditingScope(std::nullopt); }
+
+void MapEditor::drawIndependentSector()
+{
+    if (setEditingScope(std::set<MapDocument::SectorId>{})) { setMode(Mode::Draw); }
+}
+
+void MapEditor::isolateSelectedSectors()
+{
+    std::set<MapDocument::SectorId> sectors;
+    for (auto *item : m_scene->selectedItems()) {
+        if (dynamic_cast<SectorItem *>(item)) { sectors.insert(item->data(sectorIdRole).toULongLong()); }
+    }
+    if (sectors.empty()) { reportStatus("Select the sectors to isolate in Sectors mode first."); return; }
+    setEditingScope(std::move(sectors));
+}
+
+void MapEditor::filterEditingHeight()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("Editable height range (Build Z)");
+    QFormLayout layout(&dialog);
+    QSpinBox top, bottom;
+    for (auto *box : {&top, &bottom}) { box->setRange(std::numeric_limits<int>::min(), std::numeric_limits<int>::max()); }
+    top.setValue(-8192);
+    bottom.setValue(0);
+    layout.addRow("Top Z (smaller):", &top);
+    layout.addRow("Bottom Z (larger):", &bottom);
+    QDialogButtonBox buttons(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    layout.addRow(&buttons);
+    connect(&buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(&buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() != QDialog::Accepted) { return; }
+    if (top.value() >= bottom.value()) { reportStatus("Top Z must be smaller than bottom Z."); return; }
+    std::set<MapDocument::SectorId> sectors;
+    for (std::size_t s = 0; s < m_document.sectors().size(); ++s) {
+        // Conservative bounds include all sloped endpoints, not just base Z.
+        double ceiling = std::numeric_limits<double>::infinity(), floor = -ceiling;
+        for (const auto v : m_document.sectors()[s].vertices) {
+            const auto p = m_document.vertices()[v].position;
+            ceiling = std::min(ceiling, double(sectorFloorZAt(m_document, s, p, false)));
+            floor = std::max(floor, double(sectorFloorZAt(m_document, s, p)));
+        }
+        if (ceiling < bottom.value() && floor > top.value()) { sectors.insert(s); }
+    }
+    if (sectors.empty()) { reportStatus("No sectors intersect that height range; scope unchanged."); return; }
+    setEditingScope(std::move(sectors));
+}
+
+bool MapEditor::resolveDrawingScope(const QPointF &position)
+{
+    if (!m_drawingPoints.empty()) { return true; }
+    auto candidates = m_document.sectorsAt(position);
+    candidates.erase(std::remove_if(candidates.begin(), candidates.end(), [this](auto s) {
+        return m_editingScope && !m_editingScope->count(s);
+    }), candidates.end());
+    if (candidates.size() < 2) { return true; }
+    QStringList choices;
+    for (const auto s : candidates) {
+        const auto &sector = m_document.sectors()[s];
+        choices.append(QString("Sector %1 — ceiling %2, floor %3").arg(s).arg(sector.ceilingz).arg(sector.floorz));
+    }
+    bool ok = false;
+    const auto choice = QInputDialog::getItem(this, "Choose drawing target",
+        "Multiple sectors meet here. Which sector should drawing attach to?\nOther sectors will be grayed out; use Tools → Show all sectors to reset.", choices, 0, false, &ok);
+    return ok && setEditingScope(std::set<MapDocument::SectorId>{candidates[choices.indexOf(choice)]});
+}
+
+QList<QGraphicsItem *> MapEditor::pickItems(const QPoint &position) const
+{
+    return m_resolvedPick ? QList<QGraphicsItem *>{m_resolvedPick} : items(position);
+}
+
+bool MapEditor::resolveAmbiguousPick(const QPoint &position)
+{
+    QList<QGraphicsItem *> candidates;
+    QStringList labels;
+    const int role = m_mode == Mode::Sectors ? sectorIdRole : m_mode == Mode::Lines ? wallIdRole
+        : m_mode == Mode::Vertices ? vertexIdRole : spriteIdRole;
+    for (auto *item : items(position)) {
+        if (!item->data(role).isValid()) { continue; }
+        candidates.append(item);
+        const auto id = item->data(role).toULongLong();
+        QString label = QString("%1 %2").arg(m_mode == Mode::Sectors ? "Sector" : m_mode == Mode::Lines ? "Wall"
+            : m_mode == Mode::Vertices ? "Vertex" : "Sprite").arg(id);
+        if (m_mode == Mode::Sectors) {
+            const auto &s = m_document.sectors()[id];
+            label += QString(" — ceiling %1, floor %2").arg(s.ceilingz).arg(s.floorz);
+        } else if (m_mode == Mode::Sprites) {
+            const auto &sprite = m_document.sprites()[id];
+            label += QString(" — sector %1, Z %2")
+                .arg(sprite.sectorId ? QString::number(*sprite.sectorId) : "unassigned").arg(sprite.z);
+        } else {
+            QStringList owners;
+            for (std::size_t s = 0; s < m_document.sectors().size(); ++s) {
+                const auto &sector = m_document.sectors()[s];
+                const auto &ids = m_mode == Mode::Lines ? sector.walls : sector.vertices;
+                if (std::find(ids.begin(),ids.end(),id) != ids.end()) {
+                    owners.append(QString("sector %1 (Z %2…%3)").arg(s).arg(sector.ceilingz).arg(sector.floorz));
+                }
+            }
+            label += " — " + owners.join(", ");
+        }
+        labels.append(label);
+    }
+    if (candidates.size() < 2) { return true; }
+    bool ok = false;
+    const auto choice = QInputDialog::getItem(this, "Choose edit target",
+        "Several objects are under the pointer. Choose the object to select or move:", labels, 0, false, &ok);
+    if (!ok) { return false; }
+    m_resolvedPick = candidates[labels.indexOf(choice)];
+    return true;
+}
+
 QPointF MapEditor::snappedPosition(const QPoint &viewportPosition, bool disableSnapping) const
 {
     const QPointF scenePosition = mapToScene(viewportPosition);
@@ -1531,7 +1743,9 @@ QPointF MapEditor::snappedPosition(const QPoint &viewportPosition, bool disableS
     qreal nearestDistance = sceneTolerance;
     QPointF result;
     bool foundVertex = false;
-    for (const MapDocument::Vertex &vertex : m_document.vertices()) {
+    for (std::size_t id = 0; id < m_document.vertices().size(); ++id) {
+        if (!vertexEditable(id)) { continue; }
+        const auto &vertex = m_document.vertices()[id];
         const qreal distance = QLineF(scenePosition, vertex.position).length();
         if (distance <= nearestDistance) {
             nearestDistance = distance;
@@ -1558,6 +1772,25 @@ QPointF MapEditor::snappedPosition(const QPoint &viewportPosition, bool disableS
 
 void MapEditor::mousePressEvent(QMouseEvent *event)
 {
+    m_resolvedPick = nullptr;
+    if (event->button() == Qt::LeftButton || event->button() == Qt::RightButton) {
+        if (m_mode == Mode::Draw && event->button() == Qt::LeftButton && m_drawingPoints.empty()) {
+            if (!resolveDrawingScope(mapToScene(event->position().toPoint()))) { event->accept(); return; }
+        } else if (m_mode != Mode::Draw && !resolveAmbiguousPick(event->position().toPoint())) {
+            event->accept();
+            return;
+        }
+        if (m_mode == Mode::Sprites && event->button() == Qt::RightButton) {
+            const auto hits = pickItems(event->position().toPoint());
+            const bool existing = std::any_of(hits.begin(), hits.end(), [](auto *item) {
+                return dynamic_cast<SpriteItem *>(item) || dynamic_cast<PlayerStartItem *>(item);
+            });
+            if (!existing && !resolveDrawingScope(mapToScene(event->position().toPoint()))) {
+                event->accept();
+                return;
+            }
+        }
+    }
     if (event->button() == Qt::RightButton) {
         finishPendingEdit();
         beginEdit(m_mode == Mode::Draw ? "Draw geometry" : "Move selection");
@@ -1576,7 +1809,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
     if (event->button() == Qt::RightButton && m_mode == Mode::Sprites) {
         SpriteItem *sprite = nullptr;
         PlayerStartItem *playerStart = nullptr;
-        for (QGraphicsItem *item : items(event->position().toPoint())) {
+        for (QGraphicsItem *item : pickItems(event->position().toPoint())) {
             if ((sprite = dynamic_cast<SpriteItem *>(item))) {
                 break;
             }
@@ -1593,8 +1826,14 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
                 m_editLabel = "Create sprite";
                 const QPointF position = snappedPosition(
                     event->position().toPoint(), disableSnapping);
+                const auto sectorId = sectorAtPosition(m_document, position, m_editingScope);
+                if (!sectorId && !m_document.sectorsAt(position).empty()) {
+                    reportStatus("Sprite placement is ambiguous or outside the editing scope. Choose a sector first.");
+                    event->accept();
+                    return;
+                }
                 const auto spriteId = m_document.addSprite(position);
-                if (const auto sectorId = sectorAtPosition(m_document, position)) {
+                if (sectorId) {
                     auto sprite = m_document.sprites()[spriteId];
                     sprite.sectorId = sectorId;
                     sprite.z = sectorFloorZAt(m_document, *sectorId, position);
@@ -1642,7 +1881,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
 
     if (event->button() == Qt::RightButton && m_mode == Mode::Vertices) {
         VertexItem *vertex = nullptr;
-        for (QGraphicsItem *item : items(event->position().toPoint())) {
+        for (QGraphicsItem *item : pickItems(event->position().toPoint())) {
             if ((vertex = dynamic_cast<VertexItem *>(item))) {
                 break;
             }
@@ -1667,7 +1906,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
     }
     if (event->button() == Qt::RightButton && m_mode == Mode::Lines) {
         WallItem *wall = nullptr;
-        for (QGraphicsItem *item : items(event->position().toPoint())) {
+        for (QGraphicsItem *item : pickItems(event->position().toPoint())) {
             if ((wall = dynamic_cast<WallItem *>(item))) {
                 break;
             }
@@ -1703,7 +1942,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
     }
     if (event->button() == Qt::RightButton && m_mode == Mode::Sectors) {
         SectorItem *sector = nullptr;
-        for (QGraphicsItem *item : items(event->position().toPoint())) {
+        for (QGraphicsItem *item : pickItems(event->position().toPoint())) {
             if ((sector = dynamic_cast<SectorItem *>(item))) {
                 break;
             }
@@ -1741,7 +1980,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
         if (m_mode == Mode::Sprites) {
             SpriteItem *sprite = nullptr;
             PlayerStartItem *playerStart = nullptr;
-            for (QGraphicsItem *item : items(event->position().toPoint())) {
+            for (QGraphicsItem *item : pickItems(event->position().toPoint())) {
                 if ((sprite = dynamic_cast<SpriteItem *>(item))) {
                     break;
                 }
@@ -1768,7 +2007,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
 
         if (m_mode == Mode::Vertices) {
             VertexItem *vertex = nullptr;
-            for (QGraphicsItem *item : items(event->position().toPoint())) {
+            for (QGraphicsItem *item : pickItems(event->position().toPoint())) {
                 if ((vertex = dynamic_cast<VertexItem *>(item))) {
                     break;
                 }
@@ -1790,7 +2029,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
 
         if (m_mode == Mode::Lines) {
             WallItem *wall = nullptr;
-            for (QGraphicsItem *item : items(event->position().toPoint())) {
+            for (QGraphicsItem *item : pickItems(event->position().toPoint())) {
                 if ((wall = dynamic_cast<WallItem *>(item))) {
                     break;
                 }
@@ -1812,7 +2051,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
 
         if (m_mode == Mode::Sectors) {
             SectorItem *sector = nullptr;
-            for (QGraphicsItem *item : items(event->position().toPoint())) {
+            for (QGraphicsItem *item : pickItems(event->position().toPoint())) {
                 if ((sector = dynamic_cast<SectorItem *>(item))) {
                     break;
                 }
@@ -1877,11 +2116,14 @@ void MapEditor::updateSplitPreview(const QPoint &position, bool disableSnapping)
     const QPointF cursor = mapToScene(position);
     const qreal tolerance = snapRadiusPixels / std::abs(transform().m11());
     // Existing vertices take precedence over creating another nearby vertex.
-    for (const auto &vertex : m_document.vertices()) {
+    for (std::size_t id = 0; id < m_document.vertices().size(); ++id) {
+        if (!vertexEditable(id)) { continue; }
+        const auto &vertex = m_document.vertices()[id];
         if (QLineF(cursor, vertex.position).length() <= tolerance) return;
     }
     qreal nearest = tolerance;
     for (MapDocument::WallId id = 0; id < m_document.walls().size(); ++id) {
+        if (!wallEditable(id)) { continue; }
         const auto &wall = m_document.walls()[id];
         const QPointF start = m_document.vertices()[wall.start].position;
         const QPointF delta = m_document.vertices()[wall.end].position - start;
@@ -1925,6 +2167,13 @@ void MapEditor::updateSplitPreview(const QPoint &position, bool disableSnapping)
 
 void MapEditor::mouseDoubleClickEvent(QMouseEvent *event)
 {
+    if (m_mode == Mode::Vertices && event->button() == Qt::LeftButton) {
+        updateSplitPreview(event->position().toPoint(), event->modifiers().testFlag(Qt::AltModifier));
+        if (m_splitWall && !resolveDrawingScope(m_splitPosition)) {
+            event->accept();
+            return;
+        }
+    }
     Edit edit(this, "Split line");
     if (m_mode == Mode::Vertices && event->button() == Qt::LeftButton) {
         updateSplitPreview(event->position().toPoint(), event->modifiers().testFlag(Qt::AltModifier));
@@ -2209,6 +2458,16 @@ void MapEditor::wheelEvent(QWheelEvent *event)
 void MapEditor::drawBackground(QPainter *painter, const QRectF &rect)
 {
     m_scene->paintBackground(painter, rect);
+    if (m_editingScope) {
+        painter->save();
+        painter->setPen(cosmeticPen(QColor(90, 90, 90), 1));
+        for (std::size_t w = 0; w < m_document.walls().size(); ++w) {
+            if (wallEditable(w)) { continue; }
+            const auto &wall = m_document.walls()[w];
+            painter->drawLine(m_document.vertices()[wall.start].position, m_document.vertices()[wall.end].position);
+        }
+        painter->restore();
+    }
 }
 
 bool MapEditor::canJoinSelectedSectors() const
@@ -2442,6 +2701,7 @@ void MapEditor::addDrawingPoint(const QPointF &position)
     if (m_drawingPoints.size() >= 2) {
         const bool onWall = std::any_of(m_document.walls().begin(), m_document.walls().end(),
             [&](const MapDocument::Wall &wall) {
+                if (!wallEditable(&wall - m_document.walls().data())) { return false; }
                 const auto a = m_document.vertices()[wall.start].position;
                 const auto b = m_document.vertices()[wall.end].position;
                 const auto delta = b - a, offset = position - a;
@@ -2458,7 +2718,12 @@ bool MapEditor::finishDrawing(bool close, bool discardOnFailure)
 {
     Edit edit(this, "Draw geometry");
     QString error;
-    const bool sectorCreated = m_document.addPolyline(m_drawingPoints, close, &error);
+    const auto oldCount = m_document.sectors().size();
+    const bool sectorCreated = m_document.addPolyline(m_drawingPoints, close, &error, m_editingScope);
+    if (sectorCreated && m_editingScope) {
+        for (auto id = oldCount; id < m_document.sectors().size(); ++id) { m_editingScope->insert(id); }
+        rememberScopeTopology();
+    }
     if (!sectorCreated && !discardOnFailure) return false;
     m_drawingPoints.clear();
     rebuildScene();
@@ -2538,6 +2803,14 @@ void MapEditor::updateSectorTextures()
 
 void MapEditor::rebuildScene()
 {
+    m_resolvedPick = nullptr;
+    if (m_editingScope) {
+        bool changed = m_scopeTopology.size() != m_document.sectors().size();
+        for (std::size_t s = 0; !changed && s < m_scopeTopology.size(); ++s) {
+            changed = m_scopeTopology[s] != m_document.sectors()[s].walls;
+        }
+        if (changed) { m_editingScope.reset(); }
+    }
     m_splitPreviewItem = nullptr;
     m_splitWall.reset();
     m_scene->clear();
@@ -2607,6 +2880,7 @@ void MapEditor::rebuildScene()
     playerStart->setRotation(m_document.playerStart().angle + 90.0);
     playerStart->setZValue(13.0);
     updateSectorTextures();
+    applyEditingScope();
 }
 
 void MapEditor::updateProperties() const

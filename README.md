@@ -284,10 +284,36 @@ the same unsaved-changes prompt as Open.
 
 Imported maps retain sector loops, independent portal-side properties, sprites,
 and player start information. Connected inner sectors remain editable after
-reopening. Overlapping single-loop sectors support line deletion without
-rebuilding their faces; adding lines remains restricted. Empty inner loops remain editable without filling their interiors. Overlapping
-and effect sectors still restrict structural edits. Saving applies the validation rules
+reopening. Overlapping sectors can be edited using an explicit drawing scope;
+independent rooms are not connected merely because their coordinates coincide.
+Empty inner loops remain editable without filling their interiors. Ambiguous
+and unsupported effect-geometry operations are rejected. Saving applies the validation rules
 below; some original effect geometry may be opened but cannot yet be saved.
+
+### Editing overlapping rooms
+
+Overlapping object clicks offer a target chooser. Starting a drawing at an
+ambiguous location asks which sector to attach to and grays out the others.
+Alternatively, use **Tools → Isolate selected sectors** or **Edit height range…**
+to set an optional editing scope. Grayed-out geometry is excluded from picking,
+snapping, and drawing. The status bar shows the scope; **Show all sectors** resets
+it. Height filtering uses Build Z (smaller values are higher), including slope
+bounds. A filter containing ambiguous overlapping rooms still does not authorize
+merging them: the drawing is rejected until its target is resolved.
+
+**Draw independent sector** starts a separate room without attaching to existing
+geometry, even at coincident coordinates. Scoped drawing supports splitting rooms,
+inserting inner loops, and attaching rooms. Intersections with editable boundaries
+are split transactionally; real portal counterparts are updated even when the
+neighbor is outside the filter. Unrelated overlapping rooms are retained.
+
+Drawing and moving geometry are undoable; undo/redo also restores the editing
+scope. Invalid changed boundaries are rolled back instead of silently deleting
+sectors. Topology operations other than drawing may reset the scope when sector
+identities change. Unsupported splits that would change a slope or relative
+texture alignment's first wall, and ambiguous effect loops, remain blocked with
+an explanation. Sprite creation in overlapping rooms also resolves the target
+sector and uses its local floor height.
 
 Use **File → Save** (Ctrl+S) or **Save As** (Ctrl+Shift+S) to write a
 Build `.map` file. Saving automatically uses version 7 for maps with at most

@@ -706,14 +706,22 @@ int main(int argc, char **argv)
         }
     }
     require(pastedSides == 1, "paste changes one wall side and preserves mapping");
+    const auto beforeReset = editor->document();
     QTest::keyClick(view, Qt::Key_R);
     int resetSides = 0;
-    for (const auto &wall : editor->document().walls()) {
-        for (const auto &side : {wall.forwardSide, wall.reverseSide}) {
-            if (side.texture == 0 && side.xpanning == 0 && side.ypanning == 0
-                && side.yrepeat == 8 && side.xrepeat == 64) {
+    for (std::size_t i = 0; i < editor->document().walls().size(); ++i) {
+        for (bool reversed : {false,true}) {
+            const auto &wall = editor->document().walls()[i];
+            const auto &side = reversed ? wall.reverseSide : wall.forwardSide;
+            const auto &oldWall = beforeReset.walls()[i];
+            auto expected = reversed ? oldWall.reverseSide : oldWall.forwardSide;
+            if (expected.texture == 0 && expected.xpanning == 255 && expected.yrepeat == 7) {
+                expected.xpanning = expected.ypanning = 0;
+                expected.xrepeat = beforeReset.defaultWallXRepeat(i);
+                expected.yrepeat = 8;
                 ++resetSides;
             }
+            require(side == expected, "Reset changes only the targeted wall mapping");
         }
     }
     require(resetSides == 1, "reset restores wall scale and clears panning");
@@ -858,6 +866,9 @@ int main(int argc, char **argv)
                     "enemy and pickup properties show difficulty choices");
         } else if (tile == 1) {
             require(tagEditor->itemText(0).contains("Sector rotation"), "SE retains effect presets");
+        } else if (tile == 5) {
+            require(tagEditor->count() > 0 && tagEditor->toolTip().contains("MusicAndSFX")
+                && !tagEditor->itemText(0).contains("Sector rotation"), "MusicAndSFX shows sound presets, not SE effects");
         } else if (tile == 6 || tile == 1405) {
             require(tagEditor->count() == (tile == 6 ? 1 : 2), "special sprite choices");
         } else {

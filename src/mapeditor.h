@@ -178,6 +178,12 @@ public:
     void setGridSize(qreal size);
     void reorientGridToSelectedLine();
     void resetGridOrientation();
+    void isolateSelectedSectors();
+    void filterEditingHeight();
+    void clearEditingScope();
+    void drawIndependentSector();
+    bool setEditingScope(std::optional<std::set<MapDocument::SectorId>> sectors);
+    std::function<void(const QString &)> editingScopeChanged;
     void setGridVisible(bool visible);
     [[nodiscard]] bool isGridVisible() const;
     void setZoomPercent(qreal percent);
@@ -208,6 +214,7 @@ private:
         std::vector<MapDocument::SectorId> sectorOrder;
         Mode mode;
         bool reversed;
+        std::optional<std::set<MapDocument::SectorId>> editingScope = std::nullopt;
     };
     struct Snapshot { MapDocument document; Selection selection; };
     class Edit;
@@ -234,6 +241,17 @@ private:
     void updateSectorTextures();
     void updateProperties() const;
     void reportStatus(const QString &message) const;
+    bool wallEditable(MapDocument::WallId id) const;
+    bool vertexEditable(MapDocument::VertexId id) const;
+    void applyEditingScope();
+    void rememberScopeTopology();
+    bool resolveDrawingScope(const QPointF &position);
+    bool resolveAmbiguousPick(const QPoint &position);
+    QList<QGraphicsItem *> pickItems(const QPoint &position) const;
+    std::optional<std::set<MapDocument::SectorId>> m_editingScope;
+    std::vector<std::vector<MapDocument::WallId>> m_scopeTopology;
+    std::vector<bool> m_editableWalls, m_editableVertices;
+    QGraphicsItem *m_resolvedPick = nullptr;
 
     MapDocument m_document;
     MapDocument m_savedDocument;

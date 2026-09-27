@@ -1020,6 +1020,14 @@ MainWindow::MainWindow(QWidget *parent)
         cursorStatusLabel->setText(message);
     });
     statusBar()->addPermanentWidget(cursorStatusLabel);
+    auto *editingScopeLabel = new QLabel("All sectors", this);
+    editingScopeLabel->setObjectName("editingScopeStatusLabel");
+    editingScopeLabel->setToolTip("2D editing scope. Tools → Show all sectors resets the filter.");
+    statusBar()->addPermanentWidget(editingScopeLabel);
+    editor->editingScopeChanged = [editingScopeLabel](const QString &text) { editingScopeLabel->setText(text); };
+    connect(views, &QStackedWidget::currentChanged, editingScopeLabel, [=](int) {
+        editingScopeLabel->setVisible(views->currentWidget() == editor);
+    });
     connect(views, &QStackedWidget::currentChanged, cursorStatusLabel, [=](int) {
         cursorStatusLabel->setVisible(views->currentWidget() == editor);
     });
@@ -1149,6 +1157,20 @@ MainWindow::MainWindow(QWidget *parent)
     addModeAction("Sprites", QKeySequence(Qt::Key_T), MapEditor::Mode::Sprites);
 
     auto *toolsMenu = menuBar()->addMenu("&Tools");
+    auto *isolateAction = toolsMenu->addAction("Isolate selected sectors");
+    connect(isolateAction, &QAction::triggered, editor, &MapEditor::isolateSelectedSectors);
+    auto *heightScopeAction = toolsMenu->addAction("Edit height range…");
+    connect(heightScopeAction, &QAction::triggered, editor, &MapEditor::filterEditingHeight);
+    auto *clearScopeAction = toolsMenu->addAction("Show all sectors");
+    connect(clearScopeAction, &QAction::triggered, editor, &MapEditor::clearEditingScope);
+    auto *independentAction = toolsMenu->addAction("Draw independent sector");
+    connect(independentAction, &QAction::triggered, editor, &MapEditor::drawIndependentSector);
+    connect(views, &QStackedWidget::currentChanged, editor, [=](int) {
+        for (auto *action : {isolateAction, heightScopeAction, clearScopeAction, independentAction}) {
+            action->setEnabled(views->currentWidget() == editor);
+        }
+    });
+    toolsMenu->addSeparator();
     auto *grpFileManagerAction = toolsMenu->addAction("GRP File Manager");
     connect(grpFileManagerAction, &QAction::triggered, this, [this, editor, confirmMapReplacement] {
         if (!m_grpFileManager) {

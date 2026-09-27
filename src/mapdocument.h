@@ -131,7 +131,12 @@ public:
     [[nodiscard]] bool supportsTopologyEditing() const { return !m_complexTopology; }
     [[nodiscard]] bool supportsLineDeletion() const;
     [[nodiscard]] bool addPolyline(const std::vector<QPointF> &points, bool closed,
-                                   QString *error = nullptr);
+                                   QString *error = nullptr,
+                                   const std::optional<std::set<SectorId>> &editable = std::nullopt);
+    // Include boundaries; coincident but independent sectors remain separate candidates.
+    [[nodiscard]] std::vector<SectorId> sectorsAt(const QPointF &position) const;
+    // Validate changed boundaries without rejecting unchanged imported effect loops.
+    bool validateTopologyChange(const MapDocument &before, QString &error) const;
     // Join a connected selection transactionally; the first ID supplies properties.
     std::optional<SectorId> joinSectors(const std::vector<SectorId> &ids, QString &error);
     // Remove sector interiors, retaining shared boundaries as solid walls.
@@ -173,7 +178,8 @@ public:
 private:
     friend class RecoveryCodec;
     VertexId findOrAddVertex(const QPointF &position);
-    bool addScopedPolyline(const std::vector<QPointF> &points, bool closed, QString *error);
+    bool addScopedPolyline(const std::vector<QPointF> &points, bool closed, QString *error,
+                           const std::optional<std::set<SectorId>> &editable = std::nullopt);
     std::vector<bool> voidWallSides() const;
     void rebuildSectors(std::vector<bool> voidSides = {});
 
