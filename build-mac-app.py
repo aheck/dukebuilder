@@ -51,6 +51,21 @@ def macho(path):
         return stream.read(4) in MACHO_MAGICS
 
 
+def create_icon(destination):
+    """Build the standard macOS 1x/2x icon representations from supplied PNGs."""
+    iconutil = tool('iconutil')
+    with tempfile.TemporaryDirectory(prefix='dukebuilder-icon-') as temporary:
+        iconset = Path(temporary) / 'dukebuilder.iconset'
+        iconset.mkdir()
+        for size in (16, 32, 128, 256, 512):
+            for scale in (1, 2):
+                pixels = size * scale
+                suffix = '@2x' if scale == 2 else ''
+                shutil.copy2(REPO / f'icons/icon-{pixels}x{pixels}.png',
+                             iconset / f'icon_{size}x{size}{suffix}.png')
+        run(iconutil, '--convert', 'icns', '--output', destination, iconset)
+
+
 def load_commands(otool, path, arch):
     """Read load commands per slice, including paths containing spaces."""
     output = run(otool, '-arch', arch, '-l', path, capture=True)
@@ -127,7 +142,7 @@ def main():
     parser.add_argument('--macdeployqt', default='macdeployqt',
                         help='Deployment tool from the Qt installation used for this build')
     parser.add_argument('--bundle-id', default='org.dukebuilder.DukeBuilder')
-    parser.add_argument('--icon', type=Path, help='Optional .icns application icon')
+    parser.add_argument('--icon', type=Path, help='Override the bundled artwork with a custom .icns icon')
     parser.add_argument('--licenses-dir', type=Path,
                         help='Directory of additional dependency redistribution notices')
     parser.add_argument('--sign-identity',
@@ -208,7 +223,9 @@ def main():
         }
         if args.icon:
             shutil.copy2(args.icon, resources / 'dukebuilder.icns')
-            info['CFBundleIconFile'] = 'dukebuilder.icns'
+        else:
+            create_icon(resources / 'dukebuilder.icns')
+        info['CFBundleIconFile'] = 'dukebuilder.icns'
         with (contents / 'Info.plist').open('wb') as stream:
             plistlib.dump(info, stream)
         (contents / 'PkgInfo').write_bytes(b'APPL????')

@@ -82,7 +82,7 @@ export LDAI_NO_APPSTREAM=1
 "$linuxdeploy" --appdir "$appdir" \
     --executable "$appdir/usr/bin/dukebuilder" \
     --desktop-file "$appdir/usr/share/applications/dukebuilder.desktop" \
-    --icon-file "$appdir/usr/share/icons/hicolor/scalable/apps/dukebuilder.svg" \
+    --icon-file "$appdir/usr/share/icons/hicolor/256x256/apps/dukebuilder.png" \
     --output appimage
 mv -- "$LDAI_OUTPUT" "$output_dir/"
 echo "Created $output_dir/DukeBuilder-$version-x86_64.AppImage"

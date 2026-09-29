@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 
 #include <QApplication>
+#include <QIcon>
 #include <QtPlugin>
 #include <QSurfaceFormat>
 
@@ -25,6 +26,15 @@ int main(int argc, char *argv[])
     QApplication application(argc, argv);
     QApplication::setApplicationName("Duke Builder");
     QApplication::setOrganizationName("Duke Builder");
+    QGuiApplication::setDesktopFileName("dukebuilder");
+#ifndef Q_OS_MACOS
+    // macOS uses the bundle's ICNS, including any --icon override.
+    QIcon applicationIcon;
+    for (int size : {16, 32, 48, 64, 128, 256}) {
+        applicationIcon.addFile(QString(":/icons/icon-%1x%1.png").arg(size));
+    }
+    QApplication::setWindowIcon(applicationIcon);
+#endif
 
     MainWindow window;
     window.show();

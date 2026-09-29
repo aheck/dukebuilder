@@ -535,6 +535,11 @@ ornament command.
 
 ## Linux AppImage
 
+The AppImage uses the artwork from `icons/`, with a 256-pixel PNG for its
+desktop icon and 16, 32, 48, 64, 128, and 256-pixel PNGs installed in the hicolor
+icon theme and embedded for window icons. Larger source artwork is reserved for
+the macOS bundle icon.
+
 The optional packaging script creates a single x86-64 AppImage, with libduke
 and its renderer linked statically and the remaining redistributable runtime
 libraries collected by linuxdeploy. Game data and EDuke32 are not included.
@@ -615,7 +620,10 @@ These checks do not replace running the application on a clean Mac.
 
 Options include `--output-dir PATH`, `--icon PATH.icns`, `--bundle-id ID`, and
 `--licenses-dir PATH` for dependency redistribution notices. The project license
-is included automatically. Without an icon, Finder uses its generic app icon.
+is included automatically. The default app icon is generated from `icons/` using
+macOS's `iconutil`, with standard 16, 32, 128, 256, and 512-point representations
+at 1x and 2x resolution. `--icon` overrides it with a custom ICNS. macOS uses this
+bundle icon directly, without also embedding the PNGs in the executable.
 Mini Tutorials are embedded in the executable; game data and EDuke32 are supplied
 separately by the user.
 

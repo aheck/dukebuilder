@@ -14,6 +14,10 @@ project(
 qt6 = dependency('qt6', modules: ['Core', 'Widgets', 'OpenGLWidgets'])
 qt6_module = import('qt6')
 tutorial_resources = qt6_module.compile_resources(sources: 'tutorials/tutorials.qrc')
+icon_resources = []
+if host_machine.system() != 'darwin'
+  icon_resources = qt6_module.compile_resources(sources: 'icons/icons.qrc')
+endif
 cpp = meson.get_compiler('cpp')
 
 libduke_root = meson.current_source_dir() / '..' / 'libduke'
@@ -212,7 +216,7 @@ endif
 
 executable(
   'dukebuilder',
-  ['src/main.cpp'] + app_sources + tutorial_resources + windows_resources,
+  ['src/main.cpp'] + app_sources + tutorial_resources + icon_resources + windows_resources,
   cpp_args: app_cpp_args,
   dependencies: app_dependencies + renderer_dependencies + gui_entrypoint,
   win_subsystem: 'windows',
@@ -223,8 +227,15 @@ executable(
 
 install_data('packaging/dukebuilder.desktop',
   install_dir: get_option('datadir') / 'applications', install_tag: 'runtime')
-install_data('packaging/dukebuilder.svg',
-  install_dir: get_option('datadir') / 'icons/hicolor/scalable/apps', install_tag: 'runtime')
+if host_machine.system() == 'linux'
+  foreach size : ['16', '32', '48', '64', '128', '256']
+    icon_size = size + 'x' + size
+    install_data('icons/icon-' + icon_size + '.png',
+      rename: 'dukebuilder.png',
+      install_dir: get_option('datadir') / 'icons/hicolor' / icon_size / 'apps',
+      install_tag: 'runtime')
+  endforeach
+endif
 
 previewcamera_test = executable('previewcamera-test',
   ['tests/previewcamera_test.cpp', 'src/previewcamera.cpp', 'src/mapdocument.cpp', 'src/mapsave.cpp'],
@@ -257,7 +268,7 @@ spritelotags_test = executable('spritelotags-test', 'tests/spritelotags_test.cpp
 test('spritelotags', spritelotags_test)
 
 tutorial_resource_test = executable('tutorial-resource-test',
-  ['tests/tutorial_resource_test.cpp'] + tutorial_resources,
+  ['tests/tutorial_resource_test.cpp'] + tutorial_resources + icon_resources,
   cpp_args: image_format_cpp_args,
   dependencies: image_format_dependencies)
 test('tutorial-resource', tutorial_resource_test)
