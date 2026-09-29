@@ -9,6 +9,8 @@
 #include <QTimer>
 #include <QGraphicsItem>
 #include <QSpinBox>
+#include <QMessageBox>
+#include <QAbstractButton>
 #include <QtPlugin>
 #include <algorithm>
 #include <cstdlib>
@@ -257,5 +259,53 @@ int main(int argc, char **argv)
     choose(1,[&] { rightClick({768,768}); });
     require(editor.document().sprites().size() == 1 && editor.document().sprites()[0].sectorId == 1
         && editor.document().sprites()[0].z == -24576,"Sprite placement resolves overlapping sector and inherits its floor");
+    // Isolation controls picking, not explicit TROR constraints.
+    auto tror = source;
+    require(tror.extendTror(0,true,8192,error).has_value(), "Create linked fixture");
+    editor.recoverDocument(tror,{});
+    editor.setMode(MapEditor::Mode::Vertices);
+    require(editor.setEditingScope(std::set<MapDocument::SectorId>{0}), "Isolate linked upper room");
+    editor.centerOn(512,512);
+    click({0,0}); drag({0,0},{-256,0});
+    for (const auto &s : editor.document().sectors()) {
+        require(editor.document().vertices()[s.vertices[0]].position == QPointF(-256,0), "Drag follows link into hidden layer");
+    }
+    require(editor.undoStack()->index() == 1, "Linked drag is one undo action");
+    editor.undo();
+    require(editor.document() == tror && editor.editingScope() == std::optional<std::set<MapDocument::SectorId>>({0}), "Undo restores geometry, links and scope");
+    const auto splitPoint = editor.mapFromScene(QPointF(512,0));
+    QMouseEvent doubleClick(QEvent::MouseButtonDblClick,splitPoint,editor.viewport()->mapToGlobal(splitPoint),Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
+    QApplication::sendEvent(editor.viewport(),&doubleClick);
+    require(editor.document().walls().size() == tror.walls().size()+2, "Double click splits linked wall pair");
+    require(editor.editingScope() == std::optional<std::set<MapDocument::SectorId>>({0}), "Linked split preserves isolation");
+    editor.undo(); require(editor.document() == tror, "Linked split undo restores all boundaries");
+    editor.goTrorLayer(true);
+    require(editor.editingScope() == std::optional<std::set<MapDocument::SectorId>>({1}), "Navigate to lower layer");
+    editor.goTrorLayer(false);
+    require(editor.editingScope() == std::optional<std::set<MapDocument::SectorId>>({0})
+        && editor.document() == tror && editor.undoStack()->index() == 0, "Layer navigation changes no map history");
+    bool extensionPrompted = false;
+    QTimer extensionTimer;
+    QObject::connect(&extensionTimer,&QTimer::timeout,&editor,[&] {
+        if (auto *dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget())) {
+            extensionPrompted = true; dialog->setIntValue(8192); dialog->accept();
+        }
+    });
+    extensionTimer.start(1); editor.extendSelectedTror(false); extensionTimer.stop();
+    require(extensionPrompted && editor.document().sectors().size() == 3
+        && editor.editingScope() == std::optional<std::set<MapDocument::SectorId>>({2}), "Extension command creates and isolates new layer");
+    const auto extended = editor.document();
+    editor.undo(); require(editor.document() == tror, "Extension undo restores map");
+    editor.redo(); require(editor.document() == extended, "Extension redo restores bunch and scope");
+    bool disconnected = false;
+    QTimer disconnectTimer;
+    QObject::connect(&disconnectTimer,&QTimer::timeout,&editor,[&] {
+        if (auto *dialog = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+            disconnected = true; dialog->button(QMessageBox::Yes)->click();
+        }
+    });
+    disconnectTimer.start(1); editor.disconnectSelectedTror(true); disconnectTimer.stop();
+    require(disconnected && !editor.document().sectors()[2].floorBunch, "Disconnect command clears selected whole bunch");
+    editor.undo(); require(editor.document() == extended, "Disconnection undo restores links");
     editor.editingScopeChanged = {};
 }

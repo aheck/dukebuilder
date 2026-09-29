@@ -43,6 +43,7 @@ public:
 
 MapView3D::MapView3D(QWidget *parent) : QOpenGLWidget(parent)
 {
+    m_trorPlanes = QSettings().value("view3D/trorPlanes", false).toBool();
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
     setCursor(Qt::CrossCursor);
@@ -81,14 +82,15 @@ void MapView3D::cleanup()
         doneCurrent();
     }
 }
-bool MapView3D::start(const MapDocument &document, const QPointF &pointer, QString &error)
+bool MapView3D::start(const MapDocument &document, const QPointF &pointer, QString &error,
+    const std::optional<std::set<MapDocument::SectorId>> &scope)
 {
     if (!isValid() || !m_sokol) {
         error = "3D mode requires an OpenGL 4.1 context. The graphics context could not be initialized.";
         return false;
     }
     MapDocument snapshot = document;
-    if (!placePreviewCamera(snapshot, pointer, error)) { return false; }
+    if (!placePreviewCamera(snapshot, pointer, error, scope)) { return false; }
     const auto archives = QSettings().value("gameData/grpFiles").toStringList();
     if (archives.isEmpty()) {
         error = "Add DUKE3D.GRP in Settings → Game Data before entering 3D mode.";
@@ -125,12 +127,21 @@ bool MapView3D::start(const MapDocument &document, const QPointF &pointer, QStri
     m_active = true;
     duke_renderer_set_hover_enabled(m_renderer, m_hover);
     duke_renderer_set_sprite_picking_enabled(m_renderer, true);
+    duke_renderer_set_tror_planes_visible(m_renderer, m_trorPlanes);
     m_clock.start();
     m_timer.start();
     setFocus();
     captureLook();
     return true;
 }
+void MapView3D::setTrorPlanesVisible(bool visible)
+{
+    m_trorPlanes = visible;
+    QSettings().setValue("view3D/trorPlanes", visible);
+    duke_renderer_set_tror_planes_visible(m_renderer, visible);
+    updateSurfaceStatus(); update();
+}
+
 void MapView3D::stop()
 {
     m_selection.clear();
@@ -227,6 +238,14 @@ void MapView3D::updateSurfaceStatus()
             else if (shade != value) { shade = "mixed"; break; }
         }
         text = QString("%1 selected · Shade: %2").arg(m_selection.size()).arg(shade);
+    }
+    const auto &details = m_selection.size() == 1 ? selected : hovered;
+    if (m_selection.size() <= 1 && details.sector_index >= 0
+        && std::size_t(details.sector_index) < m_snapshot.sectors().size()) {
+        const auto &sector = m_snapshot.sectors()[details.sector_index];
+        const auto bunch = details.kind == DUKE_SURFACE_FLOOR ? sector.floorBunch
+            : details.kind == DUKE_SURFACE_CEILING ? sector.ceilingBunch : std::nullopt;
+        if (bunch) { text += QString(" · TROR %1").arg(*bunch); }
     }
     if (text != m_surfaceStatus) {
         m_surfaceStatus = text;
@@ -476,6 +495,7 @@ bool MapView3D::commitSurfaceEdit(MapDocument candidate, const QString &label)
 void MapView3D::editSelectedHeights(int steps, bool fine, bool slopeEdit)
 {
     auto candidate = m_snapshot;
+    std::set<int> changedBunches;
     const qreal delta = steps * (fine ? 128.0 : 1024.0);
     for (const auto &target : m_selection) {
         if (!hitFromSelection(target)) return;
@@ -488,6 +508,8 @@ void MapView3D::editSelectedHeights(int steps, bool fine, bool slopeEdit)
         } else {
             auto sector = candidate.sectors()[target.id];
             const bool floor = target.kind == DUKE_SURFACE_FLOOR;
+            const auto bunch = floor ? sector.floorBunch : sector.ceilingBunch;
+            if (bunch && !changedBunches.insert(*bunch).second) { continue; }
             if (slopeEdit) {
                 int &slope = floor ? sector.floorheinum : sector.ceilingheinum;
                 int &flags = floor ? sector.floorstat : sector.ceilingstat;
@@ -733,11 +755,18 @@ bool MapView3D::applySnapshot(MapDocument candidate)
     // Validate and upload before committing either the view or editor document.
     // The renderer owns immutable snapshots, so retain the old one on failure.
     QString error;
+    if (!candidate.validateTopologyChange(m_snapshot, error)) {
+        if (statusMessage) { statusMessage("Cannot edit surface: " + error); }
+        return false;
+    }
     DukeRenderer *replacement = nullptr;
     // The snapshot's start is only a validation placeholder, not the live
     // camera or the document's player start. Keep it inside the edited sector
     // when a floor/ceiling moves past its previous Z.
-    if (!placePreviewCamera(candidate, candidate.playerStart().position, error)) {
+    const auto preferred = candidate.playerStart().sectorId;
+    const auto scope = preferred && *preferred < candidate.sectors().size()
+        ? std::optional<std::set<MapDocument::SectorId>>({*preferred}) : std::nullopt;
+    if (!placePreviewCamera(candidate, candidate.playerStart().position, error, scope)) {
         if (statusMessage) { statusMessage("Cannot edit surface: " + error); }
         return false;
     }
@@ -771,6 +800,7 @@ bool MapView3D::applySnapshot(MapDocument candidate)
         m_renderer = replacement;
         duke_renderer_set_hover_enabled(m_renderer, m_hover);
         duke_renderer_set_sprite_picking_enabled(m_renderer, true);
+        duke_renderer_set_tror_planes_visible(m_renderer, m_trorPlanes);
         m_snapshot = std::move(candidate);
         syncSelection();
     }

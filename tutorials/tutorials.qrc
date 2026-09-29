@@ -1,5 +1,6 @@
 <RCC>
   <qresource prefix="/tutorials">
+    <file alias="tror-stacked-rooms/index.html">tror-stacked-rooms/index.html</file>
     <!-- Add each tutorial page and its images here, using aliases that keep
          the tutorial's folder structure inside the resource path. -->
     <file alias="vertical-doors/index.html">vertical-doors/index.html</file>

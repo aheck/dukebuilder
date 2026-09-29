@@ -108,6 +108,13 @@ mapsave_test = executable(
 )
 test('mapsave', mapsave_test)
 
+tror_test = executable('tror-test',
+  ['tests/tror_test.cpp', 'src/mapdocument.cpp', 'src/mapload.cpp', 'src/mapsave.cpp',
+   'src/recovery.cpp', 'src/previewcamera.cpp'],
+  include_directories: [include_directories('src'), libduke_inc],
+  dependencies: app_dependencies)
+test('tror', tror_test)
+
 grp_test_dependencies = app_dependencies
 grp_test_args = []
 if cpp.compiles('''

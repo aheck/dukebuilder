@@ -13,7 +13,10 @@ class MapView3D final : public QOpenGLWidget
 public:
     explicit MapView3D(QWidget *parent = nullptr);
     ~MapView3D() override;
-    bool start(const MapDocument &document, const QPointF &pointer, QString &error);
+    bool start(const MapDocument &document, const QPointF &pointer, QString &error,
+        const std::optional<std::set<MapDocument::SectorId>> &scope = std::nullopt);
+    void setTrorPlanesVisible(bool visible);
+    bool trorPlanesVisible() const { return m_trorPlanes; }
     void stop();
     void releaseMouseLook() { releaseLook(); }
     void runModal(const std::function<void()> &show);
@@ -85,6 +88,7 @@ private:
     bool m_captured = false;
     bool m_doubleClickSelectionArmed = false;
     bool m_hover = true;
+    bool m_trorPlanes = false;
     QWidget *m_crosshair = nullptr;
     MapDocument m_snapshot;
     QString m_archive;

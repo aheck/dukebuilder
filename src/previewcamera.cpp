@@ -4,12 +4,15 @@
 #include <cmath>
 #include <limits>
 
-bool placePreviewCamera(MapDocument &snapshot, const QPointF &pointer, QString &error)
+bool placePreviewCamera(MapDocument &snapshot, const QPointF &pointer, QString &error,
+    const std::optional<std::set<MapDocument::SectorId>> &scope)
 {
     double best = std::numeric_limits<double>::infinity();
     QPointF position;
     const MapDocument::Sector *selected = nullptr;
     for (const auto &sector : snapshot.sectors()) {
+        const auto id = static_cast<MapDocument::SectorId>(&sector-snapshot.sectors().data());
+        if (scope && !scope->empty() && !scope->count(id)) { continue; }
         if (sector.vertices.size() < 3) { continue; }
         QPainterPath path;
         path.setFillRule(Qt::OddEvenFill);
@@ -80,6 +83,7 @@ bool placePreviewCamera(MapDocument &snapshot, const QPointF &pointer, QString &
     double floor = surface(true), ceiling = surface(false);
     if (floor <= ceiling) { error = "The nearest sector has no vertical space for a camera."; return false; }
     snapshot.setPlayerStartPosition(position);
+    snapshot.setPlayerStartSector(static_cast<MapDocument::SectorId>(selected-snapshot.sectors().data()));
     snapshot.setPlayerStartZ(floor - std::min(6144.0, (floor-ceiling)*0.5));
     return true;
 }

@@ -10,6 +10,7 @@
 #include <tuple>
 #include <limits>
 #include <map>
+#include <array>
 
 namespace {
 constexpr qreal coordinateEpsilon = 0.001;
@@ -55,7 +56,13 @@ void MapDocument::setWallSide(WallId wallId, bool reversed, const WallSide &side
 
 void MapDocument::setSector(SectorId sectorId, const Sector &sector)
 {
-    if (sectorId < m_sectors.size()) m_sectors[sectorId] = sector;
+    if (sectorId >= m_sectors.size()) { return; }
+    const auto before = m_sectors[sectorId];
+    m_sectors[sectorId] = sector;
+    if (before.floorz != sector.floorz || before.floorheinum != sector.floorheinum
+        || ((before.floorstat ^ sector.floorstat) & 2)) { propagateTrorPlane(sectorId, true); }
+    if (before.ceilingz != sector.ceilingz || before.ceilingheinum != sector.ceilingheinum
+        || ((before.ceilingstat ^ sector.ceilingstat) & 2)) { propagateTrorPlane(sectorId, false); }
 }
 
 bool MapDocument::stickSpriteToWall(SpriteId id, QString &error)
@@ -197,6 +204,7 @@ std::vector<MapDocument::SectorId> MapDocument::sectorsAt(const QPointF &positio
 
 bool MapDocument::validateTopologyChange(const MapDocument &before, QString &error) const
 {
+    if (!validateTror(error)) { return false; }
     const auto fail = [&](const QString &why) { error = why; return false; };
     for (SectorId s = 0; s < m_sectors.size(); ++s) {
         const auto &sector = m_sectors[s];
@@ -588,6 +596,20 @@ bool MapDocument::addScopedPolyline(const std::vector<QPointF> &points, bool clo
         }
     }
 
+    // Planar reconstruction cannot yet repartition a connected TROR surface.
+    // Unrelated areas can still be drawn normally; their IDs remain stable.
+    for (SectorId s = 0; s < m_sectors.size(); ++s) {
+        if (!affected[s]) { continue; }
+        const auto &sector = m_sectors[s];
+        bool constrained = sector.floorBunch.has_value() || sector.ceilingBunch.has_value();
+        for (auto id : sector.walls) {
+            const auto &w = m_walls[id];
+            constrained |= w.forwardSide.upLink.has_value() || w.forwardSide.downLink.has_value()
+                || w.reverseSide.upLink.has_value() || w.reverseSide.downLink.has_value();
+        }
+        if (constrained) { return fail("Drawing would rebuild a TROR-connected boundary. Use linked vertex editing or Extend floor/ceiling; disconnect TROR before repartitioning this area."); }
+    }
+
     // Work on a compact copy of just the touched sectors. Global IDs and all
     // external portal sides are retained separately for the transactional merge.
     MapDocument local;
@@ -742,6 +764,60 @@ bool MapDocument::addScopedPolyline(const std::vector<QPointF> &points, bool clo
 
 std::optional<MapDocument::VertexId> MapDocument::splitWall(WallId wallId, const QPointF &position)
 {
+    if (wallId >= m_walls.size()) { return std::nullopt; }
+    const auto &edge = m_walls[wallId];
+    const auto a = m_vertices[edge.start].position, b = m_vertices[edge.end].position;
+    const auto delta = b-a, offset = position-a;
+    const double length = QLineF(a,b).length();
+    if (!std::isfinite(position.x()) || !std::isfinite(position.y()) || length <= coordinateEpsilon
+        || QPointF::dotProduct(offset,delta) <= coordinateEpsilon*length
+        || QPointF::dotProduct(position-b,delta) >= -coordinateEpsilon*length
+        || std::abs(offset.x()*delta.y()-offset.y()*delta.x()) > coordinateEpsilon*length) { return std::nullopt; }
+    if (!hasTror()) { return splitWallSingle(wallId, position); }
+    std::set<WallId> linked{wallId};
+    std::vector<WallId> queue{wallId};
+    for (std::size_t i = 0; i < queue.size(); ++i) {
+        const auto &w = m_walls[queue[i]];
+        for (const auto &side : {w.forwardSide, w.reverseSide}) {
+            for (const auto &link : {side.upLink, side.downLink}) {
+                if (link && link->wall < m_walls.size() && linked.insert(link->wall).second) { queue.push_back(link->wall); }
+            }
+        }
+    }
+    auto candidate = *this;
+    std::map<WallId, WallId> seconds;
+    std::optional<VertexId> result;
+    for (auto w : linked) {
+        seconds[w] = candidate.m_walls.size();
+        const auto vertex = candidate.splitWallSingle(w, position);
+        if (!vertex) { return std::nullopt; }
+        if (w == wallId) { result = vertex; }
+    }
+    for (auto w : linked) {
+        for (bool reversed : {false, true}) {
+            const auto &old = reversed ? m_walls[w].reverseSide : m_walls[w].forwardSide;
+            for (bool floor : {false, true}) {
+                const auto &link = floor ? old.downLink : old.upLink;
+                if (!link) { continue; }
+                if (!seconds.count(link->wall)) { return std::nullopt; }
+                for (bool second : {false, true}) {
+                    auto &wall = candidate.m_walls[second ? seconds[w] : w];
+                    auto &side = reversed ? wall.reverseSide : wall.forwardSide;
+                    const bool peerSecond = second != (reversed != link->reversed);
+                    (floor ? side.downLink : side.upLink) = WallSideRef{
+                        peerSecond ? seconds[link->wall] : link->wall, link->reversed};
+                }
+            }
+        }
+    }
+    QString error;
+    if (!candidate.validateTopologyChange(*this, error)) { return std::nullopt; }
+    *this = std::move(candidate);
+    return result;
+}
+
+std::optional<MapDocument::VertexId> MapDocument::splitWallSingle(WallId wallId, const QPointF &position)
+{
     if (wallId >= m_walls.size() || !std::isfinite(position.x()) || !std::isfinite(position.y())) {
         return std::nullopt;
     }
@@ -796,6 +872,7 @@ std::optional<MapDocument::VertexId> MapDocument::splitWall(WallId wallId, const
 std::optional<MapDocument::SectorId> MapDocument::joinSectors(
     const std::vector<SectorId> &ids, QString &error)
 {
+    if (hasTror()) { error = "Joining sector outlines in a TROR map is not supported. Disconnect TROR first."; return std::nullopt; }
     error.clear();
     const auto fail = [&](const QString &message) -> std::optional<SectorId> {
         error = message;
@@ -960,6 +1037,7 @@ std::optional<MapDocument::SectorId> MapDocument::joinSectors(
 
 bool MapDocument::removeSectors(const std::vector<SectorId> &ids, QString &error)
 {
+    if (hasTror()) { error = "Disconnect TROR before deleting sectors."; return false; }
     error.clear();
     const std::set<SectorId> removed(ids.begin(), ids.end());
     if (removed.empty() || *removed.rbegin() >= m_sectors.size()) {
@@ -1060,6 +1138,7 @@ bool MapDocument::removeSectors(const std::vector<SectorId> &ids, QString &error
 
 bool MapDocument::removeVertices(const std::vector<VertexId> &ids, QString &error)
 {
+    if (hasTror()) { error = "Deleting vertices in a TROR map is not supported. Disconnect TROR first."; return false; }
     error.clear();
     const std::set<VertexId> selected(ids.begin(), ids.end());
     if (selected.empty() || *selected.rbegin() >= m_vertices.size()) {
@@ -1164,6 +1243,7 @@ bool MapDocument::removeVertices(const std::vector<VertexId> &ids, QString &erro
 
 void MapDocument::removeWalls(const std::vector<WallId> &wallIds)
 {
+    if (hasTror()) { return; }
     if (!supportsLineDeletion()) return;
     const WallId removed = m_walls.size();
     std::vector<bool> selected(m_walls.size(), false);
@@ -1327,6 +1407,7 @@ void MapDocument::removeWalls(const std::vector<WallId> &wallIds)
 
 bool MapDocument::supportsLineDeletion() const
 {
+    if (hasTror()) { return false; }
     if (!m_complexTopology) return true;
     return std::all_of(m_sectors.begin(), m_sectors.end(), [](const Sector &sector) {
         return sector.loopStarts.size() <= 1 && sector.walls.size() >= 3;
@@ -1337,7 +1418,33 @@ void MapDocument::setVertexPositions(
     const std::vector<std::pair<VertexId, QPointF>> &positions, const MapDocument *scaleReference)
 {
     const MapDocument previous = scaleReference ? *scaleReference : *this;
-    for (const auto &[vertexId, position] : positions) {
+    std::map<VertexId, QPointF> resolved(positions.begin(), positions.end());
+    if (hasTror()) {
+        // Propagate by explicit links, never by coincident XY coordinates.
+        bool progress = true;
+        while (progress) {
+            progress = false;
+            for (const auto &wall : m_walls) {
+                for (bool reversed : {false, true}) {
+                    const auto &side = reversed ? wall.reverseSide : wall.forwardSide;
+                    for (const auto &link : {side.upLink, side.downLink}) {
+                        if (!link || link->wall >= m_walls.size()) { continue; }
+                        const auto &peer = m_walls[link->wall];
+                        for (bool end : {false, true}) {
+                            const auto a = (end != reversed) ? wall.end : wall.start;
+                            const auto b = (end != link->reversed) ? peer.end : peer.start;
+                            const auto source = resolved.find(a);
+                            if (source == resolved.end()) { continue; }
+                            auto [target, inserted] = resolved.emplace(b, source->second);
+                            if (!inserted && target->second != source->second) { return; }
+                            progress |= inserted;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (const auto &[vertexId, position] : resolved) {
         if (vertexId < m_vertices.size()) {
             m_vertices[vertexId].position = position;
         }
@@ -1396,6 +1503,7 @@ void MapDocument::setSectorFloorZ(std::size_t sectorId, qreal z)
 {
     if (sectorId < m_sectors.size()) {
         m_sectors[sectorId].floorz = z;
+        propagateTrorPlane(sectorId, true);
     }
 }
 
@@ -1403,6 +1511,7 @@ void MapDocument::setSectorCeilingZ(std::size_t sectorId, qreal z)
 {
     if (sectorId < m_sectors.size()) {
         m_sectors[sectorId].ceilingz = z;
+        propagateTrorPlane(sectorId, false);
     }
 }
 
@@ -1796,6 +1905,318 @@ std::size_t MapDocument::Sector::nextWallIndex(std::size_t index) const
     return index + 1 < walls.size() ? index + 1 : start;
 }
 
+namespace {
+struct TrorPlane {
+    double x = 0, y = 0, c = 0;
+    double at(const QPointF &p) const { return c + x*p.x() + y*p.y(); }
+};
+TrorPlane trorPlane(const MapDocument &d, MapDocument::SectorId id, bool floor)
+{
+    const auto &s = d.sectors()[id];
+    TrorPlane plane{0, 0, floor ? s.floorz : s.ceilingz};
+    if (((floor ? s.floorstat : s.ceilingstat) & 2) && s.vertices.size() >= 2) {
+        const auto a = d.vertices()[s.vertices[0]].position;
+        const auto b = d.vertices()[s.vertices[s.nextWallIndex(0)]].position;
+        const auto delta = b-a;
+        const double length = std::hypot(delta.x(), delta.y());
+        if (length > 0) {
+            const double scale = (floor ? s.floorheinum : s.ceilingheinum) / (256.0*length);
+            plane.x = -delta.y()*scale;
+            plane.y = delta.x()*scale;
+            plane.c -= plane.x*a.x()+plane.y*a.y();
+        }
+    }
+    return plane;
+}
+}
+
+bool MapDocument::hasTror() const
+{
+    for (const auto &s : m_sectors) {
+        if (s.ceilingBunch || s.floorBunch) { return true; }
+    }
+    for (const auto &w : m_walls) {
+        if (w.forwardSide.upLink || w.forwardSide.downLink || w.reverseSide.upLink || w.reverseSide.downLink) { return true; }
+    }
+    return false;
+}
+
+bool MapDocument::validateTror(QString &error) const
+{
+    error.clear();
+    if (!hasTror()) { return true; }
+    const auto fail = [&](const QString &why) { error = why; return false; };
+    std::array<std::array<int,2>,256> members{};
+    for (SectorId id = 0; id < m_sectors.size(); ++id) {
+        const auto &s = m_sectors[id];
+        if ((s.floorstat | s.ceilingstat) & 1024) { return fail("TROR marker bits are managed by the connection tools, not surface flags."); }
+        if (s.vertices.size() != s.walls.size() || s.vertices.empty()) { return fail("Invalid TROR sector boundary."); }
+        for (auto v : s.vertices) {
+            if (v >= m_vertices.size()) { return fail("Invalid TROR vertex reference."); }
+        }
+        for (auto w : s.walls) {
+            if (w >= m_walls.size()) { return fail("Invalid TROR wall reference."); }
+        }
+        for (std::size_t i = 0; i < s.vertices.size(); ++i) {
+            if (s.nextWallIndex(i) >= s.vertices.size()) { return fail("Invalid TROR boundary loop."); }
+        }
+        if (s.floorBunch && s.floorBunch == s.ceilingBunch) { return fail("A sector cannot belong to both sides of the same TROR bunch."); }
+        for (bool floor : {false, true}) {
+            const auto &bunch = floor ? s.floorBunch : s.ceilingBunch;
+            if (!bunch) { continue; }
+            if (*bunch < 0 || *bunch > 255) { return fail("TROR bunch IDs must be between 0 and 255."); }
+            if ((floor ? s.floorxpanning : s.ceilingxpanning) != 0) {
+                return fail("X panning is unavailable on connected TROR surfaces in version 9.");
+            }
+            ++members[*bunch][floor ? 1 : 0];
+        }
+        if (s.floorBunch || s.ceilingBunch) {
+            for (auto v : s.vertices) {
+                const auto p = m_vertices[v].position;
+                const double ceiling = trorPlane(*this,id,false).at(p), floor = trorPlane(*this,id,true).at(p);
+                if (!std::isfinite(ceiling) || !std::isfinite(floor) || ceiling > floor) {
+                    return fail("A TROR edit would invert a room's floor and ceiling.");
+                }
+            }
+        }
+    }
+    for (const auto &member : members) {
+        if ((member[0] == 0) != (member[1] == 0)) { return fail("TROR bunch is missing its opposite surface."); }
+    }
+    for (WallId w = 0; w < m_walls.size(); ++w) {
+        const auto &wall = m_walls[w];
+        if (wall.start >= m_vertices.size() || wall.end >= m_vertices.size()) { return fail("Invalid TROR wall vertices."); }
+        for (bool reversed : {false, true}) {
+            const auto &side = reversed ? wall.reverseSide : wall.forwardSide;
+            const auto owner = reversed ? wall.reverseSector : wall.forwardSector;
+            if (side.cstat & 3072) { return fail("TROR wall marker bits are managed by the connection tools, not wall flags."); }
+            if ((side.upLink && side.lotag != 0) || (side.downLink && side.extra != -1)) {
+                return fail("Upper TROR wall lotag and lower TROR wall extra are reserved for connections in version 9.");
+            }
+            for (bool floor : {false, true}) {
+                const auto &link = floor ? side.downLink : side.upLink;
+                if (!link) {
+                    if (owner && *owner < m_sectors.size()) {
+                        const auto &s = m_sectors[*owner];
+                        const auto bunch = floor ? s.floorBunch : s.ceilingBunch;
+                        const auto neighbor = reversed ? wall.forwardSector : wall.reverseSector;
+                        if (bunch && (!neighbor || *neighbor >= m_sectors.size()
+                            || (floor ? m_sectors[*neighbor].floorBunch : m_sectors[*neighbor].ceilingBunch) != bunch)) {
+                            return fail("A TROR bunch boundary is missing a vertical wall link.");
+                        }
+                    }
+                    continue;
+                }
+                if (!owner || *owner >= m_sectors.size() || link->wall >= m_walls.size()) { return fail("TROR wall link has an invalid owner or target."); }
+                const auto &peer = m_walls[link->wall];
+                if (peer.start >= m_vertices.size() || peer.end >= m_vertices.size()) { return fail("Invalid TROR peer vertices."); }
+                const auto peerOwner = link->reversed ? peer.reverseSector : peer.forwardSector;
+                const auto &peerSide = link->reversed ? peer.reverseSide : peer.forwardSide;
+                const auto &back = floor ? peerSide.upLink : peerSide.downLink;
+                if (!peerOwner || *peerOwner >= m_sectors.size() || !back || !(*back == WallSideRef{w,reversed})) {
+                    return fail("TROR wall links must be reciprocal.");
+                }
+                const auto &s = m_sectors[*owner], &t = m_sectors[*peerOwner];
+                const auto bunch = floor ? s.floorBunch : s.ceilingBunch;
+                if (!bunch || bunch != (floor ? t.ceilingBunch : t.floorBunch)) { return fail("TROR wall links have incompatible bunches."); }
+                for (bool end : {false, true}) {
+                    const auto a = m_vertices[(end != reversed) ? wall.end : wall.start].position;
+                    const auto b = m_vertices[(end != link->reversed) ? peer.end : peer.start].position;
+                    if (QLineF(a,b).length() > coordinateEpsilon) { return fail("Linked TROR boundaries must move and split together."); }
+                    if (std::abs(trorPlane(*this,*owner,floor).at(a)-trorPlane(*this,*peerOwner,!floor).at(b)) > 0.01) {
+                        return fail("Connected TROR planes must have matching heights and slopes. This slope cannot be represented by both first-wall directions.");
+                    }
+                }
+                if (members[*bunch][0] + members[*bunch][1] > 2 &&
+                    (((floor ? s.floorstat : s.ceilingstat) & 2) && (floor ? s.floorheinum : s.ceilingheinum))) {
+                    return fail("Sloped TROR connections require one sector on each side.");
+                }
+            }
+        }
+    }
+    return true;
+}
+
+void MapDocument::propagateTrorPlane(SectorId id, bool floor)
+{
+    const auto &source = m_sectors[id];
+    const auto bunch = floor ? source.floorBunch : source.ceilingBunch;
+    if (!bunch || source.vertices.size() < 2) { return; }
+    const auto plane = trorPlane(*this, id, floor);
+    for (SectorId s = 0; s < m_sectors.size(); ++s) {
+        for (bool f : {false, true}) {
+            auto &target = m_sectors[s];
+            if ((s == id && f == floor) || (f ? target.floorBunch : target.ceilingBunch) != bunch
+                || target.vertices.size() < 2) { continue; }
+            const auto a = m_vertices[target.vertices[0]].position;
+            const auto delta = m_vertices[target.vertices[target.nextWallIndex(0)]].position-a;
+            const auto length = std::hypot(delta.x(), delta.y());
+            const auto heinum = length > 0 ? 256*(-plane.x*delta.y()+plane.y*delta.x())/length : 0;
+            (f ? target.floorz : target.ceilingz) = plane.at(a);
+            (f ? target.floorheinum : target.ceilingheinum) = static_cast<int>(std::round(std::clamp(heinum,-32768.0,32767.0)));
+            auto &flags = f ? target.floorstat : target.ceilingstat;
+            flags = (flags & ~2) | (std::abs(heinum) > 0.001 ? 2 : 0);
+        }
+    }
+}
+
+std::set<MapDocument::SectorId> MapDocument::layerSectors(SectorId seed) const
+{
+    if (seed >= m_sectors.size()) { return {}; }
+    std::set<SectorId> result{seed};
+    std::vector<SectorId> queue{seed};
+    for (std::size_t i = 0; i < queue.size(); ++i) {
+        for (auto id : m_sectors[queue[i]].walls) {
+            const auto &w = m_walls[id];
+            for (const auto s : {w.forwardSector, w.reverseSector}) {
+                if (s && result.insert(*s).second) { queue.push_back(*s); }
+            }
+        }
+    }
+    return result;
+}
+
+std::set<MapDocument::SectorId> MapDocument::verticalNeighbors(SectorId id, bool floor) const
+{
+    std::set<SectorId> result;
+    if (id >= m_sectors.size()) { return result; }
+    const auto bunch = floor ? m_sectors[id].floorBunch : m_sectors[id].ceilingBunch;
+    if (!bunch) { return result; }
+    for (SectorId s = 0; s < m_sectors.size(); ++s) {
+        if ((floor ? m_sectors[s].ceilingBunch : m_sectors[s].floorBunch) == bunch) { result.insert(s); }
+    }
+    return result;
+}
+
+bool MapDocument::connectTror(SectorId upper, SectorId lower, QString &error)
+{
+    error.clear();
+    const auto fail = [&](const QString &why) { error = why; return false; };
+    if (upper >= m_sectors.size() || lower >= m_sectors.size() || upper == lower) { return fail("Choose distinct upper and lower sectors."); }
+    const auto &a = m_sectors[upper], &b = m_sectors[lower];
+    if (a.floorBunch || b.ceilingBunch) { return fail("Those surfaces are already connected. Disconnect their bunch first."); }
+    if (a.walls.size() != b.walls.size()) { return fail("TROR joining requires matching boundaries and vertex counts."); }
+    std::vector<std::pair<WallSideRef,WallSideRef>> pairs;
+    std::set<WallId> used;
+    for (std::size_t i = 0; i < a.walls.size(); ++i) {
+        const auto start = m_vertices[a.vertices[i]].position;
+        const auto end = m_vertices[a.vertices[a.nextWallIndex(i)]].position;
+        bool found = false;
+        for (std::size_t j = 0; j < b.walls.size(); ++j) {
+            if (used.count(b.walls[j])) { continue; }
+            if (QLineF(start,m_vertices[b.vertices[j]].position).length() > coordinateEpsilon
+                || QLineF(end,m_vertices[b.vertices[b.nextWallIndex(j)]].position).length() > coordinateEpsilon) { continue; }
+            if (std::abs(trorPlane(*this,upper,true).at(start)-trorPlane(*this,lower,false).at(start)) > 0.01
+                || std::abs(trorPlane(*this,upper,true).at(end)-trorPlane(*this,lower,false).at(end)) > 0.01) {
+                return fail("Move the upper floor and lower ceiling to the same plane before joining.");
+            }
+            pairs.push_back({{a.walls[i], m_walls[a.walls[i]].start != a.vertices[i]},
+                             {b.walls[j], m_walls[b.walls[j]].start != b.vertices[j]}});
+            used.insert(b.walls[j]); found = true; break;
+        }
+        if (!found) { return fail("TROR joining requires identical directed boundary edges, including holes."); }
+    }
+    std::set<int> bunches;
+    for (const auto &s : m_sectors) {
+        if (s.ceilingBunch) { bunches.insert(*s.ceilingBunch); }
+        if (s.floorBunch) { bunches.insert(*s.floorBunch); }
+    }
+    int bunch = 0;
+    while (bunches.count(bunch)) { ++bunch; }
+    if (bunch >= 256) { return fail("Version 9's limit of 256 TROR bunches has been reached."); }
+    auto candidate = *this;
+    candidate.m_sectors[upper].floorBunch = candidate.m_sectors[lower].ceilingBunch = bunch;
+    candidate.m_sectors[upper].floorxpanning = candidate.m_sectors[lower].ceilingxpanning = 0;
+    for (const auto &[up,down] : pairs) {
+        auto &u = candidate.m_walls[up.wall], &d = candidate.m_walls[down.wall];
+        (up.reversed ? u.reverseSide : u.forwardSide).downLink = down;
+        (down.reversed ? d.reverseSide : d.forwardSide).upLink = up;
+        (up.reversed ? u.reverseSide : u.forwardSide).extra = -1;
+        (down.reversed ? d.reverseSide : d.forwardSide).lotag = 0;
+    }
+    candidate.m_complexTopology = true;
+    if (!candidate.validateTopologyChange(*this,error)) { return false; }
+    *this = std::move(candidate);
+    return true;
+}
+
+std::optional<MapDocument::SectorId> MapDocument::extendTror(SectorId id, bool floor, qreal depth, QString &error)
+{
+    error.clear();
+    if (id >= m_sectors.size() || !std::isfinite(depth) || depth <= 0 || depth > 2147483647) {
+        error = "Choose a sector and a positive extension height."; return std::nullopt;
+    }
+    const auto source = m_sectors[id];
+    std::size_t wallCount = source.walls.size();
+    for (const auto &s : m_sectors) { wallCount += s.walls.size(); }
+    if (m_sectors.size() >= 4096 || wallCount > 16384) {
+        error = "The extension would exceed version 9's sector or wall limits."; return std::nullopt;
+    }
+    if (floor ? source.floorBunch.has_value() : source.ceilingBunch.has_value()) {
+        error = "This surface already has a TROR connection."; return std::nullopt;
+    }
+    auto candidate = *this;
+    const SectorId created = candidate.m_sectors.size();
+    const auto resolveMember = [&](auto &member) {
+        if (!member.sectorId) {
+            const auto owners = sectorsAt(member.position);
+            if (owners.size() == 1) { member.sectorId = owners.front(); }
+        }
+    };
+    resolveMember(candidate.m_playerStart);
+    for (auto &sprite : candidate.m_sprites) { resolveMember(sprite); }
+    auto sector = source;
+    sector.floorBunch.reset(); sector.ceilingBunch.reset();
+    sector.vertices.clear(); sector.walls.clear();
+    const qreal z = floor ? source.floorz : source.ceilingz;
+    sector.ceilingz = floor ? z : z-depth;
+    sector.floorz = floor ? z+depth : z;
+    const int slope = floor ? source.floorheinum : source.ceilingheinum;
+    const int slopeFlag = (floor ? source.floorstat : source.ceilingstat) & 2;
+    sector.floorheinum = sector.ceilingheinum = slope;
+    sector.floorstat = (sector.floorstat & ~2) | slopeFlag;
+    sector.ceilingstat = (sector.ceilingstat & ~2) | slopeFlag;
+    for (auto v : source.vertices) {
+        sector.vertices.push_back(candidate.m_vertices.size());
+        candidate.m_vertices.push_back(m_vertices[v]);
+    }
+    for (std::size_t i = 0; i < source.walls.size(); ++i) {
+        const auto &original = m_walls[source.walls[i]];
+        Wall wall{sector.vertices[i], sector.vertices[source.nextWallIndex(i)]};
+        wall.forwardSector = created;
+        wall.forwardSide = original.start == source.vertices[i] ? original.forwardSide : original.reverseSide;
+        wall.forwardSide.upLink.reset(); wall.forwardSide.downLink.reset();
+        sector.walls.push_back(candidate.m_walls.size());
+        candidate.m_walls.push_back(wall);
+    }
+    candidate.m_sectors.push_back(sector);
+    if (!candidate.connectTror(floor ? id : created, floor ? created : id, error)) { return std::nullopt; }
+    if (!candidate.validateTopologyChange(*this,error)) { return std::nullopt; }
+    *this = std::move(candidate);
+    return created;
+}
+
+bool MapDocument::disconnectTror(SectorId id, bool floor, QString &error)
+{
+    error.clear();
+    if (id >= m_sectors.size()) { error = "Choose a sector first."; return false; }
+    const auto bunch = floor ? m_sectors[id].floorBunch : m_sectors[id].ceilingBunch;
+    if (!bunch) { error = "This surface has no TROR connection."; return false; }
+    for (auto &sector : m_sectors) {
+        for (bool f : {false, true}) {
+            auto &member = f ? sector.floorBunch : sector.ceilingBunch;
+            if (member != bunch) { continue; }
+            for (std::size_t i = 0; i < sector.walls.size(); ++i) {
+                auto &wall = m_walls[sector.walls[i]];
+                auto &side = wall.start == sector.vertices[i] ? wall.forwardSide : wall.reverseSide;
+                (f ? side.downLink : side.upLink).reset();
+            }
+            member.reset();
+        }
+    }
+    return true;
+}
+
 bool MapDocument::Vertex::operator==(const Vertex &other) const
 {
     return position == other.position;
@@ -1805,11 +2226,11 @@ bool MapDocument::WallSide::operator==(const WallSide &other) const
 {
     return std::tie(
         texture, overlayTexture, shade, palette, xrepeat, yrepeat, xpanning, ypanning, cstat,
-        hitag, lotag, extra)
+        hitag, lotag, extra, upLink, downLink)
         == std::tie(
         other.texture, other.overlayTexture, other.shade, other.palette, other.xrepeat,
         other.yrepeat, other.xpanning, other.ypanning, other.cstat, other.hitag, other.lotag,
-        other.extra);
+        other.extra, other.upLink, other.downLink);
 }
 
 bool MapDocument::Wall::operator==(const Wall &other) const
@@ -1827,14 +2248,14 @@ bool MapDocument::Sector::operator==(const Sector &other) const
         walls, vertices, loopStarts, floorz, ceilingz, floorTexture, ceilingTexture, hitag,
         lotag, floorstat, ceilingstat, floorheinum, ceilingheinum, floorshade, ceilingshade,
         floorpal, ceilingpal, floorxpanning, floorypanning, ceilingxpanning, ceilingypanning,
-        visibility, extra, filler)
+        visibility, extra, filler, ceilingBunch, floorBunch)
         == std::tie(
         other.walls, other.vertices, other.loopStarts, other.floorz, other.ceilingz,
         other.floorTexture, other.ceilingTexture, other.hitag, other.lotag, other.floorstat,
         other.ceilingstat, other.floorheinum, other.ceilingheinum, other.floorshade,
         other.ceilingshade, other.floorpal, other.ceilingpal, other.floorxpanning,
         other.floorypanning, other.ceilingxpanning, other.ceilingypanning, other.visibility,
-        other.extra, other.filler);
+        other.extra, other.filler, other.ceilingBunch, other.floorBunch);
 }
 
 bool MapDocument::Sprite::operator==(const Sprite &other) const

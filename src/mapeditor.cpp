@@ -15,6 +15,7 @@
 #include <QGraphicsSimpleTextItem>
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPainterPath>
 #include <QProxyStyle>
@@ -673,6 +674,16 @@ void MapEditor::endEdit()
         return;
     }
     auto afterSelection = selection();
+    bool hiddenTrorChanged = false;
+    if (m_editingScope && m_document.hasTror()) {
+        for (std::size_t s = 0; s < m_document.sectors().size() && s < before.document.sectors().size(); ++s) {
+            if (m_editingScope->count(s)) { continue; }
+            hiddenTrorChanged |= !(m_document.sectors()[s] == before.document.sectors()[s]);
+            for (auto v : m_document.sectors()[s].vertices) {
+                if (v < before.document.vertices().size()) { hiddenTrorChanged |= !(m_document.vertices()[v] == before.document.vertices()[v]); }
+            }
+        }
+    }
     if (m_editLabel.startsWith("Change") && afterSelection.items.empty())
         afterSelection = before.selection;
     m_undoStack.push(new SnapshotCommand(this, std::move(before),
@@ -685,6 +696,7 @@ void MapEditor::endEdit()
         bytes += command->bytes();
         if (bytes > 128u * 1024u * 1024u && i != m_undoStack.count() - 1) command->expire();
     }
+    if (hiddenTrorChanged) { reportStatus("TROR constraints updated connected geometry on hidden layers too. Undo restores the whole edit."); }
 }
 
 void MapEditor::finishPendingEdit()
@@ -1570,15 +1582,27 @@ bool MapEditor::setEditingScope(std::optional<std::set<MapDocument::SectorId>> s
     applyEditingScope();
     reportStatus(!m_editingScope ? "All sectors editable"
         : m_editingScope->empty() ? "Independent drawing: no existing geometry will be attached"
-        : QString("Editing %1 sector(s); gray geometry is excluded. Real portal connections remain linked.").arg(m_editingScope->size()));
+        : QString("Editing %1 sector(s); gray geometry cannot be selected. Portal and TROR constraints remain linked, including hidden geometry.").arg(m_editingScope->size()));
     return true;
 }
 
 void MapEditor::applyEditingScope()
 {
     if (editingScopeChanged) {
-        editingScopeChanged(!m_editingScope ? "All sectors" : m_editingScope->empty() ? "Independent drawing"
-            : QString("%1 editable sector(s)").arg(m_editingScope->size()));
+        QString text = !m_editingScope ? "All sectors" : m_editingScope->empty() ? "Independent drawing"
+            : QString("%1 editable sector(s)").arg(m_editingScope->size());
+        if (m_editingScope && m_editingScope->size() == 1) {
+            const auto id = *m_editingScope->begin();
+            if (id < m_document.sectors().size()) {
+                const auto &s = m_document.sectors()[id];
+                if (s.ceilingBunch || s.floorBunch) {
+                    text += QString(" · Sector %1 · TROR ↑%2 ↓%3").arg(id)
+                        .arg(s.ceilingBunch ? QString::number(*s.ceilingBunch) : "—")
+                        .arg(s.floorBunch ? QString::number(*s.floorBunch) : "—");
+                }
+            }
+        }
+        editingScopeChanged(text);
     }
     m_editableWalls.assign(m_document.walls().size(), !m_editingScope);
     m_editableVertices.assign(m_document.vertices().size(), !m_editingScope);
@@ -1616,6 +1640,96 @@ void MapEditor::applyEditingScope()
 }
 
 void MapEditor::clearEditingScope() { setEditingScope(std::nullopt); }
+
+std::optional<MapDocument::SectorId> MapEditor::trorTarget()
+{
+    if (!m_drawingPoints.empty()) { reportStatus("Finish or cancel drawing first."); return std::nullopt; }
+    finishPendingEdit();
+    std::set<MapDocument::SectorId> candidates;
+    for (auto *item : m_scene->selectedItems()) {
+        if (dynamic_cast<SectorItem *>(item)) { candidates.insert(item->data(sectorIdRole).toULongLong()); }
+    }
+    if (candidates.empty() && m_editingScope) { candidates = *m_editingScope; }
+    if (candidates.empty()) { reportStatus("Select a sector in Sectors mode, or isolate its layer first."); return std::nullopt; }
+    if (candidates.size() == 1) { return *candidates.begin(); }
+    QStringList choices;
+    for (auto id : candidates) {
+        const auto &s = m_document.sectors()[id];
+        choices.append(QString("Sector %1 — ceiling %2, floor %3").arg(id).arg(s.ceilingz).arg(s.floorz));
+    }
+    bool ok = false;
+    const auto choice = QInputDialog::getItem(this, "TROR sector", "Choose a sector on the active layer:", choices, 0, false, &ok);
+    if (!ok) { return std::nullopt; }
+    return *std::next(candidates.begin(), choices.indexOf(choice));
+}
+
+void MapEditor::isolateCurrentLayer()
+{
+    const auto id = trorTarget();
+    if (id) { setEditingScope(m_document.layerSectors(*id)); }
+}
+
+void MapEditor::goTrorLayer(bool floor)
+{
+    const auto id = trorTarget();
+    if (!id) { return; }
+    const auto peers = m_document.verticalNeighbors(*id, floor);
+    if (peers.empty()) { reportStatus("No TROR connection in that direction."); return; }
+    std::set<MapDocument::SectorId> layer;
+    for (auto peer : peers) {
+        const auto component = m_document.layerSectors(peer);
+        layer.insert(component.begin(), component.end());
+    }
+    setEditingScope(std::move(layer));
+    reportStatus(QString("TROR: editing the layer %1 sector %2. Linked boundaries remain constrained.")
+        .arg(floor ? "below" : "above").arg(*id));
+}
+
+void MapEditor::extendSelectedTror(bool floor)
+{
+    const auto id = trorTarget();
+    if (!id) { return; }
+    bool ok = false;
+    const int height = QInputDialog::getInt(this, "Extend TROR sector",
+        "New room height (Build Z units):\nTROR reserves interface X panning and linked wall lotag/extra; those fields will be reset.",
+        32768, 1, 1048576, 1024, &ok);
+    if (!ok) { return; }
+    Edit edit(this, floor ? "Extend TROR floor" : "Extend TROR ceiling");
+    QString error;
+    const auto created = m_document.extendTror(*id, floor, height, error);
+    if (!created) { reportStatus(error); return; }
+    m_editingScope = m_document.layerSectors(*created);
+    rememberScopeTopology();
+    rebuildScene(); updateProperties();
+    reportStatus(QString("TROR sector %1 created and isolated. Use Layer above/below to navigate.").arg(*created));
+}
+
+void MapEditor::connectSelectedTror()
+{
+    if (!m_drawingPoints.empty()) { reportStatus("Finish or cancel drawing first."); return; }
+    finishPendingEdit();
+    if (m_sectorSelectionOrder.size() != 2) { reportStatus("Select two matching sectors in Sectors mode first (show both layers)."); return; }
+    if (QMessageBox::question(this, "Join TROR surfaces",
+        "Connect the matching floor and ceiling? Version 9 uses their X panning and the linked walls' upper lotag/lower extra fields for TROR; those values will be reset.") != QMessageBox::Yes) { return; }
+    Edit edit(this, "Join TROR surfaces");
+    QString error;
+    const auto a = m_sectorSelectionOrder[0], b = m_sectorSelectionOrder[1];
+    if (!m_document.connectTror(a,b,error) && !m_document.connectTror(b,a,error)) { reportStatus(error); return; }
+    rememberScopeTopology(); rebuildScene(); updateProperties();
+    reportStatus("TROR surfaces connected. Save will use version 9.");
+}
+
+void MapEditor::disconnectSelectedTror(bool floor)
+{
+    const auto id = trorTarget();
+    if (!id) { return; }
+    if (QMessageBox::question(this, "Disconnect TROR bunch",
+        "Disconnect every floor and ceiling in this bunch? The rooms remain, but the connecting planes will become solid.") != QMessageBox::Yes) { return; }
+    Edit edit(this, "Disconnect TROR bunch");
+    QString error;
+    if (!m_document.disconnectTror(*id,floor,error)) { reportStatus(error); return; }
+    rebuildScene(); updateProperties(); reportStatus("TROR bunch disconnected; geometry preserved.");
+}
 
 void MapEditor::drawIndependentSector()
 {
@@ -2180,6 +2294,7 @@ void MapEditor::mouseDoubleClickEvent(QMouseEvent *event)
         if (m_splitWall) {
             const auto vertexId = m_document.splitWall(*m_splitWall, m_splitPosition);
             if (vertexId) {
+                rememberScopeTopology();
                 rebuildScene();
                 for (auto *item : m_scene->items()) {
                     if (dynamic_cast<VertexItem *>(item)
@@ -2188,7 +2303,9 @@ void MapEditor::mouseDoubleClickEvent(QMouseEvent *event)
                         break;
                     }
                 }
-                reportStatus("Vertex created | Line split");
+                reportStatus(m_document.hasTror() ? "Vertex created | Linked TROR walls split together (including hidden layers)" : "Vertex created | Line split");
+            } else {
+                reportStatus("Cannot split this wall without invalidating connected geometry.");
             }
             event->accept();
             return;
@@ -2621,7 +2738,7 @@ void MapEditor::keyPressEvent(QKeyEvent *event)
 
     if (event->key() == Qt::Key_Delete && m_mode == Mode::Lines) {
         if (!m_document.supportsLineDeletion()) {
-            reportStatus("Line deletion is not yet supported for this imported map's complex effect geometry.");
+            reportStatus(m_document.hasTror() ? "Disconnect TROR before deleting lines." : "Line deletion is not yet supported for this imported map's complex effect geometry.");
             event->accept();
             return;
         }

@@ -179,6 +179,12 @@ public:
     void reorientGridToSelectedLine();
     void resetGridOrientation();
     void isolateSelectedSectors();
+    void isolateCurrentLayer();
+    void goTrorLayer(bool floor);
+    void extendSelectedTror(bool floor);
+    void connectSelectedTror();
+    void disconnectSelectedTror(bool floor);
+    const std::optional<std::set<MapDocument::SectorId>> &editingScope() const { return m_editingScope; }
     void filterEditingHeight();
     void clearEditingScope();
     void drawIndependentSector();
@@ -245,6 +251,7 @@ private:
     bool vertexEditable(MapDocument::VertexId id) const;
     void applyEditingScope();
     void rememberScopeTopology();
+    std::optional<MapDocument::SectorId> trorTarget();
     bool resolveDrawingScope(const QPointF &position);
     bool resolveAmbiguousPick(const QPoint &position);
     QList<QGraphicsItem *> pickItems(const QPoint &position) const;

@@ -622,9 +622,8 @@ int main(int argc, char **argv)
             map.mapversion = 9;
             return duke_map_file_write_to_filename(&map, QFile::encodeName(versionPath).constData());
         }), error);
-        const auto unchanged = smallV8;
-        require(!smallV8.openMap(versionPath, error) && smallV8 == unchanged,
-            "Version 9 remains unsupported and failed open preserves document");
+        require(smallV8.openMap(versionPath, error), "Version 9 maps without TROR can be opened");
+        assertVersion(smallV8, 7);
 
         auto sprites = room();
         for (int count = 1; count <= MAPV8_MAXSPRITES; ++count) {

@@ -271,7 +271,7 @@ does not clear an explicitly enabled sanitizer.
 
 ## Opening and saving maps
 
-Use **File → Open Map** (Ctrl+O) to open a version-7 or version-8 Build `.map`
+Use **File → Open Map** (Ctrl+O) to open a version-7, version-8, or version-9 Build `.map`
 file. The view centers on the player start, and Save uses the opened filename.
 An unsuccessful open leaves the current map intact. New, Open, and closing the application prompt to
 save unsaved changes first; choose Discard to proceed without saving or Cancel
@@ -315,10 +315,43 @@ texture alignment's first wall, and ambiguous effect loops, remain blocked with
 an explanation. Sprite creation in overlapping rooms also resolves the target
 sector and uses its local floor height.
 
+### Editing TROR layers
+
+New to TROR? Open **Help → Tutorials → TROR: Stacked Rooms (Beginner)** for a
+step-by-step example with a larger upper room and a smaller lower room.
+
+**Tools → TROR / Layers** provides layer isolation, navigation above/below,
+and commands to extend a selected sector's ceiling upward or floor downward.
+Extension creates a matching room and isolates it for editing. To connect two
+existing rooms, select both sectors and choose **Connect selected sectors**;
+their boundaries and connecting planes must match. Disconnecting a ceiling or
+floor removes its entire bunch connection, leaving the rooms intact. These map
+changes are undoable. Layer navigation itself does not change the map.
+
+Layers use ordinary wall-portal connectivity, not fixed height bands. Isolation
+limits picking and drawing, but explicit TROR constraints still apply: moving a
+linked vertex or splitting a linked wall updates its counterparts even in hidden
+layers. Connected plane heights and slopes also change together. Textures and
+shades remain independent. Entering 3D respects the isolated layer; **View → Show
+solid TROR planes** (**T** in 3D) displays the interfaces as a labeled texture on
+black, making them available for surface editing.
+
+Version 9 repurposes connected surfaces' X panning and linked walls' lotag/extra
+fields. Creation asks for confirmation before resetting these fields; properties
+show bunch/link information instead. Recovery files retain the connections.
+Existing multi-sector bunches are supported, but creation connects one sector
+to one sector, and sloped connections currently require that arrangement.
+Drawing that reconstructs a connected sector is rejected; drawing in unrelated
+rooms remains available. Sector joining and sector, wall, or vertex deletion
+are blocked while the map contains TROR. Disconnect the relevant connections
+(all connections for these deletion/join operations) before restructuring rooms.
+
 Use **File → Save** (Ctrl+S) or **Save As** (Ctrl+Shift+S) to write a
 Build `.map` file. Saving automatically uses version 7 for maps with at most
 1,024 sectors, 8,192 wall sides, and 4,096 sprites; exceeding any of those limits
 selects version 8 (up to 4,096 sectors, 16,384 wall sides, and 16,384 sprites).
+Maps with TROR connections always use version 9, with the version-8 count limits;
+removing all connections restores automatic version-7/version-8 selection.
 Shared lines count as two wall sides. This also means a version-8 map that fits
 the version-7 limits is saved as version 7. Save remembers the filename until you start a new
 map. Existing files are replaced only after validation and writing succeed.

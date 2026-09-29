@@ -16,8 +16,8 @@ bool MapDocument::openMap(const QString &filename, QString &error)
         if (!map) throw std::bad_alloc();
         const auto path = QFile::encodeName(filename);
         if (!duke_map_file_read_from_filename(map.get(), path.constData())) throw std::runtime_error(map->last_error);
-        if (map->mapversion != 7 && map->mapversion != 8)
-            throw std::runtime_error("Only version-7 and version-8 Build maps are supported.");
+        if (map->mapversion != 7 && map->mapversion != 8 && map->mapversion != 9)
+            throw std::runtime_error("Only version-7, version-8 and version-9 Build maps are supported.");
         if (map->numsectors == 0) throw std::runtime_error("The map contains no sectors.");
 
         // Import permits effect sectors; strict export geometry checks remain separate.
@@ -114,6 +114,15 @@ bool MapDocument::openMap(const QString &filename, QString &error)
             sector.floorstat = static_cast<uint16_t>(source.floorstat);
             sector.floorTexture = source.floorpicnum;
             sector.ceilingTexture = source.ceilingpicnum;
+            for (bool floor : {false, true}) {
+                const int bunch = duke_map_sector_get_bunch(map.get(), id, floor ? DUKE_MAP_FLOOR : DUKE_MAP_CEILING);
+                if (bunch >= 0) {
+                    (floor ? sector.floorBunch : sector.ceilingBunch) = bunch;
+                    (floor ? sector.floorstat : sector.ceilingstat) &= ~1024;
+                    (floor ? sector.floorxpanning : sector.ceilingxpanning) = 0;
+                    loaded.m_complexTopology = true;
+                }
+            }
             std::vector<bool> visited(source.wallnum, false);
             for (int initial = source.wallptr; initial < source.wallptr + source.wallnum; ++initial) {
                 if (visited[initial - source.wallptr]) continue;
@@ -130,6 +139,19 @@ bool MapDocument::openMap(const QString &filename, QString &error)
             }
             if (sector.walls.size() < 3) loaded.m_complexTopology = true;
             loaded.m_sectors.push_back(std::move(sector));
+        }
+        // Decode references only after every raw Build side has an editor ID.
+        for (int w = 0; w < map->numwalls; ++w) {
+            auto &wall = loaded.m_walls[wallIds[w]];
+            auto &side = reversed[w] ? wall.reverseSide : wall.forwardSide;
+            for (bool floor : {false, true}) {
+                const int peer = duke_map_wall_get_vertical_link(map.get(), w, floor ? DUKE_MAP_FLOOR : DUKE_MAP_CEILING);
+                if (peer >= 0) {
+                    (floor ? side.downLink : side.upLink) = WallSideRef{wallIds[peer], reversed[peer]};
+                    side.cstat &= ~(floor ? 2048 : 1024);
+                    (floor ? side.extra : side.lotag) = floor ? -1 : 0;
+                }
+            }
         }
         if (!loaded.m_complexTopology) {
             std::vector<QPainterPath> shapes;

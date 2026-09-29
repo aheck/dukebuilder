@@ -31,7 +31,8 @@ QString content(bool threeD)
             {"Escape", "Clear the selection while keeping mouse look active. With no selection, release the mouse."}, {"Left click in viewport", "Resume mouse look if released. While mouse look is active, select the highlighted surface or sprite; click it again or click empty space to clear selection."},
             {"Shift + left click", "Add or remove a surface or sprite from the selection. A plain click replaces the selection. Returning to 2D clears it."},
             {"Shift + double-click", "Add connected floors or ceilings at the same edge heights, or a connected run of wall sides with the same texture and palette."},
-            {"Q", "Return to 2D mode."}, {"H", "Toggle surface and sprite highlighting."}
+            {"Q", "Return to 2D mode."}, {"H", "Toggle surface and sprite highlighting."},
+            {"T", "Show/hide solid labeled TROR connection planes."}
         });
         html += section("Heights and slopes", {
             {"Mouse wheel", "Raise/lower the selected (or otherwise highlighted) floor, ceiling, or sprite by 1024 Z units per notch. Wheel-up raises it."},

@@ -22,6 +22,12 @@ public:
         QPointF position;
     };
 
+    struct WallSideRef {
+        WallId wall = 0;
+        bool reversed = false;
+        bool operator==(const WallSideRef &other) const { return wall == other.wall && reversed == other.reversed; }
+    };
+
     struct WallSide {
         bool operator==(const WallSide &other) const;
         int texture = 0;
@@ -36,6 +42,7 @@ public:
         int hitag = 0;
         int lotag = 0;
         int extra = -1;
+        std::optional<WallSideRef> upLink, downLink;
     };
 
     struct Wall {
@@ -82,6 +89,7 @@ public:
         int visibility = 0;
         int extra = -1;
         int filler = 0;
+        std::optional<int> ceilingBunch, floorBunch;
     };
 
     struct Sprite {
@@ -137,6 +145,13 @@ public:
     [[nodiscard]] std::vector<SectorId> sectorsAt(const QPointF &position) const;
     // Validate changed boundaries without rejecting unchanged imported effect loops.
     bool validateTopologyChange(const MapDocument &before, QString &error) const;
+    [[nodiscard]] bool hasTror() const;
+    bool validateTror(QString &error) const;
+    [[nodiscard]] std::set<SectorId> layerSectors(SectorId seed) const;
+    [[nodiscard]] std::set<SectorId> verticalNeighbors(SectorId sector, bool floor) const;
+    std::optional<SectorId> extendTror(SectorId sector, bool floor, qreal depth, QString &error);
+    bool connectTror(SectorId upper, SectorId lower, QString &error);
+    bool disconnectTror(SectorId sector, bool floor, QString &error);
     // Join a connected selection transactionally; the first ID supplies properties.
     std::optional<SectorId> joinSectors(const std::vector<SectorId> &ids, QString &error);
     // Remove sector interiors, retaining shared boundaries as solid walls.
@@ -168,6 +183,7 @@ public:
     void setPlayerStartPosition(const QPointF &position);
     void setPlayerStartZ(qreal z);
     void setPlayerStartAngle(qreal angle);
+    void setPlayerStartSector(SectorId id) { if (id < m_sectors.size()) { m_playerStart.sectorId = id; } }
 
     [[nodiscard]] const std::vector<Vertex> &vertices() const { return m_vertices; }
     [[nodiscard]] const std::vector<Wall> &walls() const { return m_walls; }
@@ -177,6 +193,8 @@ public:
 
 private:
     friend class RecoveryCodec;
+    std::optional<VertexId> splitWallSingle(WallId wallId, const QPointF &position);
+    void propagateTrorPlane(SectorId sector, bool floor);
     VertexId findOrAddVertex(const QPointF &position);
     bool addScopedPolyline(const std::vector<QPointF> &points, bool closed, QString *error,
                            const std::optional<std::set<SectorId>> &editable = std::nullopt);

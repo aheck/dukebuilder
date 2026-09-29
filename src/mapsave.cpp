@@ -86,6 +86,7 @@ static bool buildMap(const MapDocument &document, QString &error,
         if (issue) { issue->target = kind; issue->id = id; issue->reversed = reversed; }
     };
     try {
+        require(document.validateTror(error), error);
         const auto &sectors = document.sectors();
         require(!sectors.empty(), "The map has no closed sectors.");
         require(sectors.size() <= MAPV8_MAXSECTORS, "Version 8 supports at most 4096 sectors.");
@@ -114,6 +115,7 @@ static bool buildMap(const MapDocument &document, QString &error,
         DukeMapFile map{};
         map.mapversion = sectors.size() <= MAPV7_MAXSECTORS && wallCount <= MAPV7_MAXWALLS
             && spriteRecords.size() <= MAPV7_MAXSPRITES ? 7 : 8;
+        if (document.hasTror()) { map.mapversion = 9; }
         map.numsectors = static_cast<int16_t>(sectors.size());
         map.numwalls = static_cast<uint16_t>(wallCount);
         map.numsprites = static_cast<uint16_t>(spriteRecords.size());
@@ -152,6 +154,14 @@ static bool buildMap(const MapDocument &document, QString &error,
             out.hitag = bits(source.hitag, label + " hitag");
             out.ceilingpicnum = tile(source.ceilingTexture, label + " ceiling texture");
             out.floorpicnum = tile(source.floorTexture, label + " floor texture");
+            if (source.ceilingBunch) {
+                out.ceilingstat |= 1024;
+                out.ceilingxpanning = number<uint8_t>(*source.ceilingBunch, label + " ceiling bunch");
+            }
+            if (source.floorBunch) {
+                out.floorstat |= 1024;
+                out.floorxpanning = number<uint8_t>(*source.floorBunch, label + " floor bunch");
+            }
             for (std::size_t j = 0; j < source.walls.size(); ++j, ++nextWall) {
                 target(Target::Sector, id);
                 const auto wallId = source.walls[j];
@@ -201,6 +211,24 @@ static bool buildMap(const MapDocument &document, QString &error,
                 auto &wall = wallRecords[indices[side]];
                 wall.nextwall = static_cast<int16_t>(indices[1 - side]);
                 wall.nextsector = static_cast<int16_t>(wallOwners[indices[1 - side]]);
+            }
+        }
+        // Encode explicit vertical links using the final exported side indices.
+        for (std::size_t w = 0; w < sideIndices.size(); ++w) {
+            for (int reversed = 0; reversed < 2; ++reversed) {
+                const int index = sideIndices[w][reversed];
+                if (index < 0) { continue; }
+                const auto &side = reversed ? document.walls()[w].reverseSide : document.walls()[w].forwardSide;
+                for (bool floor : {false, true}) {
+                    const auto &link = floor ? side.downLink : side.upLink;
+                    if (!link) { continue; }
+                    require(link->wall < sideIndices.size(), "Invalid TROR wall reference.");
+                    const int peer = sideIndices[link->wall][link->reversed ? 1 : 0];
+                    require(peer >= 0, "TROR wall side has no sector owner.");
+                    auto &record = wallRecords[index];
+                    record.cstat |= floor ? 2048 : 1024;
+                    (floor ? record.extra : record.lotag) = static_cast<int16_t>(peer);
+                }
             }
         }
         // libduke exposes textual diagnostics. Translate exported wall numbers
@@ -278,7 +306,7 @@ static bool buildMap(const MapDocument &document, QString &error,
         map.cursectnum = membership(map.posx, map.posy, "Player start", start.sectorId);
         if (validation == BuildMapValidation::Strict) {
             if (!duke_map_file_validate(&map)) libraryFailure();
-        } else if (!duke_map_file_validate_references(&map)) {
+        } else if (!duke_map_file_validate_references(&map) || !duke_map_file_validate_tror(&map)) {
             libraryFailure();
         }
 

@@ -60,6 +60,12 @@ struct MapView3DTest {
         view.syncSelection();
     }
     static bool strafingLeft(const MapView3D &view) { return view.m_keys.contains(Qt::Key_A); }
+    static void raiseTrorPair(MapView3D &view) {
+        view.m_selection = {{DUKE_SURFACE_FLOOR, 0, false}, {DUKE_SURFACE_CEILING, 1, false}};
+        ++view.m_selectionRevision;
+        view.syncSelection();
+        view.editSelectedHeights(1, false, false);
+    }
     static std::size_t selected(const MapView3D &view) { return view.m_selection.size(); }
     static std::size_t selectionRevision(const MapView3D &view) { return view.m_selectionRevision; }
     static DukeCamera camera(const MapView3D &view) { return view.m_camera; }
@@ -121,7 +127,7 @@ int main(int argc, char **argv)
                 "Wall mass selection follows connected sides with matching textures");
     }
     // Optional original-game fixture: exercise entry and subsequent mesh rebuilds.
-    if (argc == 3) {
+    if (argc == 3 && QString::fromLocal8Bit(argv[2]) != "--tror-edit") {
         MapDocument imported;
         QString error;
         require(imported.openMap(QString::fromLocal8Bit(argv[2]), error), error.toUtf8().constData());
@@ -130,6 +136,15 @@ int main(int argc, char **argv)
         require(view->start(imported, imported.playerStart().position, error), error.toUtf8().constData());
         QTest::qWait(100);
         require(!view->grabFramebuffer().isNull(), "original map renders a frame");
+        if (imported.hasTror()) {
+            auto *toggle = window.findChild<QAction *>("showTrorPlanesAction");
+            require(toggle, "TROR plane action exists");
+            toggle->setChecked(true);
+            require(view->trorPlanesVisible(), "TROR plane action updates renderer mode");
+            require(!view->grabFramebuffer().isNull(), "solid TROR planes render");
+            toggle->setChecked(false);
+            require(!view->trorPlanesVisible(), "TROR plane mode can be disabled");
+        }
         imported.setSectorFloorTexture(0, 1);
         require(view->refreshDocument(imported), "original map supports 3D snapshot refresh");
         view->stop();
@@ -140,6 +155,26 @@ int main(int argc, char **argv)
     require(room.addPolyline({{-4096,-4096},{4096,-4096},{4096,4096},{-4096,4096}}, true), "room");
     room.setSectorCeilingZ(0,-32768);
     QString error;
+    if (argc == 3) {
+        auto linked = room;
+        require(linked.extendTror(0,true,32768,error).has_value(), "3D linked fixture");
+        editor->recoverDocument(linked,{});
+        view->show();
+        QTest::qWait(100);
+        require(view->start(linked,{0,0},error), error.toUtf8().constData());
+        view->setTrorPlanesVisible(true);
+        MapView3DTest::raiseTrorPair(*view);
+        require(editor->document().sectors()[0].floorz == -1024
+            && editor->document().sectors()[1].ceilingz == -1024,
+            "Selecting both connected planes raises the bunch exactly once");
+        require(editor->undoStack()->count() == 1, "Linked 3D edit is one undo command");
+        editor->undo();
+        require(editor->document() == linked, "3D linked plane undo restores both sides");
+        view->setTrorPlanesVisible(false);
+        view->stop();
+        std::cout << "TROR linked multi-selection height edit and undo passed\n";
+        return 0;
+    }
     QString path = settings.filePath("preview.map");
     require(saveBuildMap(room,path,error), "save fixture");
     require(editor->openMap(path,error,true) && editor->hasUnsavedChanges(), "Archive copy is unsaved");

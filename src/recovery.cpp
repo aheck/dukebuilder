@@ -13,13 +13,15 @@
 
 namespace {
 constexpr qint64 maximumBytes = 64 * 1024 * 1024;
-const QByteArray magic("DUKE-RECOVERY-1\n");
+const QByteArray magic("DUKE-RECOVERY-2\n");
+const QByteArray legacyMagic("DUKE-RECOVERY-1\n");
 // A fixed stream version and explicit integer widths make snapshots independent
 // of compiler layout, platform word size, and the Qt version used at runtime.
 class Archive {
 public:
     QDataStream &stream;
     bool reading;
+    bool tror = true;
     template<class T> void field(T &value) {
         if constexpr (std::is_integral_v<T>) {
             qint64 wire = static_cast<qint64>(value);
@@ -55,6 +57,7 @@ public:
     void field(MapDocument::Vertex &value) {
         field(value.position);
     }
+    void field(MapDocument::WallSideRef &value) { field(value.wall); field(value.reversed); }
     void field(MapDocument::WallSide &value) {
         field(value.texture);
         field(value.overlayTexture);
@@ -68,6 +71,7 @@ public:
         field(value.hitag);
         field(value.lotag);
         field(value.extra);
+        if (tror) { field(value.upLink); field(value.downLink); }
     }
     void field(MapDocument::Wall &value) {
         field(value.start);
@@ -102,6 +106,7 @@ public:
         field(value.visibility);
         field(value.extra);
         field(value.filler);
+        if (tror) { field(value.ceilingBunch); field(value.floorBunch); }
     }
     void field(MapDocument::Sprite &value) {
         field(value.position);
@@ -155,13 +160,14 @@ bool RecoveryCodec::decode(const QByteArray &data, RecoverySnapshot &snapshot, Q
 {
     error.clear();
     try {
-        if (data.size() > maximumBytes + magic.size() + 32 || !data.startsWith(magic)
+        const bool legacy = data.startsWith(legacyMagic);
+        if (data.size() > maximumBytes + magic.size() + 32 || (!data.startsWith(magic) && !legacy)
             || data.size() < magic.size() + 32) Archive::fail();
         auto payload = data.mid(magic.size() + 32);
         if (QCryptographicHash::hash(payload, QCryptographicHash::Sha256) != data.mid(magic.size(),32)) Archive::fail();
         QDataStream stream(&payload, QIODevice::ReadOnly);
         stream.setVersion(QDataStream::Qt_6_0);
-        Archive archive{stream, true};
+        Archive archive{stream, true, !legacy};
         RecoverySnapshot candidate;
         auto &d = candidate.document;
         archive.field(d.m_vertices); archive.field(d.m_walls); archive.field(d.m_sectors);
@@ -185,6 +191,8 @@ bool RecoveryCodec::decode(const QByteArray &data, RecoverySnapshot &snapshot, Q
                 previous = s.loopStarts[i];
             }
         }
+        QString trorError;
+        if (!d.validateTror(trorError)) Archive::fail();
         snapshot = std::move(candidate);
         return true;
     } catch (const std::exception &exception) {

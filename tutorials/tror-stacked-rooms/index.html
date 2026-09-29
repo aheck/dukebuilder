@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TROR: Stacked Rooms (Beginner)</title>
+  <style>
+    body { font: 16px sans-serif; margin: 1.5em; }
+    td, th { padding: 6px; }
+    pre { background: #eeeeee; color: #222222; padding: 12px; }
+  </style>
+</head>
+<body>
+<h1>TROR: Two Stacked Rooms</h1>
+<p>We will make a large upper room with a square opening in its floor, and a
+smaller room directly below that opening. You can look and fly through the
+opening in 3D. No sprites, lotags, or sector effectors are needed.</p>
+<p><strong>TROR</strong> means True Room Over Room. Simply overlapping two rooms
+does not connect them. A TROR connection joins an upper floor to a lower ceiling
+at the same height, making an opening between them.</p>
+<p>You can leave this tutorial open while you edit. Click the map viewport before
+using shortcuts. Save any existing work, then choose <strong>File → New</strong>.</p>
+
+<h2>1. Draw the larger upper room</h2>
+<ol>
+  <li>Set the grid size to <strong>256</strong> using the grid control in the status bar.</li>
+  <li>Press <strong>Ctrl+D</strong> for Draw mode. Draw a square 16 grid cells wide
+  and 16 cells tall. For an exact example, use corners <strong>(-2048, -2048),
+  (2048, -2048), (2048, 2048), (-2048, 2048)</strong>. The status bar shows the
+  pointer coordinates.</li>
+  <li>Click the first corner again to close the square.</li>
+  <li>Press <strong>S</strong> for Sectors mode and click inside it. In the
+  properties panel, set <strong>Ceiling Z</strong> to <strong>-16384</strong> and
+  <strong>Floor Z</strong> to <strong>0</strong>. Keep slopes at zero.</li>
+</ol>
+<p>Build heights run downward: a negative number is higher, and a positive number
+is lower. These are Build Z units, not the horizontal grid units.</p>
+
+<h2>2. Mark the smaller opening</h2>
+<ol>
+  <li>Press <strong>Ctrl+D</strong>. Inside the large square, draw another square
+  8 grid cells wide and tall: <strong>(-1024, -1024), (1024, -1024),
+  (1024, 1024), (-1024, 1024)</strong>. Close it by clicking its first corner.</li>
+  <li>Press <strong>S</strong> and click inside the small square. Check that its
+  ceiling is <strong>-16384</strong> and floor is <strong>0</strong>; set them
+  explicitly if necessary. The surrounding upper sector should have the same heights.</li>
+</ol>
+<p>The upper room now consists of two sectors: the surrounding floor and the
+small central sector. They look like one room because their heights match.
+The small sector will become the opening; <strong>do not delete it</strong>.</p>
+<pre>
+Top view of upper room (before extension)
++-----------------------+
+|                       |
+|     +-----------+     |
+|     | select    |     |
+|     | this      |     |
+|     | square    |     |
+|     +-----------+     |
+|   surrounding floor   |
++-----------------------+
+</pre>
+<p><strong>Do this before connecting TROR:</strong> the editor currently blocks
+drawing that repartitions an already connected sector.</p>
+
+<h2>3. Create the lower room</h2>
+<ol>
+  <li>With only the small central sector selected, choose
+  <strong>Tools → TROR / Layers → Extend floor downward…</strong>.</li>
+  <li>Enter <strong>16384</strong> for the new room height and accept. The dialog
+  warns that TROR reserves some panning and tag fields; these are unused in this new map.</li>
+</ol>
+<p>The editor creates the lower room and automatically isolates it. Other
+geometry turns gray. The lower room has ceiling <strong>0</strong> and floor
+<strong>16384</strong>. Its ceiling connects to the central upper sector's floor.</p>
+<table border="1" cellspacing="0">
+<tr><th>Sector</th><th>Ceiling Z</th><th>Floor Z</th></tr>
+<tr><td>Upper surrounding floor</td><td>-16384</td><td>0 (solid)</td></tr>
+<tr><td>Upper central opening</td><td>-16384</td><td>0 (TROR)</td></tr>
+<tr><td>Lower room</td><td>0 (TROR)</td><td>16384</td></tr>
+</table>
+<pre>
+Side view (not to scale)
+        large upper room
+  +-------------------------+  -16384
+  |                         |
+  +------+           +------+       0
+         |  opening  |
+         |           |
+         | lower room|
+         +-----------+          16384
+</pre>
+<p>You have <strong>two visible rooms made from three sectors</strong>. Only the
+central square connects vertically. The surrounding upper floor stays solid.
+Extending the entire large sector instead would make both rooms the same size.</p>
+
+<h2>4. Look at the result in 3D</h2>
+<ol>
+  <li>If you have not configured textures yet, add <strong>DUKE3D.GRP</strong>
+  under <strong>Settings → Game Data</strong>.</li>
+  <li>Point inside the isolated lower room and press <strong>Q</strong>.
+  You start in the lower room. Look upward: you should see the upper room's ceiling.</li>
+  <li>Use the mouse to look and <strong>W/S</strong> to fly forward/backward.
+  Look up and hold W to fly through the opening. This is a free-flight preview,
+  not player movement with gravity or collision.</li>
+  <li>Press <strong>T</strong> to show the connection as a solid labeled TROR
+  plane on black. Press T again to see through it. This is an editor display
+  toggle, not a floor added to the saved map.</li>
+  <li>Press <strong>Q</strong> to return to 2D.</li>
+</ol>
+<p>You can change ordinary floor, ceiling, and wall textures by pointing at a
+surface in 3D and right-clicking. Press Escape to clear a selection before
+editing just the pointed-at surface.</p>
+
+<h2>5. Switch between the two layers</h2>
+<p>In 2D, with the lower room isolated, choose
+<strong>Tools → TROR / Layers → Layer above</strong>. Both upper sectors become
+editable because they connect through ordinary walls. To go down again, press
+<strong>S</strong>, select the <strong>central opening sector</strong>, then
+choose <strong>Layer below</strong>. The surrounding floor has no downward connection.</p>
+<p><strong>Tools → Show all sectors</strong> removes isolation. The overlapping
+squares can then trigger a target chooser. Use layer isolation when you want
+unambiguous selection. Gray geometry is not deleted.</p>
+
+<h2>6. Place the player start and save</h2>
+<ol>
+  <li>Show all sectors and press <strong>T</strong> in 2D for Sprites mode
+  (T has a different meaning in 3D).</li>
+  <li>Select the player-start arrow and right-drag it onto the surrounding upper
+  floor, for example <strong>(-1536, 0)</strong>. Keep it away from the opening.
+  If a target chooser appears, choose the upper surrounding sector.</li>
+  <li>With the arrow selected, set its Z to <strong>-6144</strong> in the
+  properties panel. This puts it between the upper ceiling and floor.</li>
+  <li>Press <strong>Ctrl+S</strong> and save as <strong>my-first-tror.map</strong>.
+  The editor automatically uses map version 9 because the map contains TROR.</li>
+</ol>
+<p>The connected planes share a <em>bunch</em> ID, shown in properties. You do
+not need to enter this number yourself. To play the map, use a TROR-capable
+EDuke32 setup; original Duke Nukem 3D does not support version-9 TROR maps.
+This example has no stairs or lift back up from the lower room.</p>
+
+<h2>If something looks wrong</h2>
+<ul>
+  <li><strong>The opening is black with TROR lettering:</strong> press T in 3D
+  to turn off solid-plane display.</li>
+  <li><strong>Layer below says there is no connection:</strong> select the
+  upper central sector, not its surrounding floor.</li>
+  <li><strong>Both rooms change when moving a corner:</strong> linked opening
+  boundaries must match, even across hidden layers. To make the upper room
+  larger, use the surrounding sector described above, not a stretched opening.</li>
+  <li><strong>Drawing is rejected:</strong> finish the upper layout before
+  extension. Undo the extension to revise it, then extend again. Repartitioning
+  connected sectors is not supported yet.</li>
+  <li><strong>Save rejects the player start:</strong> move it onto the solid
+  upper floor and check its Z against the table above.</li>
+</ul>
+</body>
+</html>

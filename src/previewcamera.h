@@ -1,4 +1,5 @@
 #pragma once
 #include "mapdocument.h"
 // Prepare only a copy's player start for preview; never changes editor data.
-bool placePreviewCamera(MapDocument &snapshot, const QPointF &pointer, QString &error);
+bool placePreviewCamera(MapDocument &snapshot, const QPointF &pointer, QString &error,
+    const std::optional<std::set<MapDocument::SectorId>> &scope = std::nullopt);

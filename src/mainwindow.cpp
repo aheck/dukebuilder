@@ -657,10 +657,16 @@ MainWindow::MainWindow(QWidget *parent)
                           {8,"Flip X"},{16,"Masked"},{32,"One-way"},{64,"Block hitscan"},
                           {128,"Translucent"},{256,"Flip Y"},{512,"Reverse translucency"}});
                 addProperty("Hitag", QString::number(values.hitag), MapEditor::Property::Hitag);
-                addProperty("Lotag", QString::number(values.lotag), MapEditor::Property::WallLotag);
-                propertiesControl->openPersistentEditor(
-                    propertiesControl->topLevelItem(propertiesControl->topLevelItemCount() - 1), 1);
-                addProperty("Extra", QString::number(values.extra), MapEditor::Property::Extra, advancedGroup());
+                if (values.upLink) {
+                    new QTreeWidgetItem(propertiesControl, {"TROR upper wall", QString("%1 (%2)").arg(values.upLink->wall).arg(values.upLink->reversed ? "back" : "front")});
+                } else {
+                    addProperty("Lotag", QString::number(values.lotag), MapEditor::Property::WallLotag);
+                    propertiesControl->openPersistentEditor(
+                        propertiesControl->topLevelItem(propertiesControl->topLevelItemCount() - 1), 1);
+                }
+                if (values.downLink) {
+                    new QTreeWidgetItem(propertiesControl, {"TROR lower wall", QString("%1 (%2)").arg(values.downLink->wall).arg(values.downLink->reversed ? "back" : "front")});
+                } else { addProperty("Extra", QString::number(values.extra), MapEditor::Property::Extra, advancedGroup()); }
                 return;
             }
             if (properties->sector) {
@@ -688,7 +694,9 @@ MainWindow::MainWindow(QWidget *parent)
                 addProperty("Ceiling slope", QString::number(sector.ceilingheinum), MapEditor::Property::CeilingSlope);
                 addProperty("Ceiling shade", QString::number(sector.ceilingshade), MapEditor::Property::CeilingShade);
                 addProperty("Ceiling palette", QString::number(sector.ceilingpal), MapEditor::Property::CeilingPalette);
-                addProperty("Ceiling X panning", QString::number(sector.ceilingxpanning), MapEditor::Property::CeilingXPanning);
+                if (sector.ceilingBunch) {
+                    new QTreeWidgetItem(propertiesControl, {"Ceiling TROR bunch", QString::number(*sector.ceilingBunch)});
+                } else { addProperty("Ceiling X panning", QString::number(sector.ceilingxpanning), MapEditor::Property::CeilingXPanning); }
                 addProperty("Ceiling Y panning", QString::number(sector.ceilingypanning), MapEditor::Property::CeilingYPanning);
                 addFlags("Floor flags", sector.floorstat, MapEditor::Property::FloorStat,
                          {{1,"Parallax sky"},{2,"Sloped"},{4,"Swap texture axes"},{8,"Double texture scale"},
@@ -696,7 +704,9 @@ MainWindow::MainWindow(QWidget *parent)
                 addProperty("Floor slope", QString::number(sector.floorheinum), MapEditor::Property::FloorSlope);
                 addProperty("Floor shade", QString::number(sector.floorshade), MapEditor::Property::FloorShade);
                 addProperty("Floor palette", QString::number(sector.floorpal), MapEditor::Property::FloorPalette);
-                addProperty("Floor X panning", QString::number(sector.floorxpanning), MapEditor::Property::FloorXPanning);
+                if (sector.floorBunch) {
+                    new QTreeWidgetItem(propertiesControl, {"Floor TROR bunch", QString::number(*sector.floorBunch)});
+                } else { addProperty("Floor X panning", QString::number(sector.floorxpanning), MapEditor::Property::FloorXPanning); }
                 addProperty("Floor Y panning", QString::number(sector.floorypanning), MapEditor::Property::FloorYPanning);
                 std::vector<std::pair<int, QString>> wallChoices;
                 const auto outerEnd = sector.loopStarts.size() > 1 ? sector.loopStarts[1] : sector.walls.size();
@@ -1165,6 +1175,24 @@ MainWindow::MainWindow(QWidget *parent)
     connect(clearScopeAction, &QAction::triggered, editor, &MapEditor::clearEditingScope);
     auto *independentAction = toolsMenu->addAction("Draw independent sector");
     connect(independentAction, &QAction::triggered, editor, &MapEditor::drawIndependentSector);
+    auto *trorMenu = toolsMenu->addMenu("TROR / Layers");
+    const auto trorAction = [&](const QString &title, const std::function<void()> &operation) {
+        auto *action = trorMenu->addAction(title);
+        connect(action, &QAction::triggered, editor, operation);
+        return action;
+    };
+    trorAction("Isolate current layer", [editor] { editor->isolateCurrentLayer(); });
+    trorAction("Layer above", [editor] { editor->goTrorLayer(false); });
+    trorAction("Layer below", [editor] { editor->goTrorLayer(true); });
+    trorMenu->addSeparator();
+    trorAction("Extend ceiling upward…", [editor] { editor->extendSelectedTror(false); });
+    trorAction("Extend floor downward…", [editor] { editor->extendSelectedTror(true); });
+    trorAction("Connect selected sectors…", [editor] { editor->connectSelectedTror(); });
+    trorAction("Disconnect ceiling bunch…", [editor] { editor->disconnectSelectedTror(false); });
+    trorAction("Disconnect floor bunch…", [editor] { editor->disconnectSelectedTror(true); });
+    connect(views, &QStackedWidget::currentChanged, trorMenu, [=](int) {
+        trorMenu->setEnabled(views->currentWidget() == editor);
+    });
     connect(views, &QStackedWidget::currentChanged, editor, [=](int) {
         for (auto *action : {isolateAction, heightScopeAction, clearScopeAction, independentAction}) {
             action->setEnabled(views->currentWidget() == editor);
@@ -1313,6 +1341,15 @@ MainWindow::MainWindow(QWidget *parent)
     editor->addAction(spritesAction);
     connect(spritesAction, &QAction::toggled, editor, &MapEditor::setSpritesVisible);
     auto *toggle3D = viewMenu->addAction("3D Mode");
+    auto *trorPlanes = viewMenu->addAction("Show solid TROR planes");
+    trorPlanes->setObjectName("showTrorPlanesAction");
+    trorPlanes->setCheckable(true);
+    trorPlanes->setChecked(view3D->trorPlanesVisible());
+    trorPlanes->setShortcut(QKeySequence(Qt::Key_T));
+    trorPlanes->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    trorPlanes->setAutoRepeat(false);
+    view3D->addAction(trorPlanes);
+    connect(trorPlanes, &QAction::toggled, view3D, &MapView3D::setTrorPlanesVisible);
     toggle3D->setCheckable(true);
     toggle3D->setShortcut(QKeySequence(Qt::Key_Q));
     toggle3D->setAutoRepeat(false);
@@ -1408,7 +1445,7 @@ MainWindow::MainWindow(QWidget *parent)
         editor->setFocus(); // Commit any property edit before snapshotting.
         views->setCurrentWidget(view3D);
         QString error;
-        if (!view3D->start(editor->document(), start, error)) {
+        if (!view3D->start(editor->document(), start, error, editor->editingScope())) {
             leave3D();
             QMessageBox::warning(this, "Unable to enter 3D mode", error);
             return;
@@ -1464,22 +1501,26 @@ MainWindow::MainWindow(QWidget *parent)
     connect(help2DAction, &QAction::triggered, this, [=] { showShortcuts(help2D); });
     connect(help3DAction, &QAction::triggered, this, [=] { showShortcuts(help3D); });
     auto *tutorialsMenu = helpMenu->addMenu("Tutorials");
-    auto *verticalDoorsAction = tutorialsMenu->addAction("Vertical Doors");
-    connect(verticalDoorsAction, &QAction::triggered, this, [this, view3D] {
-        view3D->releaseMouseLook();
-        auto *dialog = new QDialog(this);
-        dialog->setAttribute(Qt::WA_DeleteOnClose);
-        dialog->setWindowTitle("Tutorial: Vertical Doors");
-        dialog->resize(760, 560);
-        auto *layout = new QVBoxLayout(dialog);
-        auto *browser = new QTextBrowser(dialog);
-        browser->setOpenExternalLinks(true);
-        browser->setSource(QUrl("qrc:/tutorials/vertical-doors/index.html"));
-        layout->addWidget(browser);
-        dialog->show();
-        dialog->raise();
-        dialog->activateWindow();
-    });
+    const auto addTutorial = [this, view3D, tutorialsMenu](const QString &title, const QString &path) {
+        auto *action = tutorialsMenu->addAction(title);
+        connect(action, &QAction::triggered, this, [this, view3D, title, path] {
+            view3D->releaseMouseLook();
+            auto *dialog = new QDialog(this);
+            dialog->setAttribute(Qt::WA_DeleteOnClose);
+            dialog->setWindowTitle("Tutorial: " + title);
+            dialog->resize(760, 560);
+            auto *layout = new QVBoxLayout(dialog);
+            auto *browser = new QTextBrowser(dialog);
+            browser->setOpenExternalLinks(true);
+            browser->setSource(QUrl("qrc:/tutorials/" + path + "/index.html"));
+            layout->addWidget(browser);
+            dialog->show();
+            dialog->raise();
+            dialog->activateWindow();
+        });
+    };
+    addTutorial("Vertical Doors", "vertical-doors");
+    addTutorial("TROR: Stacked Rooms (Beginner)", "tror-stacked-rooms");
     helpMenu->addSeparator();
     auto *aboutAction = helpMenu->addAction("&About");
     connect(aboutAction, &QAction::triggered, this, [this] {
