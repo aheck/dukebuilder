@@ -179,6 +179,7 @@ public:
     void reorientGridToSelectedLine();
     void resetGridOrientation();
     void isolateSelectedSectors();
+    void toggleSectorIsolation();
     void isolateCurrentLayer();
     void goTrorLayer(bool floor);
     void extendSelectedTror(bool floor);

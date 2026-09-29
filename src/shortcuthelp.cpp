@@ -91,7 +91,8 @@ QString content(bool threeD)
         });
         html += section("Overlapping geometry", {
             {"Ambiguous click", "Choose the intended object instead of selecting an arbitrary overlapping object. Cancel leaves the map unchanged."},
-            {"Tools → Isolate selected sectors", "Limit picking, snapping, and drawing to selected sectors; other geometry is gray."},
+            {"Tools → Toggle sector isolation", "Limit picking, snapping, and drawing to selected sectors; press again or use I to show all sectors."},
+            {"I", "Toggle sector isolation: isolate selected sectors, then show all sectors on the next press."},
             {"Tools → Edit height range", "Filter editable sectors by Build Z, including slopes. An ambiguous range still cannot merge independent rooms."},
             {"Tools → Show all sectors", "Reset the editing filter. The status bar shows the current scope."},
             {"Tools → Draw independent sector", "Draw a separate room without attaching to existing walls, even at identical coordinates."}

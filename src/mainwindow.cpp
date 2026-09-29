@@ -1167,8 +1167,11 @@ MainWindow::MainWindow(QWidget *parent)
     addModeAction("Sprites", QKeySequence(Qt::Key_T), MapEditor::Mode::Sprites);
 
     auto *toolsMenu = menuBar()->addMenu("&Tools");
-    auto *isolateAction = toolsMenu->addAction("Isolate selected sectors");
-    connect(isolateAction, &QAction::triggered, editor, &MapEditor::isolateSelectedSectors);
+    auto *isolateAction = toolsMenu->addAction("Toggle sector isolation");
+    isolateAction->setShortcut(QKeySequence(Qt::Key_I));
+    isolateAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    editor->addAction(isolateAction);
+    connect(isolateAction, &QAction::triggered, editor, &MapEditor::toggleSectorIsolation);
     auto *heightScopeAction = toolsMenu->addAction("Edit height range…");
     connect(heightScopeAction, &QAction::triggered, editor, &MapEditor::filterEditingHeight);
     auto *clearScopeAction = toolsMenu->addAction("Show all sectors");
@@ -1507,8 +1510,10 @@ MainWindow::MainWindow(QWidget *parent)
             view3D->releaseMouseLook();
             auto *dialog = new QDialog(this);
             dialog->setAttribute(Qt::WA_DeleteOnClose);
+            dialog->setWindowFlags(dialog->windowFlags() | Qt::WindowMinMaxButtonsHint);
             dialog->setWindowTitle("Tutorial: " + title);
-            dialog->resize(760, 560);
+            dialog->resize(1100, 800);
+            dialog->setMinimumSize(640, 480);
             auto *layout = new QVBoxLayout(dialog);
             auto *browser = new QTextBrowser(dialog);
             browser->setOpenExternalLinks(true);

@@ -1746,6 +1746,15 @@ void MapEditor::isolateSelectedSectors()
     setEditingScope(std::move(sectors));
 }
 
+void MapEditor::toggleSectorIsolation()
+{
+    if (m_editingScope) {
+        clearEditingScope();
+        return;
+    }
+    isolateSelectedSectors();
+}
+
 void MapEditor::filterEditingHeight()
 {
     QDialog dialog(this);

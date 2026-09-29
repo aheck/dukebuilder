@@ -294,8 +294,9 @@ below; some original effect geometry may be opened but cannot yet be saved.
 
 Overlapping object clicks offer a target chooser. Starting a drawing at an
 ambiguous location asks which sector to attach to and grays out the others.
-Alternatively, use **Tools → Isolate selected sectors** or **Edit height range…**
-to set an optional editing scope. Grayed-out geometry is excluded from picking,
+Alternatively, select sectors and use **Tools → Toggle sector isolation** (or
+press **I**) or use **Edit height range…** to set an optional editing scope.
+Press **I** again to show all sectors. Grayed-out geometry is excluded from picking,
 snapping, and drawing. The status bar shows the scope; **Show all sectors** resets
 it. Height filtering uses Build Z (smaller values are higher), including slope
 bounds. A filter containing ambiguous overlapping rooms still does not authorize
