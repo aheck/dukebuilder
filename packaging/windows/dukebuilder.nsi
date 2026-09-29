@@ -35,6 +35,8 @@ VIAddVersionKey /LANG=1033 "ProductVersion" "${APP_VERSION}"
 VIAddVersionKey /LANG=1033 "LegalCopyright" "Duke Builder contributors"
 
 !define MUI_ABORTWARNING
+!define MUI_ICON ${APP_ICON}
+!define MUI_UNICON ${APP_ICON}
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MULTIUSER_PAGE_INSTALLMODE
 !insertmacro MUI_PAGE_COMPONENTS

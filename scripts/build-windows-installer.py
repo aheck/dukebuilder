@@ -66,6 +66,7 @@ def make_config(stage, files, version, output, vc_redist=None):
     lines = [f'!define APP_VERSION {nsis_string(version)}',
              f'!define NUMERIC_VERSION {nsis_string(".".join(numeric) + ".0")}',
              f'!define OUTPUT_FILE {nsis_string(output)}',
+             f'!define APP_ICON {nsis_string(REPO / "icons/dukebuilder.ico")}',
              f'!define INSTALLED_KIB {max(1, (sum((stage / p).stat().st_size for p in files) + 1023) // 1024)}',
              '!macro InstallPayload']
     directories = set()

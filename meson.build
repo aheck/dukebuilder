@@ -200,13 +200,19 @@ app_sources = [
 # Qt supplies the Windows GUI entry point that forwards to main(). Keep this
 # dependency on the application only; test executables retain their consoles.
 gui_entrypoint = []
+windows_resources = []
 if host_machine.system() == 'windows'
   gui_entrypoint += dependency('qt6', modules: ['Core'], main: true)
+  windows_resources = import('windows').compile_resources(
+    'packaging/windows/dukebuilder.rc',
+    include_directories: include_directories('icons'),
+    depend_files: files('icons/dukebuilder.ico'),
+  )
 endif
 
 executable(
   'dukebuilder',
-  ['src/main.cpp'] + app_sources + tutorial_resources,
+  ['src/main.cpp'] + app_sources + tutorial_resources + windows_resources,
   cpp_args: app_cpp_args,
   dependencies: app_dependencies + renderer_dependencies + gui_entrypoint,
   win_subsystem: 'windows',

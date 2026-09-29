@@ -629,6 +629,11 @@ before distributing a release.
 
 ## Windows NSIS installer
 
+Windows builds embed `icons/dukebuilder.ico` in the application executable. The
+NSIS installer and uninstaller use the same icon, assembled from the supplied
+16–256 pixel PNGs in `icons/`. The ICO is checked in, so building on Windows does
+not require an image conversion tool.
+
 The installer packaging is ready for a **future Windows x64 build**. It does not
 cross-compile Duke Builder or resolve the remaining Windows build dependencies.
 It uses NSIS 3 (`makensis`) and Python 3 and can run on either Linux or Windows.
