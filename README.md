@@ -578,6 +578,55 @@ chmod +x DukeBuilder-0.1.0-x86_64.AppImage
 The desktop entry intentionally takes no filename argument: opening maps is
 currently handled through Duke Builder's File menu.
 
+## macOS application bundle
+
+`build-mac-app.py` builds the `dukebuilder` target in an already configured
+macOS Meson release build and packages it with the matching shared Qt 6 runtime.
+Run it on macOS with Python 3.9 or newer, Meson, Ninja, and the Xcode command
+line tools installed. Build `../libduke` and its renderer as release static
+libraries for the same architecture, with sanitizers disabled. Use shared Qt
+for this build; the current static Qt configuration lacks Cocoa plugin integration.
+
+For example, with a shared Qt installation available to Meson:
+
+```sh
+meson setup build-mac --buildtype=release -Db_sanitize=none
+python3 build-mac-app.py build-mac --macdeployqt /path/to/Qt/bin/macdeployqt
+```
+
+Supply any necessary Meson native file or Qt discovery environment when
+configuring the build. The deployment tool must come from the Qt installation
+used to compile the application; it can also be found on `PATH`.
+
+The result is `dist/DukeBuilder-<version>-<architecture>.app`. Both the version
+and executable location come from Meson introspection. Architecture is read
+from the executable (`arm64`, `x86_64`, or `universal2`); the script does not
+cross-compile or combine builds. Apple numeric version fields use the three
+numeric components of the Meson version; any prerelease suffix is retained in
+the output name and the `DukeBuilderProjectVersion` plist field.
+
+The script stages a fresh bundle, deploys Qt frameworks and plugins using
+[macdeployqt](https://doc.qt.io/qt-6/macos-deployment.html), checks the Cocoa
+and JPEG plugins, checks bundled Mach-O architectures and dependency paths,
+and verifies signatures before moving the result into place. Dependency checks
+support each library's own rpaths and those inherited from the main executable;
+unresolved paths fail packaging. Existing output bundles are never overwritten.
+These checks do not replace running the application on a clean Mac.
+
+Options include `--output-dir PATH`, `--icon PATH.icns`, `--bundle-id ID`, and
+`--licenses-dir PATH` for dependency redistribution notices. The project license
+is included automatically. Without an icon, Finder uses its generic app icon.
+Tutorials are embedded in the executable; game data and EDuke32 are supplied
+separately by the user.
+
+By default the bundle is ad-hoc signed for local use. For distribution, pass
+`--sign-identity "Developer ID Application: ..."` to enable Developer ID signing,
+hardened runtime, and a timestamp. Notarization and stapling are separate steps.
+The supported macOS baseline is determined by the application and its dependencies
+at build time. This packaging flow has not yet been exercised on macOS; verify
+launching from Finder, loading game data, tutorials, and OpenGL 4.1 rendering
+before distributing a release.
+
 ## Windows NSIS installer
 
 The installer packaging is ready for a **future Windows x64 build**. It does not
