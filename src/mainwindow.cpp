@@ -1510,7 +1510,10 @@ MainWindow::MainWindow(QWidget *parent)
             view3D->releaseMouseLook();
             auto *dialog = new QDialog(this);
             dialog->setAttribute(Qt::WA_DeleteOnClose);
-            dialog->setWindowFlags(dialog->windowFlags() | Qt::WindowMinMaxButtonsHint);
+            // Use a regular window: native dialog decorations can disable minimize.
+            dialog->setWindowFlags(Qt::Window | Qt::WindowTitleHint
+                                   | Qt::WindowSystemMenuHint | Qt::WindowMinMaxButtonsHint
+                                   | Qt::WindowCloseButtonHint);
             dialog->setWindowTitle("Tutorial: " + title);
             dialog->resize(1100, 800);
             dialog->setMinimumSize(640, 480);
