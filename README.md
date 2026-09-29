@@ -318,7 +318,7 @@ sector and uses its local floor height.
 
 ### Editing TROR layers
 
-New to TROR? Open **Help → Tutorials → TROR: Stacked Rooms (Beginner)** for a
+New to TROR? Open **Help → Mini Tutorials → TROR: Stacked Rooms (Beginner)** for a
 step-by-step example with a larger upper room and a smaller lower room.
 
 **Tools → TROR / Layers** provides layer isolation, navigation above/below,
@@ -616,7 +616,7 @@ These checks do not replace running the application on a clean Mac.
 Options include `--output-dir PATH`, `--icon PATH.icns`, `--bundle-id ID`, and
 `--licenses-dir PATH` for dependency redistribution notices. The project license
 is included automatically. Without an icon, Finder uses its generic app icon.
-Tutorials are embedded in the executable; game data and EDuke32 are supplied
+Mini Tutorials are embedded in the executable; game data and EDuke32 are supplied
 separately by the user.
 
 By default the bundle is ad-hoc signed for local use. For distribution, pass
@@ -624,7 +624,7 @@ By default the bundle is ad-hoc signed for local use. For distribution, pass
 hardened runtime, and a timestamp. Notarization and stapling are separate steps.
 The supported macOS baseline is determined by the application and its dependencies
 at build time. This packaging flow has not yet been exercised on macOS; verify
-launching from Finder, loading game data, tutorials, and OpenGL 4.1 rendering
+launching from Finder, loading game data, Mini Tutorials, and OpenGL 4.1 rendering
 before distributing a release.
 
 ## Windows NSIS installer

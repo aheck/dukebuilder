@@ -1503,7 +1503,7 @@ MainWindow::MainWindow(QWidget *parent)
     auto *help3DAction = helpMenu->addAction("3D Mode Shortcuts");
     connect(help2DAction, &QAction::triggered, this, [=] { showShortcuts(help2D); });
     connect(help3DAction, &QAction::triggered, this, [=] { showShortcuts(help3D); });
-    auto *tutorialsMenu = helpMenu->addMenu("Tutorials");
+    auto *tutorialsMenu = helpMenu->addMenu("Mini Tutorials");
     const auto addTutorial = [this, view3D, tutorialsMenu](const QString &title, const QString &path) {
         auto *action = tutorialsMenu->addAction(title);
         connect(action, &QAction::triggered, this, [this, view3D, title, path] {
@@ -1514,7 +1514,7 @@ MainWindow::MainWindow(QWidget *parent)
             dialog->setWindowFlags(Qt::Window | Qt::WindowTitleHint
                                    | Qt::WindowSystemMenuHint | Qt::WindowMinMaxButtonsHint
                                    | Qt::WindowCloseButtonHint);
-            dialog->setWindowTitle("Tutorial: " + title);
+            dialog->setWindowTitle("Mini Tutorial: " + title);
             dialog->resize(1100, 800);
             dialog->setMinimumSize(640, 480);
             auto *layout = new QVBoxLayout(dialog);
