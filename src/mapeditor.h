@@ -213,6 +213,8 @@ protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    void keyReleaseEvent(QKeyEvent *event) override;
+    void focusOutEvent(QFocusEvent *event) override;
     void drawBackground(QPainter *painter, const QRectF &rect) override;
 
 private:
@@ -287,6 +289,8 @@ private:
     QPoint m_spriteRightPressPosition;
     MapDocument::SpriteId m_clickedSprite = 0;
     bool m_panning = false;
+    bool m_spaceHeld = false;
+    Qt::MouseButton m_panButton = Qt::NoButton;
     bool m_draggingVertices = false;
     bool m_draggingSprites = false;
     bool m_spriteDragMoved = false;

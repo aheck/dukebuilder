@@ -60,7 +60,7 @@ QString content(bool threeD)
             {"S", "Sectors mode."}, {"T", "Sprites mode."},
             {"Shift+T", "Show/hide sprites in 2D. Sprites mode always shows sprites."},
             {"Q", "Enter 3D near the pointer (or the viewport center when the pointer is outside)."},
-            {"Middle-mouse drag", "Pan the map."}, {"Mouse wheel", "Zoom around the pointer."},
+            {"Middle-mouse drag / Space + left-drag", "Pan the map without changing the selection or drawing."}, {"Mouse wheel", "Zoom around the pointer."},
             {"G", "Show/hide the grid."}, {"[ / ]", "Decrease/increase grid spacing."},
             {"F11", "Reorient the grid to the selected line; select exactly one line first."},
             {"F12", "Reset the grid orientation."}

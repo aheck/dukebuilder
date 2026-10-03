@@ -148,7 +148,8 @@ as saved. New edits after undo discard the redo branch. History retains at most
   walls, together with existing walls, create a sector.
 - **Backspace:** remove the last point from the active drawing.
 - **Escape:** cancel the active drawing.
-- **Middle-mouse drag:** pan the map.
+- **Middle-mouse drag / Space + left-drag:** pan the map. Hold Space before
+  pressing the left button; releasing the mouse ends the pan.
 - **Mouse wheel:** zoom around the cursor.
 - **Zoom:** the default 100% is a level-design working scale (1024 map units
   span about 82 pixels). Use the status-bar zoom selector to return to 100%.

@@ -3,6 +3,8 @@
 
 #include <QApplication>
 #include <QKeyEvent>
+#include <QFocusEvent>
+#include <QScrollBar>
 #include <QMouseEvent>
 #include <QTemporaryDir>
 #include <QInputDialog>
@@ -61,6 +63,43 @@ int main(int argc, char **argv)
     editor.setZoomPercent(200);
     editor.centerOn(768,512);
     QApplication::processEvents();
+
+    // Panning must not place drawing points or change map history.
+    const auto pan = [&](Qt::MouseButton button, bool space) {
+        const QPoint start(400, 300), end(440, 330);
+        const int horizontal = editor.horizontalScrollBar()->value();
+        const int vertical = editor.verticalScrollBar()->value();
+        if (space) {
+            QKeyEvent key(QEvent::KeyPress, Qt::Key_Space, Qt::NoModifier);
+            QApplication::sendEvent(&editor, &key);
+        }
+        QMouseEvent press(QEvent::MouseButtonPress, start, editor.viewport()->mapToGlobal(start),
+                          button, button, Qt::NoModifier);
+        QApplication::sendEvent(editor.viewport(), &press);
+        if (space) {
+            QKeyEvent key(QEvent::KeyRelease, Qt::Key_Space, Qt::NoModifier);
+            QApplication::sendEvent(&editor, &key);
+        }
+        QMouseEvent move(QEvent::MouseMove, end, editor.viewport()->mapToGlobal(end),
+                         Qt::NoButton, button, Qt::NoModifier);
+        QApplication::sendEvent(editor.viewport(), &move);
+        require(editor.horizontalScrollBar()->value() == horizontal - 40
+                && editor.verticalScrollBar()->value() == vertical - 30,
+                "Both pan bindings move the viewport, even if Space is released first");
+        QMouseEvent release(QEvent::MouseButtonRelease, end, editor.viewport()->mapToGlobal(end),
+                            button, Qt::NoButton, Qt::NoModifier);
+        QApplication::sendEvent(editor.viewport(), &release);
+        require(editor.cursor().shape() == Qt::CrossCursor, "Mouse release ends panning");
+        require(editor.document() == source && editor.drawingPoints().empty()
+                && editor.undoStack()->count() == 0, "Panning leaves geometry and history unchanged");
+    };
+    pan(Qt::LeftButton, true);
+    pan(Qt::MiddleButton, false);
+    QKeyEvent heldSpace(QEvent::KeyPress, Qt::Key_Space, Qt::NoModifier);
+    QApplication::sendEvent(&editor, &heldSpace);
+    QFocusEvent focusOut(QEvent::FocusOut);
+    QApplication::sendEvent(&editor, &focusOut);
+    editor.centerOn(768,512);
 
     click({1024,256});
     click({1536,256});

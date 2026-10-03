@@ -13,6 +13,7 @@
 #include <QGraphicsRectItem>
 #include <QGraphicsSceneHoverEvent>
 #include <QGraphicsSimpleTextItem>
+#include <QFocusEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QMessageBox>
@@ -1896,6 +1897,22 @@ QPointF MapEditor::snappedPosition(const QPoint &viewportPosition, bool disableS
 void MapEditor::mousePressEvent(QMouseEvent *event)
 {
     m_resolvedPick = nullptr;
+    // Handle navigation before picking or drawing so Space-drag cannot edit the map.
+    if (event->button() == Qt::MiddleButton
+        || (event->button() == Qt::LeftButton && m_spaceHeld)) {
+        clearSplitPreview();
+        m_panning = true;
+        m_panButton = event->button();
+        m_lastPanPosition = event->position().toPoint();
+        setFocus(Qt::MouseFocusReason);
+        setCursor(Qt::ClosedHandCursor);
+        event->accept();
+        return;
+    }
+    if (m_panning) {
+        event->accept();
+        return;
+    }
     if (event->button() == Qt::LeftButton || event->button() == Qt::RightButton) {
         if (m_mode == Mode::Draw && event->button() == Qt::LeftButton && m_drawingPoints.empty()) {
             if (!resolveDrawingScope(mapToScene(event->position().toPoint()))) { event->accept(); return; }
@@ -1921,13 +1938,6 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
     }
 
     if (event->button() != Qt::LeftButton) clearSplitPreview();
-    if (event->button() == Qt::MiddleButton) {
-        m_panning = true;
-        m_lastPanPosition = event->position().toPoint();
-        setCursor(Qt::ClosedHandCursor);
-        event->accept();
-        return;
-    }
 
     if (event->button() == Qt::RightButton && m_mode == Mode::Sprites) {
         SpriteItem *sprite = nullptr;
@@ -2290,6 +2300,10 @@ void MapEditor::updateSplitPreview(const QPoint &position, bool disableSnapping)
 
 void MapEditor::mouseDoubleClickEvent(QMouseEvent *event)
 {
+    if (m_panning || (event->button() == Qt::LeftButton && m_spaceHeld)) {
+        mousePressEvent(event);
+        return;
+    }
     if (m_mode == Mode::Vertices && event->button() == Qt::LeftButton) {
         updateSplitPreview(event->position().toPoint(), event->modifiers().testFlag(Qt::AltModifier));
         if (m_splitWall && !resolveDrawingScope(m_splitPosition)) {
@@ -2555,8 +2569,9 @@ void MapEditor::mouseReleaseEvent(QMouseEvent *event)
         return;
     }
 
-    if (event->button() == Qt::MiddleButton && m_panning) {
+    if (event->button() == m_panButton && m_panning) {
         m_panning = false;
+        m_panButton = Qt::NoButton;
         setCursor(Qt::CrossCursor);
         event->accept();
         return;
@@ -2642,6 +2657,11 @@ void MapEditor::stickSelectedSpriteToWall()
 
 void MapEditor::keyPressEvent(QKeyEvent *event)
 {
+    if (event->key() == Qt::Key_Space) {
+        m_spaceHeld = true;
+        event->accept();
+        return;
+    }
     const bool controlCopy = event->modifiers().testFlag(Qt::ControlModifier)
         && event->key() == Qt::Key_C;
     const bool controlPaste = event->modifiers().testFlag(Qt::ControlModifier)
@@ -2810,6 +2830,31 @@ void MapEditor::keyPressEvent(QKeyEvent *event)
         return;
     }
     QGraphicsView::keyPressEvent(event);
+}
+
+void MapEditor::keyReleaseEvent(QKeyEvent *event)
+{
+    if (event->key() == Qt::Key_Space) {
+        if (!event->isAutoRepeat()) {
+            m_spaceHeld = false;
+        }
+        // Finish an active pan on mouse release even if Space is released first.
+        event->accept();
+        return;
+    }
+    QGraphicsView::keyReleaseEvent(event);
+}
+
+void MapEditor::focusOutEvent(QFocusEvent *event)
+{
+    // A release can go to another widget after a focus change; clear held state.
+    m_spaceHeld = false;
+    if (m_panning) {
+        m_panning = false;
+        m_panButton = Qt::NoButton;
+        setCursor(Qt::CrossCursor);
+    }
+    QGraphicsView::focusOutEvent(event);
 }
 
 void MapEditor::addDrawingPoint(const QPointF &position)
