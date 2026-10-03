@@ -11,7 +11,8 @@ project(
   ],
 )
 
-qt6 = dependency('qt6', modules: ['Core', 'Widgets', 'OpenGLWidgets'])
+# Framework discovery on macOS needs explicit modules for directly used headers.
+qt6 = dependency('qt6', modules: ['Core', 'Gui', 'Widgets', 'OpenGL', 'OpenGLWidgets'])
 qt6_module = import('qt6')
 tutorial_resources = qt6_module.compile_resources(sources: 'tutorials/tutorials.qrc')
 icon_resources = []
@@ -22,9 +23,10 @@ cpp = meson.get_compiler('cpp')
 
 libduke_root = meson.current_source_dir() / '..' / 'libduke'
 fs = import('fs')
+libduke_build = libduke_root / get_option('libduke_build_dir')
 libduke_libraries = []
 foreach name : ['duke', 'duke-render']
-  archive = libduke_root / 'build' / ('lib' + name + '.a')
+  archive = libduke_build / ('lib' + name + '.a')
   if host_machine.system() == 'windows' and fs.is_file(archive)
     # Meson can produce .a static archives alongside .lib DLL import libraries
     # on Windows. Pass the archive explicitly: MSVC's library-name lookup uses
@@ -33,7 +35,7 @@ foreach name : ['duke', 'duke-render']
     message('Linking static libduke archive: ' + archive)
   else
     libduke_libraries += cpp.find_library(name,
-      dirs: libduke_root / 'build', static: true, required: true)
+      dirs: libduke_build, static: true, required: true)
   endif
 endforeach
 libduke = libduke_libraries[0]

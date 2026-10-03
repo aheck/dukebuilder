@@ -1,0 +1,1 @@
+option('libduke_build_dir', type: 'string', value: 'build', description: 'Build directory within the sibling libduke repository')

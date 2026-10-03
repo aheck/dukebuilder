@@ -585,22 +585,29 @@ currently handled through Duke Builder's File menu.
 
 ## macOS application bundle
 
-`build-mac-app.py` builds the `dukebuilder` target in an already configured
-macOS Meson release build and packages it with the matching shared Qt 6 runtime.
+`build-mac-app.py` deletes and recreates `build-mac`, configures Meson with
+`--buildtype=release -Db_sanitize=none`, builds the `dukebuilder` target, and
+packages it with the matching shared Qt 6 runtime. Existing files and Meson
+settings in the selected build directory are discarded on every invocation.
 Run it on macOS with Python 3.9 or newer, Meson, Ninja, and the Xcode command
-line tools installed. Build `../libduke` and its renderer as release static
-libraries for the same architecture, with sanitizers disabled. Use shared Qt
+line tools installed. The script also configures and builds `../libduke` and
+its renderer in `../libduke/build-mac-release` with sanitizers disabled and
+links the app against those static archives. The development build in
+`../libduke/build` is preserved. Release archives and bundled binaries are
+checked for sanitizer symbols before publication. Use shared Qt
 for this build; the current static Qt configuration lacks Cocoa plugin integration.
 
 For example, with a shared Qt installation available to Meson:
 
 ```sh
-meson setup build-mac --buildtype=release -Db_sanitize=none
-python3 build-mac-app.py build-mac --macdeployqt /path/to/Qt/bin/macdeployqt
+python3 build-mac-app.py --macdeployqt /path/to/Qt/bin/macdeployqt
 ```
 
-Supply any necessary Meson native file or Qt discovery environment when
-configuring the build. The deployment tool must come from the Qt installation
+Pass any necessary Meson native file using `--native-file /path/to/native.ini`
+(repeatable), or set the Qt discovery environment before running the script.
+Native files must be stored outside the build directory. An optional positional
+argument selects another dedicated build directory directly inside the repository;
+an existing custom directory must be a Meson build. The deployment tool must come from the Qt installation
 used to compile the application; it can also be found on `PATH`.
 
 The result is `dist/DukeBuilder-<version>-<architecture>.app`. Both the version
@@ -613,7 +620,11 @@ the output name and the `DukeBuilderProjectVersion` plist field.
 The script stages a fresh bundle, deploys Qt frameworks and plugins using
 [macdeployqt](https://doc.qt.io/qt-6/macos-deployment.html), checks the Cocoa
 and JPEG plugins, checks bundled Mach-O architectures and dependency paths,
-and verifies signatures before moving the result into place. Dependency checks
+and verifies signatures before moving the result into place. If macdeployqt
+misses dependencies because Homebrew plugin rpaths no longer match the bundle
+layout, the script copies the missing libraries recursively, rewrites their
+load paths to bundle-relative locations, and signs the completed bundle again.
+Dependency checks
 support each library's own rpaths and those inherited from the main executable;
 unresolved paths fail packaging. Existing output bundles are never overwritten.
 These checks do not replace running the application on a clean Mac.
@@ -631,8 +642,8 @@ By default the bundle is ad-hoc signed for local use. For distribution, pass
 `--sign-identity "Developer ID Application: ..."` to enable Developer ID signing,
 hardened runtime, and a timestamp. Notarization and stapling are separate steps.
 The supported macOS baseline is determined by the application and its dependencies
-at build time. This packaging flow has not yet been exercised on macOS; verify
-launching from Finder, loading game data, Mini Tutorials, and OpenGL 4.1 rendering
+at build time. Packaging and signature verification have been exercised on macOS arm64
+with Homebrew Qt 6.7.2. Verify launching from Finder, loading game data, Mini Tutorials, and OpenGL 4.1 rendering
 before distributing a release.
 
 ## Windows NSIS installer
