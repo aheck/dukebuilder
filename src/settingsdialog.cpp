@@ -58,7 +58,11 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     auto *binaryLabel = new QLabel("EDuke32 binary", eduke32Page);
     auto *binaryPath = new QLineEdit(eduke32Page);
     binaryPath->setObjectName("EDuke32BinaryPath");
+#ifdef Q_OS_MACOS
+    binaryPath->setPlaceholderText("Path to the EDuke32 executable or .app bundle");
+#else
     binaryPath->setPlaceholderText("Path to the EDuke32 executable");
+#endif
     binaryPath->setText(settings.value(eduke32BinarySettingsKey).toString());
     binaryPath->setClearButtonEnabled(true);
     binaryLabel->setBuddy(binaryPath);

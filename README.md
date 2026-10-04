@@ -382,7 +382,13 @@ are saved first; canceling or failing to save stops the launch. The executable
 receives `-usecwd -nosetup -j <map directory> -map <map filename> -s#`, mapping
 Piece of Cake through Damn I'm Good to EDuke32 skills 1 through 4. **Enemies: Off** adds EDuke32's `-m` option
 before the skill option, so the no-monsters flag and selected difficulty both take
-effect. On Windows, select `eduke32.exe`; the launcher
+effect. On macOS, you can select an EDuke32 `.app` bundle or its executable.
+For an app bundle, the launcher looks in `Contents/MacOS` for `eduke32`
+(case-insensitive), or uses the only executable file when there is exactly one.
+If multiple other executables exist, select the desired binary directly.
+The executable receives the same map arguments. The working directory
+is the directory containing the configured bundle or binary.
+On Windows, select `eduke32.exe`; the launcher
 uses its absolute path and passes arguments directly through Qt, supporting
 spaces in both the executable and map paths without a command shell.
 

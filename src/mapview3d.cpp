@@ -5,6 +5,7 @@
 #include "walltexturealignment.h"
 #include <libduke/art.h>
 #include <QCursor>
+#include <QCoreApplication>
 #include <QFile>
 #include <QFocusEvent>
 #include <QKeyEvent>
@@ -43,6 +44,9 @@ public:
 
 MapView3D::MapView3D(QWidget *parent) : QOpenGLWidget(parent)
 {
+#ifdef Q_OS_MACOS
+    QCoreApplication::instance()->installNativeEventFilter(this);
+#endif
     m_trorPlanes = QSettings().value("view3D/trorPlanes", false).toBool();
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
@@ -56,6 +60,9 @@ MapView3D::MapView3D(QWidget *parent) : QOpenGLWidget(parent)
 MapView3D::~MapView3D()
 {
     cleanup();
+#ifdef Q_OS_MACOS
+    QCoreApplication::instance()->removeNativeEventFilter(this);
+#endif
     if (context()) { disconnect(context(), nullptr, this, nullptr); }
 }
 void MapView3D::initializeGL()
@@ -152,18 +159,30 @@ void MapView3D::stop()
 }
 void MapView3D::captureLook()
 {
-    if (!m_active) { return; }
+    if (!m_active || m_captured) { return; }
     m_captured = true;
     m_crosshair->move(rect().center() - QPoint(10, 10));
     m_crosshair->show();
     m_crosshair->raise();
     grabMouse(Qt::BlankCursor);
+#ifdef Q_OS_MACOS
+    if (!beginMacMouseLook()) {
+        releaseLook();
+        if (statusMessage) {
+            statusMessage("Unable to capture relative mouse motion. Click the viewport to retry.");
+        }
+    }
+#else
     QCursor::setPos(mapToGlobal(rect().center()));
+#endif
 }
 void MapView3D::releaseLook()
 {
     m_keys.clear();
     m_crosshair->hide();
+#ifdef Q_OS_MACOS
+    endMacMouseLook();
+#endif
     if (m_captured) { releaseMouse(); m_captured = false; }
 }
 void MapView3D::paintGL()
@@ -366,10 +385,16 @@ void MapView3D::mouseDoubleClickEvent(QMouseEvent *event)
 void MapView3D::mouseMoveEvent(QMouseEvent *event)
 {
     if (!m_captured) { return; }
-    QPointF delta = event->position() - QPointF(rect().center());
+#ifdef Q_OS_MACOS
+    // Native relative deltas already updated the camera. The absolute pointer
+    // stays stationary during capture and must not be used for mouse look.
+    event->accept();
+#else
+    const QPointF delta = event->position() - QPointF(rect().center());
     if (delta.isNull()) { return; }
     duke_camera_rotate(&m_camera, delta.x()*0.003f, -delta.y()*0.003f);
     QCursor::setPos(mapToGlobal(rect().center()));
+#endif
 }
 void MapView3D::resizeEvent(QResizeEvent *event)
 {

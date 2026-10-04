@@ -11,6 +11,12 @@ project(
   ],
 )
 
+# Configure Objective-C++ before resource generation or any build targets.
+if host_machine.system() == 'darwin'
+  add_languages('objcpp', native: false)
+  add_project_arguments('-std=c++17', language: 'objcpp')
+endif
+
 # Framework discovery on macOS needs explicit modules for directly used headers.
 qt6 = dependency('qt6', modules: ['Core', 'Gui', 'Widgets', 'OpenGL', 'OpenGLWidgets'])
 qt6_module = import('qt6')
@@ -47,7 +53,7 @@ if host_machine.system() == 'linux'
 elif host_machine.system() == 'windows'
   renderer_dependencies += cpp.find_library('opengl32')
 elif host_machine.system() == 'darwin'
-  renderer_dependencies += dependency('appleframeworks', modules: ['OpenGL'])
+  renderer_dependencies += dependency('appleframeworks', modules: ['OpenGL', 'CoreGraphics', 'AppKit'])
 endif
 
 qt_dependencies = [qt6]
@@ -202,6 +208,11 @@ app_sources = [
     'src/grpfilemanagerwindow.cpp',
     'src/grpfilemanagerwindow.h',
   ]
+
+# Cocoa exposes relative motion independently of the pointer position.
+if host_machine.system() == 'darwin'
+  app_sources += ['src/mapview3d_macos.mm']
+endif
 
 # Qt supplies the Windows GUI entry point that forwards to main(). Keep this
 # dependency on the application only; test executables retain their consoles.

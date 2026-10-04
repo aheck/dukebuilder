@@ -62,6 +62,33 @@
 #include <limits>
 
 namespace {
+#ifdef Q_OS_MACOS
+// Locate EDuke32 inside the bundle without loading platform frameworks.
+QString macBundleExecutable(const QString &path)
+{
+    const QDir executables(QDir(path).absoluteFilePath("Contents/MacOS"));
+    if (!executables.exists()) {
+        return {};
+    }
+
+    const QFileInfoList candidates = executables.entryInfoList(
+        QDir::Files | QDir::Executable | QDir::NoDotAndDotDot, QDir::Name);
+    // Prefer the engine over helper executables shipped in the same bundle.
+    for (const QFileInfo &candidate : candidates) {
+        if (candidate.fileName().compare("eduke32", Qt::CaseInsensitive) == 0) {
+            return candidate.absoluteFilePath();
+        }
+    }
+
+    // A uniquely named executable is safe to select; multiple unknown names
+    // require the user to configure the desired binary directly.
+    if (candidates.size() == 1) {
+        return candidates.front().absoluteFilePath();
+    }
+    return {};
+}
+#endif
+
 enum class ToolbarSymbol { New, Open, Save, Grid, Plain, Floor, Ceiling };
 
 // Draw at the requested size so toolbar icons remain crisp on high-DPI screens.
@@ -1301,7 +1328,22 @@ MainWindow::MainWindow(QWidget *parent)
         const QFileInfo binaryFile(binary);
         QProcess process;
         process.setWorkingDirectory(binaryFile.absolutePath());
-#ifdef Q_OS_WIN
+#ifdef Q_OS_MACOS
+        if (binaryFile.isDir() && binaryFile.suffix().compare("app", Qt::CaseInsensitive) == 0) {
+            const QString executable = macBundleExecutable(binaryFile.absoluteFilePath());
+            if (executable.isEmpty()) {
+                QMessageBox::warning(this, "Unable to run eDuke32",
+                                     "Could not identify the EDuke32 executable in Contents/MacOS. "
+                                     "Select the executable inside the app bundle directly.");
+                return;
+            }
+            // Launch directly to preserve map arguments and detached-process handling.
+            // Keep -usecwd pointed at the directory beside the configured bundle.
+            process.setProgram(executable);
+        } else {
+            process.setProgram("./" + binaryFile.fileName());
+        }
+#elif defined(Q_OS_WIN)
         // Windows resolves relative programs against the parent's directory,
         // not QProcess's working directory. Let Qt quote the absolute executable
         // and individual arguments for CreateProcess, including paths with spaces.

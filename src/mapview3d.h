@@ -4,11 +4,17 @@
 #include <QElapsedTimer>
 #include <QTimer>
 #include <QSet>
+#ifdef Q_OS_MACOS
+#include <QAbstractNativeEventFilter>
+#endif
 #include <functional>
 #include <libduke/camera.h>
 #include <libduke/renderer.h>
 
 class MapView3D final : public QOpenGLWidget
+#ifdef Q_OS_MACOS
+    , private QAbstractNativeEventFilter
+#endif
 {
 public:
     explicit MapView3D(QWidget *parent = nullptr);
@@ -48,6 +54,14 @@ protected:
     void hideEvent(QHideEvent *event) override;
 private:
     friend struct MapView3DTest;
+#ifdef Q_OS_MACOS
+    // Keep Cocoa input details private to the macOS implementation.
+    bool beginMacMouseLook();
+    void endMacMouseLook();
+    bool nativeEventFilter(const QByteArray &eventType, void *message, qintptr *result) override;
+    bool m_macRelativeMouse = false;
+    double m_macMouseCaptureTime = 0;
+#endif
     struct SurfaceSelection {
         DukeSurfaceKind kind;
         std::size_t id;
