@@ -150,6 +150,8 @@ public:
     void setSectorHeight(std::size_t sector, bool floor, qreal height);
     void resetSelectedWallTextureScale();
     void stickSelectedSpriteToWall();
+    void moveSelection();
+    void addSprite();
     bool canJoinSelectedSectors() const;
     void joinSelectedSectors();
     std::function<void(bool)> joinAvailabilityChanged;
@@ -233,12 +235,18 @@ private:
     void beginEdit(const QString &label, const QString &mergeKey = {});
     void endEdit();
     void finishPendingEdit();
+    void finishKeyboardMove(bool cancel);
+    void createSpriteAt(const QPoint &position, bool disableSnapping, bool chooseTexture);
     QUndoStack m_undoStack;
     std::optional<Snapshot> m_beforeEdit;
     QString m_editLabel, m_editKey;
     int m_editDepth = 0;
     unsigned m_historyGeneration = 0;
     bool m_mouseEdit = false;
+    bool m_keyboardMove = false;
+    bool m_moveAwaitingPointer = false;
+    bool m_addingSprite = false;
+    bool m_consumeLeftRelease = false;
     QPointF snappedPosition(const QPoint &viewportPosition, bool disableSnapping) const;
     void addDrawingPoint(const QPointF &position);
     bool finishDrawing(bool close, bool discardOnFailure = true);

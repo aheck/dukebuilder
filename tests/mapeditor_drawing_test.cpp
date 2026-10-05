@@ -2,6 +2,7 @@
 #include "mapsave.h"
 
 #include <QApplication>
+#include <QCursor>
 #include <QKeyEvent>
 #include <QFocusEvent>
 #include <QScrollBar>
@@ -347,4 +348,118 @@ int main(int argc, char **argv)
     require(disconnected && !editor.document().sectors()[2].floorBunch, "Disconnect command clears selected whole bunch");
     editor.undo(); require(editor.document() == extended, "Disconnection undo restores links");
     editor.editingScopeChanged = {};
+
+    // Keyboard/toolbar movement shares geometry validation and one undo transaction.
+    editor.setGridSize(256);
+    // The minimal Qt platform has no system cursor; commands use toolbar placement.
+    const auto hover = [&](QPointF point, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+        const QPoint local = editor.mapFromScene(point);
+        QMouseEvent event(QEvent::MouseMove, local, editor.viewport()->mapToGlobal(local),
+                          Qt::NoButton, Qt::NoButton, modifiers);
+        QApplication::sendEvent(editor.viewport(), &event);
+    };
+    const auto key = [&](int code) {
+        QKeyEvent event(QEvent::KeyPress, code, Qt::NoModifier);
+        QApplication::sendEvent(&editor, &event);
+    };
+    for (auto mode : {MapEditor::Mode::Vertices, MapEditor::Mode::Lines, MapEditor::Mode::Sectors}) {
+        editor.recoverDocument(source, {});
+        editor.clearEditingScope();
+        editor.setMode(mode);
+        editor.centerOn(512,512);
+        const QPointF grab = mode == MapEditor::Mode::Vertices ? QPointF(0,0)
+            : mode == MapEditor::Mode::Lines ? QPointF(512,0) : QPointF(512,512);
+        click(grab);
+        require(editor.scene()->selectedItems().size() == 1, "Select object for keyboard move");
+        editor.moveSelection();
+        hover(grab);
+        require(!editor.canAutosave(), "Move preview is an open transaction");
+        hover(grab + QPointF(-256,0));
+        require(editor.document().vertices()[0].position == QPointF(-256,0), "Keyboard move snaps geometry");
+        key(Qt::Key_Escape);
+        require(editor.document() == source && editor.undoStack()->count() == 0
+            && editor.scene()->selectedItems().size() == 1 && editor.canAutosave(),
+            "Escape restores document and selection without undo history");
+        editor.moveSelection();
+        hover(grab);
+        hover(grab + QPointF(-256,0));
+        click(grab + QPointF(-256,0));
+        const auto moved = editor.document();
+        require(!(moved == source) && editor.undoStack()->count() == 1 && editor.canAutosave(),
+            "Click commits one keyboard move");
+        if (mode == MapEditor::Mode::Lines)
+            require(moved.vertices()[1].position == QPointF(768,0)
+                && moved.vertices()[2] == source.vertices()[2], "Line move translates both endpoints only");
+        if (mode == MapEditor::Mode::Sectors)
+            for (std::size_t v = 0; v < source.vertices().size(); ++v)
+                require(moved.vertices()[v].position == source.vertices()[v].position + QPointF(-256,0),
+                    "Sector keyboard move translates all boundary vertices");
+        editor.undo(); require(editor.document() == source, "Keyboard move undo");
+        editor.redo(); require(editor.document() == moved, "Keyboard move redo");
+    }
+
+    editor.recoverDocument(source, {});
+    editor.setMode(MapEditor::Mode::Vertices);
+    editor.centerOn(512,512);
+    click({0,0}); click({1024,0}, Qt::ShiftModifier);
+    editor.moveSelection(); hover({0,0}); hover({-100,0}, Qt::AltModifier);
+    const auto freeDelta = editor.mapToScene(editor.mapFromScene(QPointF(-100,0)))
+        - editor.mapToScene(editor.mapFromScene(QPointF(0,0)));
+    require(editor.document().vertices()[0].position == freeDelta
+        && editor.document().vertices()[1].position == QPointF(1024,0) + freeDelta,
+        "Alt moves multiple selected vertices freely while preserving spacing");
+    key(Qt::Key_Escape);
+    click({0,0});
+    editor.moveSelection(); hover({0,0}); hover({1024,1024}); key(Qt::Key_Return);
+    require(editor.document() == source && editor.undoStack()->count() == 0,
+        "Invalid keyboard move rolls back without history");
+    editor.moveSelection(); key(Qt::Key_Return);
+    require(editor.document() == source && editor.undoStack()->count() == 0,
+        "Confirming without moving creates no history");
+
+    editor.recoverDocument(source, {});
+    editor.setMode(MapEditor::Mode::Sprites);
+    editor.centerOn(512,512);
+    editor.setTextureSelector([](std::optional<int>) -> std::optional<MapEditor::SpriteTexture> {
+        return std::nullopt;
+    });
+    editor.addSprite(); click({256,256});
+    require(editor.document() == source && editor.undoStack()->count() == 0,
+        "Cancel add texture picker creates no sprite or history");
+    editor.setTextureSelector([](std::optional<int>) -> std::optional<MapEditor::SpriteTexture> {
+        return MapEditor::SpriteTexture{42, QImage()};
+    });
+    editor.addSprite(); click({256,256});
+    require(editor.document().sprites().size() == 1 && editor.document().sprites()[0].texture == 42
+        && editor.document().sprites()[0].position == QPointF(256,256)
+        && editor.document().sprites()[0].sectorId == 0 && editor.document().sprites()[0].z == -2048
+        && editor.undoStack()->count() == 1, "Add sprite sets texture, snapped position, sector and floor in one edit");
+    const auto withSprite = editor.document();
+    editor.moveSelection(); hover({256,256}); hover({512,256}); key(Qt::Key_Return);
+    require(editor.document().sprites()[0].position == QPointF(512,256)
+        && editor.undoStack()->count() == 2, "Enter commits sprite keyboard movement");
+    editor.undo(); require(editor.document() == withSprite, "Undo sprite movement");
+    click({512,512}); editor.moveSelection(); hover({512,512}); hover({768,512}); key(Qt::Key_Return);
+    require(editor.document().playerStart().position == QPointF(768,512), "Keyboard move supports player start");
+    editor.undo();
+
+    // A toolbar invocation starts outside the viewport and waits for a placement click.
+    QCursor::setPos(editor.viewport()->mapToGlobal(QPoint(-30,-30)));
+    editor.addSprite();
+    require(editor.document() == withSprite, "Toolbar add waits for a position");
+    key(Qt::Key_Escape); click({768,768});
+    require(editor.document() == withSprite, "Escape cancels pending sprite placement");
+    QCursor::setPos(editor.viewport()->mapToGlobal(QPoint(-30,-30)));
+    editor.addSprite(); click({768,768});
+    require(editor.document().sprites().size() == 2, "Toolbar add places sprite at clicked position");
+    editor.undo(); require(editor.document() == withSprite, "Toolbar add undo");
+    click({256,256});
+    QCursor::setPos(editor.viewport()->mapToGlobal(QPoint(-30,-30)));
+    editor.moveSelection(); hover({256,256});
+    require(editor.document() == withSprite, "Toolbar move establishes origin on entering the map");
+    hover({512,256});
+    QFocusEvent lostFocus(QEvent::FocusOut);
+    QApplication::sendEvent(&editor, &lostFocus);
+    require(editor.document() == withSprite && editor.canAutosave(), "Losing focus cancels movement safely");
+
 }

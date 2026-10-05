@@ -89,7 +89,7 @@ QString macBundleExecutable(const QString &path)
 }
 #endif
 
-enum class ToolbarSymbol { New, Open, Save, Grid, Plain, Floor, Ceiling };
+enum class ToolbarSymbol { New, Open, Save, Grid, Plain, Floor, Ceiling, Move, AddSprite };
 
 // Draw at the requested size so toolbar icons remain crisp on high-DPI screens.
 class ToolbarIconEngine final : public QIconEngine
@@ -134,6 +134,22 @@ public:
             painter->drawRect(QRectF(7, 3, 9, 6));
             painter->drawRect(QRectF(7, 13, 10, 8));
             painter->drawLine(QPointF(10, 17), QPointF(14, 17));
+        } else if (m_symbol == ToolbarSymbol::Move) {
+            painter->drawLine(QPointF(3, 12), QPointF(21, 12));
+            painter->drawLine(QPointF(12, 3), QPointF(12, 21));
+            for (int angle : {0, 90, 180, 270}) {
+                painter->save();
+                painter->translate(12, 12);
+                painter->rotate(angle);
+                painter->drawPolyline(QPolygonF{QPointF(-3, -6), QPointF(0, -9), QPointF(3, -6)});
+                painter->restore();
+            }
+        } else if (m_symbol == ToolbarSymbol::AddSprite) {
+            painter->drawEllipse(QRectF(3, 3, 12, 12));
+            painter->drawLine(QPointF(9, 9), QPointF(13, 5));
+            painter->setPen(QPen(accent, 2, Qt::SolidLine, Qt::RoundCap));
+            painter->drawLine(QPointF(13, 17), QPointF(23, 17));
+            painter->drawLine(QPointF(18, 12), QPointF(18, 22));
         } else if (m_symbol == ToolbarSymbol::Grid) {
             for (int coordinate : {4, 12, 20}) {
                 painter->drawLine(QPointF(coordinate, 4), QPointF(coordinate, 20));
@@ -1009,6 +1025,24 @@ MainWindow::MainWindow(QWidget *parent)
     connect(redoAction, &QAction::triggered, this, [editor] { if (editor->isVisible()) editor->setFocus(); editor->redo(); });
     updateHistory();
     editMenu->addSeparator();
+    auto *moveAction = editMenu->addAction(toolbarIcon(ToolbarSymbol::Move), "Move selection");
+    moveAction->setShortcut(QKeySequence(Qt::Key_M));
+    moveAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    moveAction->setAutoRepeat(false);
+    moveAction->setToolTip("Move selection (M) — click to confirm, Escape to cancel");
+    editor->addAction(moveAction);
+    connect(moveAction, &QAction::triggered, editor, &MapEditor::moveSelection);
+    auto *addSpriteAction = editMenu->addAction(toolbarIcon(ToolbarSymbol::AddSprite), "Add sprite");
+    addSpriteAction->setShortcut(QKeySequence(Qt::Key_A));
+    addSpriteAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    addSpriteAction->setAutoRepeat(false);
+    addSpriteAction->setToolTip("Add sprite (A) — place a sprite in Sprites mode");
+    editor->addAction(addSpriteAction);
+    connect(addSpriteAction, &QAction::triggered, editor, &MapEditor::addSprite);
+    editorToolBar->addSeparator();
+    editorToolBar->addAction(moveAction);
+    editorToolBar->addAction(addSpriteAction);
+    editMenu->addSeparator();
     auto *settingsAction = editMenu->addAction("&Settings");
     connect(settingsAction, &QAction::triggered, this, [this] {
         SettingsDialog dialog(this);
@@ -1192,6 +1226,18 @@ MainWindow::MainWindow(QWidget *parent)
     addModeAction("Vertices", QKeySequence(Qt::Key_V), MapEditor::Mode::Vertices);
     addModeAction("Sectors", QKeySequence(Qt::Key_S), MapEditor::Mode::Sectors);
     addModeAction("Sprites", QKeySequence(Qt::Key_T), MapEditor::Mode::Sprites);
+
+    const auto updatePlacementActions = [=] {
+        const bool in2D = views->currentWidget() == editor;
+        const auto mode = static_cast<MapEditor::Mode>(modeGroup->checkedAction()->data().toInt());
+        moveAction->setEnabled(in2D && mode != MapEditor::Mode::Draw
+                               && !editor->scene()->selectedItems().empty());
+        addSpriteAction->setEnabled(in2D && mode == MapEditor::Mode::Sprites);
+    };
+    connect(modeGroup, &QActionGroup::triggered, editor, updatePlacementActions);
+    connect(editor->scene(), &QGraphicsScene::selectionChanged, editor, updatePlacementActions);
+    connect(views, &QStackedWidget::currentChanged, editor, updatePlacementActions);
+    updatePlacementActions();
 
     auto *toolsMenu = menuBar()->addMenu("&Tools");
     auto *isolateAction = toolsMenu->addAction("Toggle sector isolation");

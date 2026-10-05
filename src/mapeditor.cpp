@@ -6,6 +6,7 @@
 #include "mapsave.h"
 
 #include <QApplication>
+#include <QCursor>
 #include <QGraphicsEllipseItem>
 #include <QGraphicsLineItem>
 #include <QGraphicsPathItem>
@@ -702,6 +703,8 @@ void MapEditor::endEdit()
 
 void MapEditor::finishPendingEdit()
 {
+    m_addingSprite = false;
+    if (m_keyboardMove) { finishKeyboardMove(true); return; }
     if (m_mouseEdit) {
         m_mouseEdit = false;
         m_draggingVertices = m_draggingSprites = m_draggingPlayerStart = false;
@@ -1894,8 +1897,165 @@ QPointF MapEditor::snappedPosition(const QPoint &viewportPosition, bool disableS
     return m_scene->snapToGrid(scenePosition);
 }
 
+void MapEditor::moveSelection()
+{
+    if (m_keyboardMove || m_mode == Mode::Draw) return;
+    finishPendingEdit();
+    const auto selected = m_scene->selectedItems();
+    if (selected.empty()) { reportStatus("Select objects before moving them."); return; }
+    clearSplitPreview();
+    m_draggedVertices.clear();
+    m_draggedWalls.clear();
+    m_draggedSectors.clear();
+    m_draggedSprites.clear();
+    m_draggingPlayerStart = false;
+    const auto addVertex = [this](MapDocument::VertexId id) {
+        if (std::none_of(m_draggedVertices.begin(), m_draggedVertices.end(),
+                        [id](const auto &entry) { return entry.first == id; }))
+            m_draggedVertices.emplace_back(id, m_document.vertices()[id].position);
+    };
+    for (auto *item : selected) {
+        if (m_mode == Mode::Vertices && dynamic_cast<VertexItem *>(item)) {
+            addVertex(item->data(vertexIdRole).toULongLong());
+        } else if (m_mode == Mode::Lines && dynamic_cast<WallItem *>(item)) {
+            const auto id = item->data(wallIdRole).toULongLong();
+            m_draggedWalls.push_back(id);
+            addVertex(m_document.walls()[id].start);
+            addVertex(m_document.walls()[id].end);
+        } else if (m_mode == Mode::Sectors && dynamic_cast<SectorItem *>(item)) {
+            const auto id = item->data(sectorIdRole).toULongLong();
+            m_draggedSectors.push_back(id);
+            for (auto vertex : m_document.sectors()[id].vertices) addVertex(vertex);
+        } else if (m_mode == Mode::Sprites && dynamic_cast<SpriteItem *>(item)) {
+            const auto id = item->data(spriteIdRole).toULongLong();
+            m_draggedSprites.emplace_back(id, m_document.sprites()[id].position);
+        } else if (m_mode == Mode::Sprites && dynamic_cast<PlayerStartItem *>(item)) {
+            m_draggingPlayerStart = true;
+            m_draggedPlayerStart = m_document.playerStart().position;
+        }
+    }
+    if (m_draggedVertices.empty() && m_draggedSprites.empty() && !m_draggingPlayerStart) return;
+    setFocus(Qt::OtherFocusReason);
+    beginEdit("Move selection");
+    m_mouseEdit = m_keyboardMove = true;
+    m_vertexDragDocument = m_document;
+    m_draggingVertices = !m_draggedVertices.empty();
+    m_draggingSprites = !m_draggedSprites.empty() || m_draggingPlayerStart;
+    m_spriteDragMoved = true; // Keyboard movement never opens the texture picker.
+    const QPoint pointer = viewport()->mapFromGlobal(QCursor::pos());
+    m_moveAwaitingPointer = !viewport()->rect().contains(pointer);
+    m_vertexDragStart = m_moveAwaitingPointer ? QPointF{} : mapToScene(pointer);
+    // A stable anchor keeps the whole selection together when snapping.
+    if (m_draggingVertices) {
+        std::sort(m_draggedVertices.begin(), m_draggedVertices.end(),
+                  [](const auto &a, const auto &b) { return a.first < b.first; });
+        m_vertexDragAnchor = m_draggedVertices.front().second;
+    } else {
+        std::sort(m_draggedSprites.begin(), m_draggedSprites.end(),
+                  [](const auto &a, const auto &b) { return a.first < b.first; });
+        m_vertexDragAnchor = m_draggedSprites.empty() ? m_draggedPlayerStart : m_draggedSprites.front().second;
+    }
+    setCursor(Qt::SizeAllCursor);
+    reportStatus("Move: left-click or Enter to confirm; Escape to cancel; Alt/Option disables snapping.");
+}
+
+void MapEditor::finishKeyboardMove(bool cancel)
+{
+    if (!m_keyboardMove) return;
+    m_keyboardMove = m_moveAwaitingPointer = false;
+    if (cancel && m_beforeEdit) {
+        const auto before = *m_beforeEdit;
+        restore(before);
+    }
+    finishPendingEdit();
+    m_draggedVertices.clear();
+    m_draggedWalls.clear();
+    m_draggedSectors.clear();
+    m_draggedSprites.clear();
+    m_spriteDragMoved = false;
+    setCursor(Qt::CrossCursor);
+    if (cancel) reportStatus("Move cancelled.");
+}
+
+void MapEditor::addSprite()
+{
+    if (m_mode != Mode::Sprites) {
+        reportStatus("Switch to Sprites mode (T) to add a sprite.");
+        return;
+    }
+    finishPendingEdit();
+    setFocus(Qt::OtherFocusReason);
+    const QPoint pointer = viewport()->mapFromGlobal(QCursor::pos());
+    if (viewport()->rect().contains(pointer)) {
+        createSpriteAt(pointer, QApplication::keyboardModifiers().testFlag(Qt::AltModifier), true);
+    } else {
+        m_addingSprite = true;
+        setCursor(Qt::CrossCursor);
+        reportStatus("Add sprite: click a position in the map; Escape to cancel.");
+    }
+}
+
+void MapEditor::createSpriteAt(const QPoint &pointer, bool disableSnapping, bool chooseTexture)
+{
+    const QPointF scenePosition = mapToScene(pointer);
+    if (!m_scene->sceneRect().contains(scenePosition)) {
+        reportStatus("Outside Build map coordinate range");
+        return;
+    }
+    if (!resolveDrawingScope(scenePosition)) return;
+    const QPointF position = snappedPosition(pointer, disableSnapping);
+    const auto sectorId = sectorAtPosition(m_document, position, m_editingScope);
+    if (!sectorId && !m_document.sectorsAt(position).empty()) {
+        reportStatus("Sprite placement is ambiguous or outside the editing scope. Choose a sector first.");
+        return;
+    }
+    std::optional<SpriteTexture> texture;
+    if (chooseTexture && m_textureSelector) {
+        texture = m_textureSelector(std::nullopt);
+        if (!texture) return;
+    }
+    Edit edit(this, "Create sprite");
+    m_editLabel = "Create sprite";
+    const auto id = m_document.addSprite(position);
+    auto sprite = m_document.sprites()[id];
+    if (sectorId) {
+        sprite.sectorId = sectorId;
+        sprite.z = sectorFloorZAt(m_document, *sectorId, position);
+    }
+    if (texture) {
+        sprite.texture = texture->tile;
+        m_spriteTextures.insert(texture->tile * 256, texture->image);
+    }
+    m_document.setSprite(id, sprite);
+    rebuildScene();
+    if (chooseTexture) {
+        for (auto *item : m_scene->items())
+            if (dynamic_cast<SpriteItem *>(item) && item->data(spriteIdRole).toULongLong() == id)
+                item->setSelected(true);
+    }
+    reportStatus("Sprite created");
+}
+
 void MapEditor::mousePressEvent(QMouseEvent *event)
 {
+    if (m_keyboardMove) {
+        if (event->button() == Qt::LeftButton) {
+            mouseMoveEvent(event);
+            finishKeyboardMove(false);
+            m_consumeLeftRelease = true;
+        }
+        event->accept();
+        return;
+    }
+    if (m_addingSprite) {
+        if (event->button() == Qt::LeftButton) {
+            m_addingSprite = false;
+            m_consumeLeftRelease = true;
+            createSpriteAt(event->position().toPoint(), event->modifiers().testFlag(Qt::AltModifier), true);
+        }
+        event->accept();
+        return;
+    }
     m_resolvedPick = nullptr;
     // Handle navigation before picking or drawing so Space-drag cannot edit the map.
     if (event->button() == Qt::MiddleButton
@@ -1951,30 +2111,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
             }
         }
         if (!sprite && !playerStart) {
-            const QPointF scenePosition = mapToScene(event->position().toPoint());
-            if (!m_scene->sceneRect().contains(scenePosition)) {
-                reportStatus("Outside Build map coordinate range");
-            } else {
-                const bool disableSnapping = event->modifiers().testFlag(Qt::AltModifier);
-                m_editLabel = "Create sprite";
-                const QPointF position = snappedPosition(
-                    event->position().toPoint(), disableSnapping);
-                const auto sectorId = sectorAtPosition(m_document, position, m_editingScope);
-                if (!sectorId && !m_document.sectorsAt(position).empty()) {
-                    reportStatus("Sprite placement is ambiguous or outside the editing scope. Choose a sector first.");
-                    event->accept();
-                    return;
-                }
-                const auto spriteId = m_document.addSprite(position);
-                if (sectorId) {
-                    auto sprite = m_document.sprites()[spriteId];
-                    sprite.sectorId = sectorId;
-                    sprite.z = sectorFloorZAt(m_document, *sectorId, position);
-                    m_document.setSprite(spriteId, sprite);
-                }
-                rebuildScene();
-                reportStatus("Sprite created");
-            }
+            createSpriteAt(event->position().toPoint(), event->modifiers().testFlag(Qt::AltModifier), false);
             event->accept();
             return;
         }
@@ -2300,6 +2437,7 @@ void MapEditor::updateSplitPreview(const QPoint &position, bool disableSnapping)
 
 void MapEditor::mouseDoubleClickEvent(QMouseEvent *event)
 {
+    if (m_keyboardMove || m_addingSprite) { mousePressEvent(event); return; }
     if (m_panning || (event->button() == Qt::LeftButton && m_spaceHeld)) {
         mousePressEvent(event);
         return;
@@ -2345,7 +2483,11 @@ void MapEditor::leaveEvent(QEvent *event)
 
 void MapEditor::mouseMoveEvent(QMouseEvent *event)
 {
-    if (event->buttons() == Qt::NoButton) {
+    if (m_keyboardMove && m_moveAwaitingPointer) {
+        m_vertexDragStart = mapToScene(event->position().toPoint());
+        m_moveAwaitingPointer = false;
+    }
+    if (event->buttons() == Qt::NoButton && !m_keyboardMove && !m_addingSprite) {
         updateSplitPreview(event->position().toPoint(), event->modifiers().testFlag(Qt::AltModifier));
     } else {
         clearSplitPreview();
@@ -2361,6 +2503,8 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
         m_spriteDragMoved = true;
         setCursor(Qt::ClosedHandCursor);
         QPointF delta = mapToScene(event->position().toPoint()) - m_vertexDragStart;
+        if (m_keyboardMove && !event->modifiers().testFlag(Qt::AltModifier))
+            delta = m_scene->snapToGrid(m_vertexDragAnchor + delta) - m_vertexDragAnchor;
         qreal minimumX = std::numeric_limits<qreal>::max();
         qreal maximumX = std::numeric_limits<qreal>::lowest();
         qreal minimumY = std::numeric_limits<qreal>::max();
@@ -2416,7 +2560,7 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
 
     if (m_draggingVertices) {
         QPointF delta = mapToScene(event->position().toPoint()) - m_vertexDragStart;
-        if (m_mode == Mode::Vertices && !event->modifiers().testFlag(Qt::AltModifier)) {
+        if ((m_mode == Mode::Vertices || m_keyboardMove) && !event->modifiers().testFlag(Qt::AltModifier)) {
             // Snap the grabbed vertex, preserving the click offset and the
             // relative positions of all other vertices in the selection.
             delta = m_scene->snapToGrid(m_vertexDragAnchor + delta) - m_vertexDragAnchor;
@@ -2517,6 +2661,11 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
 
 void MapEditor::mouseReleaseEvent(QMouseEvent *event)
 {
+    if (m_keyboardMove || m_addingSprite || (m_consumeLeftRelease && event->button() == Qt::LeftButton)) {
+        if (event->button() == Qt::LeftButton) m_consumeLeftRelease = false;
+        event->accept();
+        return;
+    }
     const auto finish = [this, event](void *) {
         if (event->button() == Qt::RightButton) finishPendingEdit();
     };
@@ -2657,6 +2806,16 @@ void MapEditor::stickSelectedSpriteToWall()
 
 void MapEditor::keyPressEvent(QKeyEvent *event)
 {
+    if (m_keyboardMove || m_addingSprite) {
+        if (event->key() == Qt::Key_Escape) {
+            finishKeyboardMove(true);
+            m_addingSprite = false;
+        } else if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+            finishKeyboardMove(false);
+        }
+        event->accept();
+        return;
+    }
     if (event->key() == Qt::Key_Space) {
         m_spaceHeld = true;
         event->accept();
@@ -2847,6 +3006,8 @@ void MapEditor::keyReleaseEvent(QKeyEvent *event)
 
 void MapEditor::focusOutEvent(QFocusEvent *event)
 {
+    finishKeyboardMove(true);
+    m_addingSprite = false;
     // A release can go to another widget after a focus change; clear held state.
     m_spaceHeld = false;
     if (m_panning) {

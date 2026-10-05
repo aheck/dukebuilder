@@ -77,6 +77,7 @@ QString content(bool threeD)
         html += section("Selection and geometry", {
             {"Left click / left-drag rectangle", "Select objects in the active selection mode."},
             {"Shift + left click", "Add/remove an object from the selection."},
+            {"M, then move pointer", "Move selected vertices, lines, sectors, sprites, or the player start. Left click or Enter confirms; Escape cancels. Alt/Option disables grid snapping."},
             {"Right-drag selection", "Move selected vertices, lines, sectors, sprites, or the player start. Hold Alt to move freely."},
             {"Double-click shadow vertex", "In Vertices mode, split the hovered line at the preview point. Grid snapping applies; Alt allows free placement."},
             {"Delete", "Delete selected vertices, lines, sectors, or sprites. Deleting an inner sector leaves a hole; the player start cannot be deleted."},
@@ -84,6 +85,7 @@ QString content(bool threeD)
         });
         html += section("Sprites", {
             {"Ctrl+C / Ctrl+V", "Copy selected sprites and paste duplicates one grid cell down and right. Requires Sprites mode."},
+            {"A / Add sprite toolbar button", "In Sprites mode, add at the pointer with A, or click a placement point after using the toolbar. Choose a texture; cancelling the picker creates nothing."},
             {"Right click empty space", "Create a sprite in Sprites mode."},
             {"Right click a sprite", "Choose its texture in Sprites mode."},
             {"O", "Stick one selected sprite to the nearest wall of its sector. Requires Sprites mode; preserves height and tags."},

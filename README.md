@@ -173,6 +173,16 @@ as saved. New edits after undo discard the redo branch. History retains at most
   Right-drag selected vertices to move them: the grabbed vertex snaps to the
   active grid, including its rotation. Hold Alt to move freely. Multiple selected
   vertices move together without changing their relative positions.
+- **M / Edit → Move selection / Move toolbar button:** move selected vertices,
+  lines, sectors, sprites, or the player start without holding a mouse button.
+  Move the pointer, then left-click or press Enter to confirm; Escape or changing
+  focus cancels. Grid snapping applies; hold Alt/Option to move freely. Each
+  confirmed move is one undo step. From the toolbar, movement starts when the
+  pointer enters the map.
+- **A / Add sprite toolbar button:** in Sprites mode, press A to add a sprite at
+  the pointer, then choose its texture. From the toolbar, click a placement point
+  first. Escape cancels pending placement; cancelling the texture picker creates
+  nothing. Also available in the Edit menu.
 - **Sprites mode:** right-click empty space to add a sprite; left-click or
   rubber-band to select; right-drag to move; right-click a sprite to choose its
   texture; Delete removes selected sprites.
