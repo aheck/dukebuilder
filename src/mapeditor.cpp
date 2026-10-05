@@ -2009,11 +2009,6 @@ void MapEditor::createSpriteAt(const QPoint &pointer, bool disableSnapping, bool
         reportStatus("Sprite placement is ambiguous or outside the editing scope. Choose a sector first.");
         return;
     }
-    std::optional<SpriteTexture> texture;
-    if (chooseTexture && m_textureSelector) {
-        texture = m_textureSelector(std::nullopt);
-        if (!texture) return;
-    }
     Edit edit(this, "Create sprite");
     m_editLabel = "Create sprite";
     const auto id = m_document.addSprite(position);
@@ -2022,16 +2017,30 @@ void MapEditor::createSpriteAt(const QPoint &pointer, bool disableSnapping, bool
         sprite.sectorId = sectorId;
         sprite.z = sectorFloorZAt(m_document, *sectorId, position);
     }
-    if (texture) {
-        sprite.texture = texture->tile;
-        m_spriteTextures.insert(texture->tile * 256, texture->image);
-    }
     m_document.setSprite(id, sprite);
-    rebuildScene();
-    if (chooseTexture) {
-        for (auto *item : m_scene->items())
-            if (dynamic_cast<SpriteItem *>(item) && item->data(spriteIdRole).toULongLong() == id)
-                item->setSelected(true);
+    const auto showSprite = [this, id, chooseTexture] {
+        rebuildScene();
+        if (chooseTexture) {
+            for (auto *item : m_scene->items())
+                if (dynamic_cast<SpriteItem *>(item) && item->data(spriteIdRole).toULongLong() == id)
+                    item->setSelected(true);
+        }
+    };
+    showSprite();
+    if (chooseTexture && m_textureSelector) {
+        // Paint the empty sprite before the modal picker covers the viewport.
+        // Keep creation pending so cancellation leaves no sprite or undo entry.
+        viewport()->repaint();
+        const auto texture = m_textureSelector(std::nullopt);
+        if (!texture) {
+            const auto before = *m_beforeEdit;
+            restore(before);
+            reportStatus("Sprite creation cancelled.");
+            return;
+        }
+        m_document.setSpriteTexture(id, texture->tile);
+        m_spriteTextures.insert(texture->tile * 256, texture->image);
+        showSprite();
     }
     reportStatus("Sprite created");
 }

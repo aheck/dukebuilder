@@ -420,16 +420,35 @@ int main(int argc, char **argv)
     editor.recoverDocument(source, {});
     editor.setMode(MapEditor::Mode::Sprites);
     editor.centerOn(512,512);
-    editor.setTextureSelector([](std::optional<int>) -> std::optional<MapEditor::SpriteTexture> {
+    const auto checkEmptySpritePreview = [&] {
+        require(editor.document().sprites().size() == 1
+            && editor.document().sprites()[0].texture == -1
+            && editor.document().sprites()[0].position == QPointF(256,256)
+            && editor.document().sprites()[0].sectorId == 0
+            && editor.document().sprites()[0].z == -2048,
+            "Empty sprite exists at its final placement before texture picker opens");
+        const auto selected = editor.scene()->selectedItems();
+        require(selected.size() == 1 && selected.front()->isVisible()
+            && selected.front()->pos() == QPointF(256,256),
+            "Empty sprite preview is visible and selected before texture picker opens");
+        require(!editor.canAutosave() && editor.undoStack()->count() == 0,
+            "Sprite preview remains pending until texture choice");
+    };
+    editor.setTextureSelector([&](std::optional<int>) -> std::optional<MapEditor::SpriteTexture> {
+        checkEmptySpritePreview();
         return std::nullopt;
     });
     editor.addSprite(); click({256,256});
     require(editor.document() == source && editor.undoStack()->count() == 0,
         "Cancel add texture picker creates no sprite or history");
-    editor.setTextureSelector([](std::optional<int>) -> std::optional<MapEditor::SpriteTexture> {
+    editor.setTextureSelector([&](std::optional<int>) -> std::optional<MapEditor::SpriteTexture> {
+        checkEmptySpritePreview();
         return MapEditor::SpriteTexture{42, QImage()};
     });
     editor.addSprite(); click({256,256});
+    editor.setTextureSelector([](std::optional<int>) -> std::optional<MapEditor::SpriteTexture> {
+        return MapEditor::SpriteTexture{42, QImage()};
+    });
     require(editor.document().sprites().size() == 1 && editor.document().sprites()[0].texture == 42
         && editor.document().sprites()[0].position == QPointF(256,256)
         && editor.document().sprites()[0].sectorId == 0 && editor.document().sprites()[0].z == -2048
