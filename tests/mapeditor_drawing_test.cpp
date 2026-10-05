@@ -462,4 +462,40 @@ int main(int argc, char **argv)
     QApplication::sendEvent(&editor, &lostFocus);
     require(editor.document() == withSprite && editor.canAutosave(), "Losing focus cancels movement safely");
 
+    // Enter edits a selected sprite, but never the player start or an empty selection.
+    editor.recoverDocument(withSprite, {});
+    editor.setMode(MapEditor::Mode::Sprites);
+    click({256,256});
+    int pickerCalls = 0;
+    editor.setTextureSelector([&](std::optional<int> current) -> std::optional<MapEditor::SpriteTexture> {
+        ++pickerCalls;
+        require(current == 42, "Enter picker starts at the current sprite texture");
+        return MapEditor::SpriteTexture{43, QImage()};
+    });
+    key(Qt::Key_Return);
+    auto textured = withSprite;
+    textured.setSpriteTexture(0, 43);
+    require(editor.document() == textured && pickerCalls == 1
+        && editor.undoStack()->count() == 1 && editor.scene()->selectedItems().size() == 1,
+        "Enter changes only sprite texture in one undoable edit and retains selection");
+    editor.undo(); require(editor.document() == withSprite, "Undo Enter texture change");
+    editor.redo(); require(editor.document() == textured, "Redo Enter texture change");
+    editor.setTextureSelector([&](std::optional<int>) -> std::optional<MapEditor::SpriteTexture> {
+        ++pickerCalls;
+        return std::nullopt;
+    });
+    key(Qt::Key_Enter);
+    require(pickerCalls == 2 && editor.document() == textured && editor.undoStack()->count() == 1,
+        "Keypad Enter opens picker; cancellation changes neither map nor history");
+    QKeyEvent repeatedEnter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier, QString(), true);
+    QApplication::sendEvent(&editor, &repeatedEnter);
+    require(pickerCalls == 2, "Held Enter does not reopen picker");
+    click({512,512}); key(Qt::Key_Return);
+    editor.scene()->clearSelection(); key(Qt::Key_Return);
+    require(pickerCalls == 2 && editor.document() == textured,
+        "Enter ignores player start and empty selection");
+    click({256,256}); editor.moveSelection(); hover({256,256}); hover({512,256}); key(Qt::Key_Return);
+    require(pickerCalls == 2 && editor.document().sprites()[0].position == QPointF(512,256),
+        "Enter confirms active move without opening texture picker");
+
 }

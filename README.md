@@ -184,8 +184,8 @@ as saved. New edits after undo discard the redo branch. History retains at most
   first. Escape cancels pending placement; cancelling the texture picker creates
   nothing. Also available in the Edit menu.
 - **Sprites mode:** right-click empty space to add a sprite; left-click or
-  rubber-band to select; right-drag to move; right-click a sprite to choose its
-  texture; Delete removes selected sprites.
+  rubber-band to select; right-drag to move; press Enter with one sprite selected
+  (or right-click a sprite) to choose its texture; Delete removes selected sprites.
 - **Player start:** the permanent arrow can be selected and right-dragged only
   in Sprites mode; it has no selectable texture and is omitted from selections
   containing ordinary sprites.

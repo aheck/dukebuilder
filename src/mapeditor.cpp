@@ -2681,29 +2681,7 @@ void MapEditor::mouseReleaseEvent(QMouseEvent *event)
         m_clickedPlayerStart = false;
         setCursor(Qt::CrossCursor);
 
-        if (chooseTexture && spriteId < m_document.sprites().size()
-                && m_textureSelector) {
-            const int currentTexture = m_document.sprites()[spriteId].texture;
-            const std::optional<SpriteTexture> selection = m_textureSelector(
-                currentTexture >= 0 ? std::optional<int>(currentTexture)
-                                    : std::nullopt);
-            if (selection) {
-                m_editLabel = "Change sprite texture";
-                m_document.setSpriteTexture(spriteId, selection->tile);
-            m_spriteTextures.insert(selection->tile * 256, selection->image);
-                rebuildScene();
-                for (QGraphicsItem *item : m_scene->items()) {
-                    auto *sprite = dynamic_cast<SpriteItem *>(item);
-                    if (sprite && static_cast<MapDocument::SpriteId>(
-                            sprite->data(spriteIdRole).toULongLong()) == spriteId) {
-                        sprite->setSelected(true);
-                        break;
-                    }
-                }
-                reportStatus(QString("Sprite texture set to tile %1")
-                                 .arg(selection->tile));
-            }
-        }
+        if (chooseTexture) chooseSpriteTexture(spriteId);
         event->accept();
         return;
     }
@@ -2804,6 +2782,28 @@ void MapEditor::stickSelectedSpriteToWall()
     reportStatus("Sprite placed against the nearest wall.");
 }
 
+void MapEditor::chooseSpriteTexture(MapDocument::SpriteId spriteId)
+{
+    if (spriteId >= m_document.sprites().size() || !m_textureSelector) return;
+    const int currentTexture = m_document.sprites()[spriteId].texture;
+    const auto texture = m_textureSelector(currentTexture >= 0
+        ? std::optional<int>(currentTexture) : std::nullopt);
+    if (!texture) return;
+    Edit edit(this, "Change sprite texture");
+    m_editLabel = "Change sprite texture";
+    m_document.setSpriteTexture(spriteId, texture->tile);
+    m_spriteTextures.insert(texture->tile * 256, texture->image);
+    rebuildScene();
+    for (auto *item : m_scene->items()) {
+        if (dynamic_cast<SpriteItem *>(item)
+            && item->data(spriteIdRole).toULongLong() == spriteId) {
+            item->setSelected(true);
+            break;
+        }
+    }
+    reportStatus(QString("Sprite texture set to tile %1").arg(texture->tile));
+}
+
 void MapEditor::keyPressEvent(QKeyEvent *event)
 {
     if (m_keyboardMove || m_addingSprite) {
@@ -2812,6 +2812,18 @@ void MapEditor::keyPressEvent(QKeyEvent *event)
             m_addingSprite = false;
         } else if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
             finishKeyboardMove(false);
+        }
+        event->accept();
+        return;
+    }
+    if (m_mode == Mode::Sprites && event->modifiers() == Qt::NoModifier
+        && (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)) {
+        if (!event->isAutoRepeat() && !m_mouseEdit) {
+            const auto selected = m_scene->selectedItems();
+            if (selected.size() == 1 && dynamic_cast<SpriteItem *>(selected.front()))
+                chooseSpriteTexture(selected.front()->data(spriteIdRole).toULongLong());
+            else
+                reportStatus("Select one sprite to change its texture.");
         }
         event->accept();
         return;

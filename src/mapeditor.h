@@ -236,6 +236,7 @@ private:
     void endEdit();
     void finishPendingEdit();
     void finishKeyboardMove(bool cancel);
+    void chooseSpriteTexture(MapDocument::SpriteId spriteId);
     void createSpriteAt(const QPoint &position, bool disableSnapping, bool chooseTexture);
     QUndoStack m_undoStack;
     std::optional<Snapshot> m_beforeEdit;

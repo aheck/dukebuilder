@@ -87,7 +87,7 @@ QString content(bool threeD)
             {"Ctrl+C / Ctrl+V", "Copy selected sprites and paste duplicates one grid cell down and right. Requires Sprites mode."},
             {"A / Add sprite toolbar button", "In Sprites mode, add at the pointer with A, or click a placement point after using the toolbar. Choose a texture; cancelling the picker creates nothing."},
             {"Right click empty space", "Create a sprite in Sprites mode."},
-            {"Right click a sprite", "Choose its texture in Sprites mode."},
+            {"Enter / Right click a sprite", "Choose the selected sprite’s texture with Enter, or right-click a sprite. Requires Sprites mode and one selected sprite for Enter."},
             {"O", "Stick one selected sprite to the nearest wall of its sector. Requires Sprites mode; preserves height and tags."},
             {"Player-start arrow", "Select and right-drag in Sprites mode. It has no selectable texture."}
         });
