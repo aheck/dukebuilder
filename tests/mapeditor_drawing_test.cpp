@@ -517,4 +517,121 @@ int main(int argc, char **argv)
     require(pickerCalls == 2 && editor.document().sprites()[0].position == QPointF(512,256),
         "Enter confirms active move without opening texture picker");
 
+    // Sector paste remains outside the document until the floating group is deselected.
+    editor.recoverDocument(source, {});
+    editor.setMode(MapEditor::Mode::Sectors);
+    editor.centerOn(1024,512);
+    QApplication::processEvents();
+    click({512,512});
+    const auto shortcut = [&](int code) {
+        QKeyEvent event(QEvent::KeyPress, code, Qt::ControlModifier);
+        QApplication::sendEvent(&editor, &event);
+    };
+    shortcut(Qt::Key_C);
+    QCursor::setPos(editor.viewport()->mapToGlobal(editor.mapFromScene({2048,0})));
+    shortcut(Qt::Key_V);
+    require(editor.hasFloatingPaste() && editor.document() == source && editor.undoStack()->count() == 0,
+        "Paste creates a floating group without changing geometry or history");
+    require(!editor.canAutosave() && editor.hasUnsavedChanges(), "Pending paste participates in dirty and autosave state");
+    const auto dragFloating = [&](QPointF from, QPointF to) {
+        const QPoint a = editor.mapFromScene(from), b = editor.mapFromScene(to);
+        QMouseEvent press(QEvent::MouseButtonPress, a, editor.viewport()->mapToGlobal(a),
+            Qt::RightButton, Qt::RightButton, Qt::NoModifier);
+        QApplication::sendEvent(editor.viewport(), &press);
+        QMouseEvent move(QEvent::MouseMove, b, editor.viewport()->mapToGlobal(b),
+            Qt::NoButton, Qt::RightButton, Qt::NoModifier);
+        QApplication::sendEvent(editor.viewport(), &move);
+        QMouseEvent release(QEvent::MouseButtonRelease, b, editor.viewport()->mapToGlobal(b),
+            Qt::RightButton, Qt::NoButton, Qt::NoModifier);
+        QApplication::sendEvent(editor.viewport(), &release);
+    };
+    require(editor.scene()->selectedItems().size() == 1, "Floating sectors are selected as one group");
+    const auto floatingItem = editor.scene()->selectedItems().front();
+    const auto floatingOffset = floatingItem->pos();
+    const auto floatingCenter = floatingItem->sceneBoundingRect().center();
+    dragFloating(floatingCenter, floatingCenter + QPointF(512,0));
+    require(editor.hasFloatingPaste() && editor.document() == source && editor.undoStack()->count() == 0,
+        "Releasing a floating-sector drag does not settle it");
+    click({-512,-512});
+    require(!editor.hasFloatingPaste() && editor.document().sectors().size() == 2
+        && editor.undoStack()->count() == 1 && editor.undoStack()->undoText() == "Paste sectors",
+        "Deselect settles the entire paste as one undo step");
+    require(editor.document().vertices()[4].position == source.vertices()[0].position + floatingOffset + QPointF(512,0),
+        "Floating movement snaps the group without moving its source");
+    const auto pastedSectors = editor.document();
+    editor.undo(); require(editor.document() == source, "Undo removes the entire sector paste");
+    editor.redo(); require(editor.document() == pastedSectors, "Redo restores final placement");
+    shortcut(Qt::Key_V); key(Qt::Key_Escape);
+    require(!editor.hasFloatingPaste() && editor.document() == pastedSectors && editor.undoStack()->count() == 1,
+        "Escape cancels a paste without creating history");
+    shortcut(Qt::Key_V); editor.undo();
+    require(!editor.hasFloatingPaste() && editor.document() == pastedSectors && editor.undoStack()->index() == 1,
+        "Undo during floating paste cancels only the pending copy");
+    shortcut(Qt::Key_V);
+    editor.scene()->clearSelection();
+    QApplication::processEvents();
+    require(!editor.hasFloatingPaste() && editor.document().sectors().size() == 3,
+        "Explicit selection clearing also settles the paste");
+    editor.undo();
+    shortcut(Qt::Key_V);
+    editor.setMode(MapEditor::Mode::Lines);
+    require(!editor.hasFloatingPaste() && editor.document().sectors().size() == 3,
+        "Mode switch settles a floating paste");
+    editor.undo();
+    editor.setMode(MapEditor::Mode::Sectors);
+    shortcut(Qt::Key_V);
+    QTemporaryDir pasteDirectory;
+    QString pasteError;
+    require(editor.saveMap(pasteDirectory.filePath("paste.map"), pasteError), "Save settles and saves floating sectors");
+    require(!editor.hasFloatingPaste() && !editor.hasUnsavedChanges(), "Saved paste is clean");
+    MapDocument savedPaste;
+    require(savedPaste.openMap(pasteDirectory.filePath("paste.map"), pasteError)
+        && savedPaste.sectors().size() == 3, "Saved map contains settled paste");
+    shortcut(Qt::Key_V);
+    editor.newMap();
+    require(!editor.hasFloatingPaste() && editor.document().sectors().empty(), "New map discards pending paste");
+
+    MapDocument adjacent = source;
+    require(adjacent.addPolyline({{1024,0},{2048,0},{2048,1024},{1024,1024}}, true), "Create multiselection fixture");
+    const auto sectorSprite = adjacent.addSprite({256,256});
+    adjacent.setSpriteTexture(sectorSprite, 123);
+    editor.recoverDocument(adjacent, {});
+    editor.setMode(MapEditor::Mode::Sectors);
+    editor.centerOn(1024,512);
+    click({512,512}); click({1536,512}, Qt::ShiftModifier);
+    require(editor.scene()->selectedItems().size() == 2, "Select two sectors to copy");
+    shortcut(Qt::Key_C); shortcut(Qt::Key_V);
+    const auto beforeKeyboardMove = editor.scene()->selectedItems().front()->pos();
+    editor.moveSelection();
+    hover({2048,2048});
+    hover({2560,2048});
+    key(Qt::Key_Return);
+    require(editor.hasFloatingPaste() && editor.document() == adjacent
+        && editor.scene()->selectedItems().front()->pos() != beforeKeyboardMove,
+        "Keyboard positioning leaves the copied group floating");
+    const auto groupCenter = editor.scene()->selectedItems().front()->sceneBoundingRect().center();
+    click(groupCenter, Qt::ShiftModifier);
+    require(!editor.hasFloatingPaste() && editor.document().sectors().size() == 4
+        && editor.document().sprites().size() == 2 && editor.undoStack()->count() == 1,
+        "Shift-deselect settles all copied sectors and their sprites together");
+    editor.undo(); require(editor.document() == adjacent, "Undo multisection paste restores source");
+    editor.redo();
+    require(editor.document().sectors().size() == 4, "Redo restores multisection paste");
+
+    // A rejected commit must leave the pending fragment available for cancellation.
+    MapDocument invalidSource = source;
+    invalidSource.setVertexPositions({{1, invalidSource.vertices()[0].position}});
+    editor.recoverDocument(invalidSource, {});
+    editor.setMode(MapEditor::Mode::Sectors);
+    click({256,768});
+    shortcut(Qt::Key_C); shortcut(Qt::Key_V);
+    require(editor.hasFloatingPaste(), "Invalid fixture can be previewed before placement validation");
+    editor.scene()->clearSelection();
+    QApplication::processEvents();
+    require(editor.hasFloatingPaste() && editor.document() == invalidSource && editor.undoStack()->count() == 0,
+        "Rejected placement stays floating and creates no undo entry");
+    require(!editor.saveMap(pasteDirectory.filePath("invalid.map"), pasteError)
+        && !pasteError.isEmpty() && editor.hasFloatingPaste(), "Save reports an invalid paste without discarding it");
+    key(Qt::Key_Escape);
+
 }

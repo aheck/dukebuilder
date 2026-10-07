@@ -1,6 +1,7 @@
 #include "mapdocument.h"
 
 #include <algorithm>
+#include <limits>
 #include <QPainterPath>
 #include <cstdlib>
 #include <iostream>
@@ -50,6 +51,56 @@ void checkSideReferences(const MapDocument &document)
 
 int main()
 {
+    {
+        MapDocument source, fragment;
+        QString error;
+        require(source.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}}, true), "Copy source room");
+        require(source.addPolyline({{1024,0},{2048,0},{2048,1024},{1024,1024}}, true), "Copy adjacent room");
+        auto sector = source.sectors()[0];
+        sector.floorTexture = 42; sector.lotag = 7; sector.floorheinum = 512; sector.floorstat = 2;
+        source.setSector(0, sector);
+        const auto spriteId = source.addSprite({256,256});
+        auto sprite = source.sprites()[spriteId];
+        sprite.texture = 123; sprite.hitag = 17; sprite.owner = static_cast<int>(spriteId);
+        source.setSprite(spriteId, sprite);
+        require(source.copySectors({0,1,0}, fragment, error), "Copy adjacent sectors with duplicate selection IDs");
+        require(fragment.sectors().size() == 2 && fragment.walls().size() == 7 && fragment.vertices().size() == 6,
+            "Copy deduplicates shared walls and vertices");
+        require(fragment.sprites().size() == 1 && fragment.sprites()[0].sectorId == 0,
+            "Copy includes newly created sprites by location");
+        require(fragment.sectors()[0].floorTexture == 42 && fragment.sectors()[0].floorheinum == 512,
+            "Copy preserves surface properties");
+        checkSideReferences(fragment);
+        const auto before = source;
+        require(source.pasteSectors(fragment, {4096,0}, error), "Paste connected fragment");
+        require(source.sectors().size() == 4 && source.vertices().size() == 12 && source.walls().size() == 14,
+            "Paste appends fresh geometry");
+        checkSideReferences(source);
+        require(source.sprites()[1].position == QPointF(4352,256) && source.sprites()[1].sectorId == 2
+            && source.sprites()[1].owner == 1 && source.sprites()[1].hitag == 17, "Pasted sprite references are remapped");
+        require(source.vertices()[0] == before.vertices()[0] && source.sectors()[0] == before.sectors()[0],
+            "Paste leaves source geometry unchanged");
+        MapDocument single;
+        require(before.copySectors({1}, single, error), "Copy only one side of a portal");
+        require(std::none_of(single.walls().begin(), single.walls().end(), [](const auto &w) { return w.isTwoSided(); }),
+            "External portals become solid walls");
+        checkSideReferences(single);
+        const auto settled = source;
+        require(!source.pasteSectors(fragment, {std::numeric_limits<qreal>::quiet_NaN(),0}, error) && source == settled,
+            "Invalid paste is transactional");
+        require(source.pasteSectors(single, {0,0}, error), "Coincident independent sectors can be pasted");
+        require(source.vertices().size() == settled.vertices().size() + 4, "Coincident paste never welds vertices");
+
+        MapDocument holes;
+        require(holes.addPolyline({{0,0},{4096,0},{4096,4096},{0,4096}}, true), "Hole outer room");
+        require(holes.addPolyline({{1024,1024},{2048,1024},{2048,2048},{1024,2048}}, true), "Hole inner room");
+        require(holes.copySectors({0}, fragment, error), "Copy sector containing a hole");
+        require(fragment.sectors()[0].loopStarts == holes.sectors()[0].loopStarts, "Copy preserves hole loops");
+        require(holes.pasteSectors(fragment, {8192,0}, error), "Paste sector containing a hole");
+        require(holes.sectorsAt({9728,1536}).empty(), "Pasted hole remains empty");
+        checkSideReferences(holes);
+    }
+
     {
         MapDocument stacked;
         QString error;

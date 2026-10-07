@@ -47,6 +47,22 @@ int main(int argc, char **argv)
     require(dir.isValid(), "Temporary directory");
     const auto path = dir.filePath("tror.map");
     QString error;
+    {
+        auto original = room();
+        require(original.extendTror(0, true, 8192, error) == 1, error);
+        MapDocument fragment;
+        require(original.copySectors({0,1}, fragment, error), error);
+        require(fragment.validateTror(error), error);
+        require(original.pasteSectors(fragment, {4096,0}, error), error);
+        require(original.sectors()[2].floorBunch == original.sectors()[3].ceilingBunch
+            && original.sectors()[2].floorBunch != original.sectors()[0].floorBunch,
+            "Pasted TROR connections use a fresh bunch");
+        roundTrip(original, path, 9);
+        require(original.copySectors({0}, fragment, error), error);
+        require(!fragment.hasTror(), "A partial TROR copy detaches external connections");
+        require(original.pasteSectors(fragment, {8192,0}, error), error);
+        roundTrip(original, path, 9);
+    }
     // Reproduce the beginner tutorial: two visible rooms, three sectors.
     MapDocument tutorial;
     require(tutorial.addPolyline({{-2048,-2048},{2048,-2048},{2048,2048},{-2048,2048}},true), "Tutorial upper room");

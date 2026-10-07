@@ -173,6 +173,15 @@ as saved. New edits after undo discard the redo branch. History retains at most
   Right-drag selected vertices to move them: the grabbed vertex snaps to the
   active grid, including its rotation. Hold Alt to move freely. Multiple selected
   vertices move together without changing their relative positions.
+- **Sectors mode, Ctrl+C / Ctrl+V:** copy one or more selected sectors, including
+  their sprites, and paste a floating group at the pointer. Right-drag or use M
+  to position it; grid snapping applies, with Alt/Option for free movement.
+  Releasing the drag or confirming M leaves the group floating. Click outside
+  or select something else to settle it; Escape or Delete cancels it. Saving or
+  changing editing mode also settles it. Placement is one undo step and creates
+  independent geometry without welding touching walls. Internal portals and
+  complete TROR bunches are preserved; connections outside the copy are removed.
+  Tags are preserved, so copied effects may still share tag-based behavior.
 - **M / Edit → Move selection / Move toolbar button:** move selected vertices,
   lines, sectors, sprites, or the player start without holding a mouse button.
   Move the pointer, then left-click or press Enter to confirm; Escape or changing

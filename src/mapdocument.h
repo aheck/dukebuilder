@@ -152,6 +152,9 @@ public:
     std::optional<SectorId> extendTror(SectorId sector, bool floor, qreal depth, QString &error);
     bool connectTror(SectorId upper, SectorId lower, QString &error);
     bool disconnectTror(SectorId sector, bool floor, QString &error);
+    // Copy topology with local IDs; paste allocates independent geometry transactionally.
+    bool copySectors(const std::vector<SectorId> &ids, MapDocument &fragment, QString &error) const;
+    bool pasteSectors(const MapDocument &fragment, const QPointF &offset, QString &error);
     // Join a connected selection transactionally; the first ID supplies properties.
     std::optional<SectorId> joinSectors(const std::vector<SectorId> &ids, QString &error);
     // Remove sector interiors, retaining shared boundaries as solid walls.

@@ -151,6 +151,9 @@ public:
     void resetSelectedWallTextureScale();
     void stickSelectedSpriteToWall();
     void moveSelection();
+    void copySelectedSectors();
+    void pasteCopiedSectors();
+    bool hasFloatingPaste() const { return m_floatingPaste.has_value(); }
     void addSprite();
     bool canJoinSelectedSectors() const;
     void joinSelectedSectors();
@@ -162,7 +165,7 @@ public:
     std::function<void()> documentRestored;
     // Set only for the duration of a continuous 3D edit callback.
     QString continuousEditKey;
-    bool canAutosave() const { return !m_mouseEdit && m_editDepth == 0; }
+    bool canAutosave() const { return !m_floatingPaste && !m_mouseEdit && m_editDepth == 0; }
     const std::vector<QPointF> &drawingPoints() const { return m_drawingPoints; }
     void recoverDocument(const MapDocument &document, const std::vector<QPointF> &points);
     void showMapIssue(const MapCheckResult &issue);
@@ -220,6 +223,18 @@ protected:
     void drawBackground(QPainter *painter, const QRectF &rect) override;
 
 private:
+    struct FloatingSectorPaste {
+        MapDocument fragment;
+        QPointF anchor, offset, dragStart, dragOffset;
+        bool dragging = false;
+        bool following = false;
+    };
+    std::optional<MapDocument> m_sectorClipboard;
+    std::optional<FloatingSectorPaste> m_floatingPaste;
+    QGraphicsPathItem *m_floatingPasteItem = nullptr;
+    void updateFloatingPaste();
+    void cancelFloatingPaste();
+    bool settleFloatingPaste(QString *failure = nullptr);
     struct Selection {
         std::vector<std::pair<int, qulonglong>> items;
         std::vector<MapDocument::SectorId> sectorOrder;

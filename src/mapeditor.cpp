@@ -613,6 +613,7 @@ MapEditor::Selection MapEditor::selection() const
     Selection result{{}, m_sectorSelectionOrder, m_mode, m_wallSideReversed};
     result.editingScope = m_editingScope;
     for (auto *item : m_scene->selectedItems()) {
+        if (item == m_floatingPasteItem) continue;
         int role = dynamic_cast<VertexItem *>(item) ? vertexIdRole
             : dynamic_cast<WallItem *>(item) ? wallIdRole
             : dynamic_cast<SectorItem *>(item) ? sectorIdRole
@@ -624,6 +625,7 @@ MapEditor::Selection MapEditor::selection() const
 
 void MapEditor::restore(const Snapshot &snapshot)
 {
+    cancelFloatingPaste();
     cancelDrawing();
     m_draggingVertices = m_draggingSprites = m_draggingPlayerStart = false;
     m_draggedVertices.clear(); m_draggedWalls.clear(); m_draggedSectors.clear();
@@ -714,6 +716,7 @@ void MapEditor::finishPendingEdit()
 
 void MapEditor::undo()
 {
+    if (m_floatingPaste) { cancelFloatingPaste(); reportStatus("Paste cancelled."); return; }
     finishPendingEdit();
     if (!m_drawingPoints.empty()) { cancelDrawing(); return; }
     ++m_historyGeneration;
@@ -725,6 +728,7 @@ void MapEditor::undo()
 
 void MapEditor::redo()
 {
+    if (m_floatingPaste) { reportStatus("Finish or cancel the floating paste before redoing."); return; }
     finishPendingEdit();
     cancelDrawing();
     ++m_historyGeneration;
@@ -840,6 +844,12 @@ MapEditor::MapEditor(QWidget *parent)
     m_undoStack.setUndoLimit(100);
     setScene(m_scene);
     connect(m_scene, &QGraphicsScene::selectionChanged, this, [this] {
+        if (m_floatingPasteItem && !m_floatingPasteItem->isSelected()) {
+            // Defer destruction until Qt has finished changing the scene selection.
+            QTimer::singleShot(0, this, [this] {
+                if (m_floatingPasteItem && !m_floatingPasteItem->isSelected()) settleFloatingPaste();
+            });
+        }
         std::set<MapDocument::SectorId> selectedSectors;
         if (m_mode == Mode::Sectors) {
             for (auto *item : m_scene->selectedItems()) {
@@ -1330,11 +1340,12 @@ void MapEditor::setSectorHeight(std::size_t sector, bool floor, qreal height)
 
 bool MapEditor::hasUnsavedChanges() const
 {
-    return m_recoveredDirty || !m_drawingPoints.empty() || !(m_document == m_savedDocument);
+    return m_floatingPaste || m_recoveredDirty || !m_drawingPoints.empty() || !(m_document == m_savedDocument);
 }
 
 bool MapEditor::saveMap(const QString &filename, QString &error)
 {
+    if (!settleFloatingPaste(&error)) return false;
     finishPendingEdit();
     if (!m_drawingPoints.empty()) {
         error = "Finish or cancel the current drawing before saving.";
@@ -1351,6 +1362,7 @@ bool MapEditor::openMap(const QString &filename, QString &error, bool asUnsavedC
 {
     MapDocument loaded;
     if (!loaded.openMap(filename, error)) return false;
+    cancelFloatingPaste();
     cancelDrawing();
     m_draggingVertices = m_draggingSprites = m_draggingPlayerStart = false;
     m_spriteDragMoved = m_clickedPlayerStart = m_panning = false;
@@ -1384,6 +1396,7 @@ bool MapEditor::openMap(const QString &filename, QString &error, bool asUnsavedC
 
 void MapEditor::recoverDocument(const MapDocument &document, const std::vector<QPointF> &points)
 {
+    cancelFloatingPaste();
     finishPendingEdit();
     m_undoStack.clear();
     setMode(Mode::Draw);
@@ -1426,6 +1439,7 @@ void MapEditor::showMapIssue(const MapCheckResult &issue)
 
 void MapEditor::newMap()
 {
+    cancelFloatingPaste();
     m_editingScope.reset();
     finishPendingEdit();
     m_undoStack.clear();
@@ -1439,6 +1453,7 @@ void MapEditor::newMap()
 
 void MapEditor::setMode(Mode mode)
 {
+    if (mode != m_mode && !settleFloatingPaste()) return;
     finishPendingEdit();
     ++m_historyGeneration;
     if (m_mode == mode) {
@@ -1570,6 +1585,7 @@ void MapEditor::rememberScopeTopology()
 
 bool MapEditor::setEditingScope(std::optional<std::set<MapDocument::SectorId>> sectors)
 {
+    if (!settleFloatingPaste()) return false;
     if (!m_drawingPoints.empty()) {
         reportStatus("Finish or cancel drawing before changing the editing scope.");
         return false;
@@ -1897,8 +1913,137 @@ QPointF MapEditor::snappedPosition(const QPoint &viewportPosition, bool disableS
     return m_scene->snapToGrid(scenePosition);
 }
 
+void MapEditor::copySelectedSectors()
+{
+    if (m_floatingPaste) {
+        m_sectorClipboard = m_floatingPaste->fragment;
+        reportStatus("Floating sectors copied.");
+        return;
+    }
+    if (m_mode != Mode::Sectors) { reportStatus("Switch to Sectors mode to copy sectors."); return; }
+    QString error;
+    MapDocument fragment;
+    if (!m_document.copySectors(m_sectorSelectionOrder, fragment, error)) {
+        reportStatus(error);
+        return;
+    }
+    m_sectorClipboard = std::move(fragment);
+    reportStatus(QString("%1 sector(s) copied.").arg(m_sectorClipboard->sectors().size()));
+}
+
+void MapEditor::pasteCopiedSectors()
+{
+    if (!m_sectorClipboard) { reportStatus("No copied sectors to paste."); return; }
+    if (!settleFloatingPaste()) return;
+    finishPendingEdit();
+    setMode(Mode::Sectors);
+    clearSplitPreview();
+    m_scene->clearSelection();
+    FloatingSectorPaste paste;
+    paste.fragment = *m_sectorClipboard;
+    paste.anchor = paste.fragment.vertices().front().position;
+    const QPoint pointer = viewport()->mapFromGlobal(QCursor::pos());
+    const QPointF position = mapToScene(viewport()->rect().contains(pointer) ? pointer : viewport()->rect().center());
+    paste.offset = m_scene->snapToGrid(position) - paste.anchor;
+    m_floatingPaste = std::move(paste);
+    updateFloatingPaste();
+    setFocus(Qt::OtherFocusReason);
+    reportStatus("Sectors pasted: right-drag or M to move; click outside to settle; Escape cancels.");
+}
+
+void MapEditor::updateFloatingPaste()
+{
+    if (!m_floatingPaste) return;
+    if (!m_floatingPasteItem) {
+        QPainterPath path;
+        // Union sector fills so overlapping TROR layers remain pickable.
+        for (const auto &sector : m_floatingPaste->fragment.sectors()) {
+            QPainterPath outline;
+            outline.setFillRule(Qt::OddEvenFill);
+            for (std::size_t i = 0; i < sector.vertices.size(); ++i) {
+                const auto p = m_floatingPaste->fragment.vertices()[sector.vertices[i]].position;
+                if (i == 0 || std::find(sector.loopStarts.begin(), sector.loopStarts.end(), i) != sector.loopStarts.end())
+                    outline.moveTo(p);
+                else outline.lineTo(p);
+                if (sector.nextWallIndex(i) <= i) outline.closeSubpath();
+            }
+            path = path.united(outline);
+        }
+        m_floatingPasteItem = m_scene->addPath(path, cosmeticPen(QColor(255, 210, 80), 2), QColor(255, 210, 80, 55));
+        m_floatingPasteItem->setFlag(QGraphicsItem::ItemIsSelectable);
+        m_floatingPasteItem->setZValue(30);
+        // Keep internal shared walls and sprites visible inside the group fill.
+        QPainterPath details;
+        for (const auto &wall : m_floatingPaste->fragment.walls()) {
+            details.moveTo(m_floatingPaste->fragment.vertices()[wall.start].position);
+            details.lineTo(m_floatingPaste->fragment.vertices()[wall.end].position);
+        }
+        for (const auto &sprite : m_floatingPaste->fragment.sprites()) {
+            details.addEllipse(sprite.position, 32, 32);
+            const auto angle = sprite.angle * 3.14159265358979323846 / 180;
+            details.moveTo(sprite.position);
+            details.lineTo(sprite.position + QPointF(std::cos(angle), std::sin(angle)) * 64);
+        }
+        auto *lines = new QGraphicsPathItem(details, m_floatingPasteItem);
+        lines->setPen(cosmeticPen(QColor(255, 210, 80), 1));
+        lines->setAcceptedMouseButtons(Qt::NoButton);
+        m_floatingPasteItem->setSelected(true);
+    }
+    m_floatingPasteItem->setPos(m_floatingPaste->offset);
+}
+
+void MapEditor::cancelFloatingPaste()
+{
+    m_floatingPaste.reset();
+    auto *item = m_floatingPasteItem;
+    m_floatingPasteItem = nullptr;
+    delete item;
+    setCursor(Qt::CrossCursor);
+    updateProperties();
+}
+
+bool MapEditor::settleFloatingPaste(QString *failure)
+{
+    if (!m_floatingPaste) return true;
+    QString error;
+    MapDocument candidate = m_document;
+    if (!candidate.pasteSectors(m_floatingPaste->fragment, m_floatingPaste->offset, error)) {
+        if (failure) *failure = error;
+        if (m_floatingPasteItem) m_floatingPasteItem->setSelected(true);
+        reportStatus("Cannot settle pasted sectors: " + error);
+        return false;
+    }
+    const auto count = m_floatingPaste->fragment.sectors().size();
+    cancelFloatingPaste();
+    Edit edit(this, "Paste sectors");
+    if (m_editingScope) {
+        for (auto id = m_document.sectors().size(); id < candidate.sectors().size(); ++id)
+            m_editingScope->insert(id);
+    }
+    m_document = std::move(candidate);
+    rememberScopeTopology();
+    for (const auto &sprite : m_document.sprites()) {
+        const int key = sprite.texture * 256 + sprite.palette;
+        if (m_textureResolver && sprite.texture >= 0 && !m_spriteTextures.contains(key))
+            m_spriteTextures.insert(key, m_textureResolver(sprite.texture, sprite.palette));
+    }
+    rebuildScene();
+    updateProperties();
+    reportStatus(QString("%1 sector(s) placed.").arg(count));
+    return true;
+}
+
 void MapEditor::moveSelection()
 {
+    if (m_floatingPaste) {
+        m_floatingPaste->following = true;
+        const auto pointer = viewport()->mapFromGlobal(QCursor::pos());
+        m_floatingPaste->dragStart = mapToScene(viewport()->rect().contains(pointer) ? pointer : viewport()->rect().center());
+        m_floatingPaste->dragOffset = m_floatingPaste->offset;
+        setCursor(Qt::SizeAllCursor);
+        setFocus(Qt::OtherFocusReason);
+        return;
+    }
     if (m_keyboardMove || m_mode == Mode::Draw) return;
     finishPendingEdit();
     const auto selected = m_scene->selectedItems();
@@ -2047,6 +2192,35 @@ void MapEditor::createSpriteAt(const QPoint &pointer, bool disableSnapping, bool
 
 void MapEditor::mousePressEvent(QMouseEvent *event)
 {
+    if (m_floatingPaste && event->button() != Qt::MiddleButton && !m_spaceHeld) {
+        if (m_floatingPaste->following && event->button() == Qt::LeftButton) {
+            mouseMoveEvent(event);
+            m_floatingPaste->following = false;
+            setCursor(Qt::CrossCursor);
+            m_consumeLeftRelease = true;
+            event->accept();
+            return;
+        }
+        const auto position = mapToScene(event->position().toPoint());
+        const bool inside = m_floatingPasteItem && m_floatingPasteItem->contains(m_floatingPasteItem->mapFromScene(position));
+        if (inside) {
+            if (event->button() == Qt::LeftButton && event->modifiers().testFlag(Qt::ShiftModifier)) {
+                settleFloatingPaste();
+                m_consumeLeftRelease = true;
+                event->accept();
+                return;
+            }
+            if (event->button() == Qt::RightButton) {
+                m_floatingPaste->dragging = true;
+                m_floatingPaste->dragStart = position;
+                m_floatingPaste->dragOffset = m_floatingPaste->offset;
+                setCursor(Qt::SizeAllCursor);
+            }
+            event->accept();
+            return;
+        }
+        if (!settleFloatingPaste()) { event->accept(); return; }
+    }
     if (m_keyboardMove) {
         if (event->button() == Qt::LeftButton) {
             mouseMoveEvent(event);
@@ -2446,7 +2620,7 @@ void MapEditor::updateSplitPreview(const QPoint &position, bool disableSnapping)
 
 void MapEditor::mouseDoubleClickEvent(QMouseEvent *event)
 {
-    if (m_keyboardMove || m_addingSprite) { mousePressEvent(event); return; }
+    if (m_floatingPaste || m_keyboardMove || m_addingSprite) { mousePressEvent(event); return; }
     if (m_panning || (event->button() == Qt::LeftButton && m_spaceHeld)) {
         mousePressEvent(event);
         return;
@@ -2492,6 +2666,15 @@ void MapEditor::leaveEvent(QEvent *event)
 
 void MapEditor::mouseMoveEvent(QMouseEvent *event)
 {
+    if (m_floatingPaste && !m_panning && (m_floatingPaste->dragging || m_floatingPaste->following)) {
+        auto offset = m_floatingPaste->dragOffset + mapToScene(event->position().toPoint()) - m_floatingPaste->dragStart;
+        if (!event->modifiers().testFlag(Qt::AltModifier))
+            offset = m_scene->snapToGrid(m_floatingPaste->anchor + offset) - m_floatingPaste->anchor;
+        m_floatingPaste->offset = offset;
+        updateFloatingPaste();
+        event->accept();
+        return;
+    }
     if (m_keyboardMove && m_moveAwaitingPointer) {
         m_vertexDragStart = mapToScene(event->position().toPoint());
         m_moveAwaitingPointer = false;
@@ -2670,6 +2853,12 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
 
 void MapEditor::mouseReleaseEvent(QMouseEvent *event)
 {
+    if (m_floatingPaste && event->button() == Qt::RightButton) {
+        m_floatingPaste->dragging = false;
+        setCursor(Qt::CrossCursor);
+        event->accept();
+        return;
+    }
     if (m_keyboardMove || m_addingSprite || (m_consumeLeftRelease && event->button() == Qt::LeftButton)) {
         if (event->button() == Qt::LeftButton) m_consumeLeftRelease = false;
         event->accept();
@@ -2815,6 +3004,27 @@ void MapEditor::chooseSpriteTexture(MapDocument::SpriteId spriteId)
 
 void MapEditor::keyPressEvent(QKeyEvent *event)
 {
+    if (m_floatingPaste) {
+        if (event->key() == Qt::Key_Escape || event->key() == Qt::Key_Delete) {
+            cancelFloatingPaste();
+            reportStatus("Paste cancelled.");
+            event->accept();
+            return;
+        }
+        if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+            m_floatingPaste->following = false;
+            m_floatingPaste->dragging = false;
+            setCursor(Qt::CrossCursor);
+            event->accept();
+            return;
+        }
+    }
+    if (m_mode == Mode::Sectors && event->matches(QKeySequence::Copy)) {
+        copySelectedSectors(); event->accept(); return;
+    }
+    if (m_mode == Mode::Sectors && event->matches(QKeySequence::Paste)) {
+        pasteCopiedSectors(); event->accept(); return;
+    }
     if (m_keyboardMove || m_addingSprite) {
         if (event->key() == Qt::Key_Escape) {
             finishKeyboardMove(true);
@@ -3027,6 +3237,10 @@ void MapEditor::keyReleaseEvent(QKeyEvent *event)
 
 void MapEditor::focusOutEvent(QFocusEvent *event)
 {
+    if (m_floatingPaste) {
+        m_floatingPaste->dragging = m_floatingPaste->following = false;
+        setCursor(Qt::CrossCursor);
+    }
     finishKeyboardMove(true);
     m_addingSprite = false;
     // A release can go to another widget after a focus change; clear held state.
@@ -3166,6 +3380,7 @@ void MapEditor::rebuildScene()
     }
     m_splitPreviewItem = nullptr;
     m_splitWall.reset();
+    m_floatingPasteItem = nullptr;
     m_scene->clear();
     m_previewItem = nullptr;
     m_previewLengthItem = nullptr;
@@ -3234,6 +3449,7 @@ void MapEditor::rebuildScene()
     playerStart->setZValue(13.0);
     updateSectorTextures();
     applyEditingScope();
+    updateFloatingPaste();
 }
 
 void MapEditor::updateProperties() const

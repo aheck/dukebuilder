@@ -1930,6 +1930,152 @@ TrorPlane trorPlane(const MapDocument &d, MapDocument::SectorId id, bool floor)
 }
 }
 
+bool MapDocument::copySectors(const std::vector<SectorId> &ids, MapDocument &fragment, QString &error) const
+{
+    error.clear();
+    if (ids.empty()) { error = "Select one or more sectors to copy."; return false; }
+    MapDocument result;
+    std::map<SectorId, SectorId> sectors;
+    std::map<WallId, WallId> walls;
+    std::map<VertexId, VertexId> vertices;
+    for (auto id : ids) {
+        if (id >= m_sectors.size()) { error = "Invalid sector selection."; return false; }
+        if (sectors.count(id)) continue;
+        sectors.emplace(id, result.m_sectors.size());
+        result.m_sectors.push_back(m_sectors[id]);
+        for (auto v : m_sectors[id].vertices) {
+            if (vertices.count(v)) continue;
+            vertices.emplace(v, result.m_vertices.size());
+            result.m_vertices.push_back(m_vertices[v]);
+        }
+        for (auto w : m_sectors[id].walls) {
+            if (walls.count(w)) continue;
+            walls.emplace(w, result.m_walls.size());
+            result.m_walls.push_back(m_walls[w]);
+        }
+    }
+    // A partially copied bunch cannot retain its complete vertical boundary.
+    std::set<int> detachedBunches;
+    for (SectorId s = 0; s < m_sectors.size(); ++s) {
+        if (sectors.count(s)) continue;
+        for (auto bunch : {m_sectors[s].floorBunch, m_sectors[s].ceilingBunch})
+            if (bunch) detachedBunches.insert(*bunch);
+    }
+    for (auto &sector : result.m_sectors) {
+        for (auto &v : sector.vertices) v = vertices.at(v);
+        for (auto &w : sector.walls) w = walls.at(w);
+        for (auto *bunch : {&sector.floorBunch, &sector.ceilingBunch})
+            if (*bunch && detachedBunches.count(**bunch)) bunch->reset();
+    }
+    for (auto &wall : result.m_walls) {
+        wall.start = vertices.at(wall.start);
+        wall.end = vertices.at(wall.end);
+        for (auto *owner : {&wall.forwardSector, &wall.reverseSector}) {
+            if (*owner && sectors.count(**owner)) *owner = sectors.at(**owner);
+            else owner->reset();
+        }
+        for (bool reverse : {false, true}) {
+            auto &side = reverse ? wall.reverseSide : wall.forwardSide;
+            const auto owner = reverse ? wall.reverseSector : wall.forwardSector;
+            if (!owner) { side = WallSide{}; continue; }
+            const auto &sector = result.m_sectors[*owner];
+            for (bool floor : {false, true}) {
+                auto &link = floor ? side.downLink : side.upLink;
+                if (!(floor ? sector.floorBunch : sector.ceilingBunch)) link.reset();
+                else if (link) link->wall = walls.at(link->wall);
+            }
+        }
+    }
+    std::map<SpriteId, SpriteId> sprites;
+    for (SpriteId id = 0; id < m_sprites.size(); ++id) {
+        const auto &sprite = m_sprites[id];
+        auto owner = sprite.sectorId;
+        if (!owner) {
+            const auto candidates = sectorsAt(sprite.position);
+            if (candidates.size() == 1) owner = candidates.front();
+            else if (std::any_of(candidates.begin(), candidates.end(), [&](auto s) { return sectors.count(s); })) {
+                error = "A sprite overlaps multiple sectors without an assigned sector. Assign its sector before copying.";
+                return false;
+            }
+        }
+        if (!owner || !sectors.count(*owner)) continue;
+        sprites.emplace(id, result.m_sprites.size());
+        result.m_sprites.push_back(sprite);
+        result.m_sprites.back().sectorId = sectors.at(*owner);
+    }
+    for (auto &sprite : result.m_sprites) {
+        sprite.owner = sprite.owner >= 0 && sprites.count(static_cast<SpriteId>(sprite.owner))
+            ? static_cast<int>(sprites.at(static_cast<SpriteId>(sprite.owner))) : -1;
+    }
+    result.m_complexTopology = m_complexTopology;
+    if (!result.validateTror(error)) return false;
+    fragment = std::move(result);
+    return true;
+}
+
+bool MapDocument::pasteSectors(const MapDocument &fragment, const QPointF &offset, QString &error)
+{
+    error.clear();
+    if (fragment.m_sectors.empty()) { error = "No copied sectors to paste."; return false; }
+    MapDocument candidate = *this;
+    // Preserve unambiguous original membership if the copy overlaps its source.
+    const auto resolveMembership = [this](auto &object) {
+        if (object.sectorId) return;
+        const auto owners = sectorsAt(object.position);
+        if (owners.size() == 1) object.sectorId = owners.front();
+    };
+    resolveMembership(candidate.m_playerStart);
+    for (auto &sprite : candidate.m_sprites) resolveMembership(sprite);
+    const auto vertexBase = candidate.m_vertices.size(), wallBase = candidate.m_walls.size();
+    const auto sectorBase = candidate.m_sectors.size(), spriteBase = candidate.m_sprites.size();
+    std::set<int> usedBunches;
+    std::map<int, int> bunches;
+    for (const auto &sector : m_sectors)
+        for (auto bunch : {sector.floorBunch, sector.ceilingBunch})
+            if (bunch) usedBunches.insert(*bunch);
+    for (const auto &sector : fragment.m_sectors) {
+        for (auto bunch : {sector.floorBunch, sector.ceilingBunch}) {
+            if (!bunch || bunches.count(*bunch)) continue;
+            int next = 0;
+            while (usedBunches.count(next)) ++next;
+            if (next >= 256) { error = "Version 9's limit of 256 TROR bunches has been reached."; return false; }
+            bunches.emplace(*bunch, next);
+            usedBunches.insert(next);
+        }
+    }
+    for (auto vertex : fragment.m_vertices) {
+        vertex.position += offset;
+        candidate.m_vertices.push_back(vertex);
+    }
+    for (auto wall : fragment.m_walls) {
+        wall.start += vertexBase; wall.end += vertexBase;
+        for (auto *owner : {&wall.forwardSector, &wall.reverseSector})
+            if (*owner) **owner += sectorBase;
+        for (auto *side : {&wall.forwardSide, &wall.reverseSide})
+            for (auto *link : {&side->upLink, &side->downLink})
+                if (*link) (*link)->wall += wallBase;
+        candidate.m_walls.push_back(wall);
+    }
+    for (auto sector : fragment.m_sectors) {
+        for (auto &v : sector.vertices) v += vertexBase;
+        for (auto &w : sector.walls) w += wallBase;
+        for (auto *bunch : {&sector.floorBunch, &sector.ceilingBunch})
+            if (*bunch) *bunch = bunches.at(**bunch);
+        candidate.m_sectors.push_back(sector);
+    }
+    for (auto sprite : fragment.m_sprites) {
+        sprite.position += offset;
+        if (sprite.sectorId) *sprite.sectorId += sectorBase;
+        if (sprite.owner >= 0) sprite.owner += static_cast<int>(spriteBase);
+        candidate.m_sprites.push_back(sprite);
+    }
+    // Independent geometry must never be welded by a later planar rebuild.
+    candidate.m_complexTopology = true;
+    if (!candidate.validateTopologyChange(*this, error)) return false;
+    *this = std::move(candidate);
+    return true;
+}
+
 bool MapDocument::hasTror() const
 {
     for (const auto &s : m_sectors) {
