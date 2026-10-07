@@ -861,11 +861,54 @@ void MapView3D::showSurfaceContextMenu(const QPoint &globalPosition)
     QAction *selectFloor = nullptr;
     QAction *snapCeilingToFloor = nullptr;
     QAction *snapFloorToCeiling = nullptr;
+    struct FlagAction {
+        QAction *action;
+        int mask;
+        int value;
+    };
+    std::vector<FlagAction> flagActions;
+    QActionGroup translucencyMode(&menu);
+    translucencyMode.setExclusive(true);
+    const auto addFlag = [&flagActions](QMenu *submenu, const char *label, int flags, int bit) {
+        auto *action = submenu->addAction(label);
+        action->setCheckable(true);
+        action->setChecked(flags & bit);
+        flagActions.push_back({action, bit, (flags & bit) ? 0 : bit});
+    };
+    if (target->kind == DUKE_SURFACE_FLOOR || target->kind == DUKE_SURFACE_CEILING) {
+        const auto &sector = m_snapshot.sectors()[target->id];
+        const int flags = target->kind == DUKE_SURFACE_FLOOR ? sector.floorstat : sector.ceilingstat;
+        auto *flagsMenu = menu.addMenu("Surface Flags");
+        addFlag(flagsMenu, "Parallax Sky", flags, 1);
+        addFlag(flagsMenu, "Flip X", flags, 16);
+        addFlag(flagsMenu, "Flip Y", flags, 32);
+        addFlag(flagsMenu, "Swap Texture Axes", flags, 4);
+        addFlag(flagsMenu, "Double Texture Scale", flags, 8);
+        addFlag(flagsMenu, "Align to First Wall", flags, 64);
+    }
     std::optional<std::size_t> opposingSector;
     if (target->kind == DUKE_SURFACE_WALL) {
         const auto &wall = m_snapshot.walls()[target->id];
         opposingSector = target->reversed ? wall.forwardSector : wall.reverseSector;
         const auto &side = target->reversed ? wall.reverseSide : wall.forwardSide;
+        auto *flagsMenu = menu.addMenu("Surface Flags");
+        addFlag(flagsMenu, "Flip X", side.cstat, 8);
+        addFlag(flagsMenu, "Flip Y", side.cstat, 256);
+        addFlag(flagsMenu, "Align to Bottom", side.cstat, 4);
+        flagsMenu->addSeparator();
+        addFlag(flagsMenu, "Blocking", side.cstat, 1);
+        addFlag(flagsMenu, "Block Hitscan", side.cstat, 64);
+        auto *translucencyMenu = flagsMenu->addMenu("Translucency");
+        translucencyMenu->setEnabled(wall.isTwoSided() && (side.cstat & 16) && !(side.cstat & 32));
+        const int translucency = (side.cstat & 128) ? (side.cstat & (128 | 512)) : 0;
+        for (const auto &[label, value] : std::initializer_list<std::pair<const char *, int>>{
+                 {"Opaque", 0}, {"Normal", 128}, {"Reverse", 128 | 512}}) {
+            auto *action = translucencyMenu->addAction(label);
+            action->setCheckable(true);
+            action->setChecked(translucency == value);
+            translucencyMode.addAction(action);
+            flagActions.push_back({action, 128 | 512, value});
+        }
         const bool supportsMaskedTexture = wall.isTwoSided() && !(side.cstat & 32);
         changeMaskedTexture = menu.addAction("Change Masked Texture...");
         changeMaskedTexture->setEnabled(supportsMaskedTexture);
@@ -908,7 +951,25 @@ void MapView3D::showSurfaceContextMenu(const QPoint &globalPosition)
         m_clock.restart();
         m_timer.start();
     }
-    if (!m_active) return;
+    if (!m_active || !chosen) return;
+
+    for (const auto &flag : flagActions) {
+        if (chosen != flag.action) continue;
+        auto candidate = m_snapshot;
+        if (target->kind == DUKE_SURFACE_WALL) {
+            const auto &wall = candidate.walls()[target->id];
+            auto side = target->reversed ? wall.reverseSide : wall.forwardSide;
+            side.cstat = (side.cstat & ~flag.mask) | flag.value;
+            candidate.setWallSide(target->id, target->reversed, side);
+        } else {
+            auto sector = candidate.sectors()[target->id];
+            int &flags = target->kind == DUKE_SURFACE_FLOOR ? sector.floorstat : sector.ceilingstat;
+            flags = (flags & ~flag.mask) | flag.value;
+            candidate.setSector(target->id, sector);
+        }
+        commitSurfaceEdit(std::move(candidate), "Change surface flags: " + chosen->text());
+        return;
+    }
 
     if (chosen == changeTexture) {
         editTexture(0, false, target);
