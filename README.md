@@ -194,7 +194,8 @@ as saved. New edits after undo discard the redo branch. History retains at most
   Move the pointer, then left-click or press Enter to confirm; Escape or changing
   focus cancels. Grid snapping applies; hold Alt/Option to move freely. Each
   confirmed move is one undo step. From the toolbar, movement starts when the
-  pointer enters the map.
+  pointer enters the map; when the toolbar is outside the map, the cursor is
+  centered over the selection as movement starts.
 - **R / Edit → Rotate selection / Rotate toolbar button:** rotate selected vertices,
   lines, sectors, sprites, or the player start around the selection center. Move
   the pointer for 15° angle increments (Alt for free rotation), enter an exact

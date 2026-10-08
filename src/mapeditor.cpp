@@ -2293,6 +2293,35 @@ void MapEditor::moveSelection()
                   [](const auto &a, const auto &b) { return a.first < b.first; });
         m_vertexDragAnchor = m_draggedSprites.empty() ? m_draggedPlayerStart : m_draggedSprites.front().second;
     }
+    if (m_moveAwaitingPointer) {
+        QPointF minimum, maximum;
+        bool hasPosition = false;
+        const auto include = [&](QPointF position) {
+            if (!hasPosition) {
+                minimum = maximum = position;
+                hasPosition = true;
+            } else {
+                minimum.setX(std::min(minimum.x(), position.x()));
+                minimum.setY(std::min(minimum.y(), position.y()));
+                maximum.setX(std::max(maximum.x(), position.x()));
+                maximum.setY(std::max(maximum.y(), position.y()));
+            }
+        };
+        for (const auto &[id, position] : m_draggedVertices) { Q_UNUSED(id); include(position); }
+        for (const auto &[id, position] : m_draggedSprites) { Q_UNUSED(id); include(position); }
+        if (m_draggingPlayerStart) include(m_draggedPlayerStart);
+        if (hasPosition) {
+            const QPointF center = (minimum + maximum) / 2.0;
+            QPoint viewportPosition = mapFromScene(center);
+            if (!viewport()->rect().contains(viewportPosition)) {
+                centerOn(center);
+                viewportPosition = mapFromScene(center);
+            }
+            QCursor::setPos(viewport()->mapToGlobal(viewportPosition));
+            m_vertexDragStart = center;
+            m_moveAwaitingPointer = false;
+        }
+    }
     setCursor(Qt::SizeAllCursor);
     reportStatus("Move: left-click or Enter to confirm; Escape to cancel; Alt/Option disables snapping.");
 }
