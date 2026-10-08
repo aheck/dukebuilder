@@ -3,6 +3,7 @@
 #include <QtGlobal>
 #include <QPainterPath>
 #include <QLineF>
+#include <QTransform>
 
 #include <cmath>
 #include <algorithm>
@@ -200,6 +201,150 @@ std::vector<MapDocument::SectorId> MapDocument::sectorsAt(const QPointF &positio
         if (contains) { result.push_back(s); }
     }
     return result;
+}
+
+bool MapDocument::transformSelection(const TransformSelection &selection, QPointF pivot,
+                                     qreal angleDegrees, bool mirror, QString &error)
+{
+    error.clear();
+    const auto fail = [&](const QString &message) { error = message; return false; };
+    if (!std::isfinite(pivot.x()) || !std::isfinite(pivot.y()) || !std::isfinite(angleDegrees))
+        return fail("Invalid transform parameters.");
+    auto vertices = selection.vertices;
+    auto sprites = selection.sprites;
+    bool player = selection.playerStart;
+    for (auto id : selection.sectors) {
+        if (id >= m_sectors.size()) return fail("Invalid sector selection.");
+        vertices.insert(m_sectors[id].vertices.begin(), m_sectors[id].vertices.end());
+    }
+    for (auto id : vertices) if (id >= m_vertices.size()) return fail("Invalid vertex selection.");
+    for (auto id : sprites) if (id >= m_sprites.size()) return fail("Invalid sprite selection.");
+    const auto included = [&](const auto &object) {
+        if (object.sectorId) return selection.sectors.count(*object.sectorId) != 0;
+        const auto owners = sectorsAt(object.position);
+        return owners.size() == 1 && selection.sectors.count(owners.front());
+    };
+    for (SpriteId id = 0; id < m_sprites.size(); ++id) if (included(m_sprites[id])) sprites.insert(id);
+    player |= included(m_playerStart);
+    QTransform linear;
+    linear.rotate(angleDegrees);
+    if (mirror) { linear.scale(1, -1); linear.rotate(-angleDegrees); }
+    const auto position = [&](QPointF p) {
+        const auto result = pivot + linear.map(p - pivot);
+        return QPointF(std::round(result.x()), std::round(result.y()));
+    };
+    const auto angle = [&](qreal degrees) {
+        const auto radians = degrees * std::acos(-1.0) / 180.0;
+        const auto direction = linear.map(QPointF(std::cos(radians), std::sin(radians)));
+        auto result = std::atan2(direction.y(), direction.x()) * 180.0 / std::acos(-1.0);
+        if (result < 0) result += 360;
+        return std::fmod(std::round(result * 1e10) / 1e10, 360.0);
+    };
+    const auto inBounds = [](QPointF p) {
+        return std::isfinite(p.x()) && std::isfinite(p.y())
+            && std::abs(p.x()) <= 131072 && std::abs(p.y()) <= 131072;
+    };
+    auto candidate = *this;
+    for (auto id : vertices) {
+        const auto p = position(m_vertices[id].position);
+        if (!inBounds(p)) return fail("Transform exceeds Build map coordinate range.");
+        candidate.m_vertices[id].position = p;
+    }
+    std::set<SectorId> full;
+    for (SectorId id = 0; id < m_sectors.size(); ++id) {
+        const auto &sector = m_sectors[id];
+        const auto count = std::count_if(sector.vertices.begin(), sector.vertices.end(),
+                                        [&](auto v) { return vertices.count(v); });
+        if (!count) continue;
+        if (count == static_cast<long>(sector.vertices.size())) full.insert(id);
+        else if ((sector.floorstat | sector.ceilingstat) & 2)
+            return fail("Select all vertices of affected sloped sectors before transforming.");
+        if (mirror && full.count(id) && ((sector.floorstat | sector.ceilingstat) & 64))
+            return fail("Mirroring relative-aligned sector textures is not supported. Disable relative alignment first.");
+    }
+    if (mirror) {
+        std::set<WallId> reversed;
+        for (auto id : full) {
+            auto &sector = candidate.m_sectors[id];
+            auto starts = sector.loopStarts;
+            if (starts.empty()) starts.push_back(0);
+            starts.push_back(sector.walls.size());
+            const auto old = sector;
+            for (std::size_t loop = 0; loop + 1 < starts.size(); ++loop) {
+                const auto first = starts[loop], last = starts[loop + 1];
+                // Retain the first wall, reversing its traversal and the rest of the loop.
+                for (auto i = first; i < last; ++i) {
+                    const auto source = i == first ? first : last - (i - first);
+                    sector.walls[i] = old.walls[source];
+                    sector.vertices[i] = old.vertices[old.nextWallIndex(source)];
+                    reversed.insert(sector.walls[i]);
+                }
+            }
+        }
+        for (auto id : reversed) {
+            auto &wall = candidate.m_walls[id];
+            if ((wall.forwardSector && !full.count(*wall.forwardSector))
+                || (wall.reverseSector && !full.count(*wall.reverseSector)))
+                return fail("Mirror the connected neighboring sectors together, or copy the selection to independent geometry first.");
+            std::swap(wall.forwardSide, wall.reverseSide);
+            std::swap(wall.forwardSector, wall.reverseSector);
+        }
+        // TROR links name oriented wall sides; their targets must follow the swap.
+        for (auto &wall : candidate.m_walls) {
+            for (auto *side : {&wall.forwardSide, &wall.reverseSide}) {
+                for (auto *link : {&side->upLink, &side->downLink})
+                    if (*link && reversed.count((*link)->wall)) (*link)->reversed = !(*link)->reversed;
+            }
+        }
+    }
+    for (auto id : sprites) {
+        auto &sprite = candidate.m_sprites[id];
+        sprite.position = position(sprite.position);
+        sprite.angle = angle(sprite.angle);
+        if (!inBounds(sprite.position)) return fail("Transform exceeds Build map coordinate range.");
+    }
+    if (player) {
+        candidate.m_playerStart.position = position(m_playerStart.position);
+        candidate.m_playerStart.angle = angle(m_playerStart.angle);
+        if (!inBounds(candidate.m_playerStart.position)) return fail("Transform exceeds Build map coordinate range.");
+    }
+    if (!candidate.validateTopologyChange(*this, error)) return false;
+    std::vector<bool> changed(m_sectors.size());
+    std::vector<QPainterPath> oldShapes, newShapes;
+    for (SectorId id = 0; id < m_sectors.size(); ++id) {
+        changed[id] = std::any_of(m_sectors[id].vertices.begin(), m_sectors[id].vertices.end(),
+                                 [&](auto v) { return vertices.count(v); });
+        oldShapes.push_back(sectorShape(*this, m_sectors[id]));
+        newShapes.push_back(sectorShape(candidate, candidate.m_sectors[id]));
+    }
+    for (SectorId a = 0; a < m_sectors.size(); ++a) {
+        if (!changed[a]) continue;
+        for (SectorId b = 0; b < m_sectors.size(); ++b) {
+            if (a == b || (changed[b] && b < a)) continue;
+            if (newShapes[a].boundingRect().intersects(newShapes[b].boundingRect())
+                && interiorsOverlap(newShapes[a], newShapes[b])
+                && !interiorsOverlap(oldShapes[a], oldShapes[b]))
+                return fail("Transform would overlap previously separate sector interiors.");
+        }
+    }
+    // Keep floor and ceiling ordering valid in affected sectors.
+    for (SectorId id = 0; id < m_sectors.size(); ++id) {
+        const auto &sector = candidate.m_sectors[id];
+        if (std::none_of(sector.vertices.begin(), sector.vertices.end(), [&](auto v) { return vertices.count(v); })) continue;
+        const auto a = candidate.m_vertices[sector.vertices.front()].position;
+        const auto b = candidate.m_vertices[sector.vertices[sector.nextWallIndex(0)]].position;
+        const auto d = b - a;
+        const auto length = std::hypot(d.x(), d.y());
+        for (auto v : sector.vertices) {
+            const auto p = candidate.m_vertices[v].position - a;
+            const auto distance = (d.x()*p.y() - d.y()*p.x()) / (256.0 * length);
+            const auto floor = sector.floorz + ((sector.floorstat & 2) ? sector.floorheinum * distance : 0);
+            const auto ceiling = sector.ceilingz + ((sector.ceilingstat & 2) ? sector.ceilingheinum * distance : 0);
+            if (ceiling > floor) return fail("Transform would put a ceiling below its floor.");
+        }
+    }
+    *this = std::move(candidate);
+    return true;
 }
 
 bool MapDocument::validateTopologyChange(const MapDocument &before, QString &error) const

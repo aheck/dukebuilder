@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <cmath>
 #include <QPainterPath>
 #include <cstdlib>
 #include <iostream>
@@ -51,6 +52,71 @@ void checkSideReferences(const MapDocument &document)
 
 int main()
 {
+    {
+        MapDocument transformed;
+        QString error;
+        require(transformed.addPolyline({{0,0},{1024,0},{1024,512},{0,512}}, true), "Transform source");
+        const auto sprite = transformed.addSprite({256,128});
+        transformed.setSpriteAngle(sprite, 30);
+        transformed.setPlayerStartPosition({512,128});
+        auto slope = transformed.sectors()[0];
+        slope.floorstat = 2; slope.floorheinum = 256;
+        transformed.setSector(0, slope);
+        auto side = transformed.walls()[0].forwardSide;
+        side.texture = 123; side.xpanning = 29;
+        transformed.setWallSide(0, false, side);
+        const auto original = transformed;
+        MapDocument::TransformSelection targets;
+        targets.sectors = {0};
+        for (int i = 0; i < 4; ++i)
+            require(transformed.transformSelection(targets, {512,256}, 90, false, error), "Quarter turn succeeds");
+        require(transformed == original, "Four quarter turns restore all geometry and directional objects");
+        require(transformed.transformSelection(targets, {512,256}, 90, true, error), "Mirror sloped sector");
+        checkSideReferences(transformed);
+        require(transformed.sprites()[0].position == QPointF(768,128)
+                && transformed.sprites()[0].angle == 150, "Mirror includes sprite position and facing");
+        require(transformed.sectors()[0].walls.front() == original.sectors()[0].walls.front()
+                && transformed.sectors()[0].floorheinum == 256, "Mirror preserves slope first wall and steepness");
+        require(transformed.transformSelection(targets, {512,256}, 90, true, error), "Second mirror succeeds");
+        require(transformed == original, "Two mirrors restore loops, wall sides and objects");
+        require(!transformed.transformSelection(targets, {200000,0}, 180, false, error)
+                && transformed == original, "Out of bounds transform is atomic");
+        auto relative = transformed.sectors()[0]; relative.floorstat |= 64;
+        transformed.setSector(0, relative);
+        const auto beforeRelative = transformed;
+        require(!transformed.transformSelection(targets, {}, 0, true, error)
+                && transformed == beforeRelative, "Unsupported mirrored alignment is rejected atomically");
+        MapDocument::TransformSelection partial; partial.vertices = {0};
+        require(!transformed.transformSelection(partial, {512,256}, 90, false, error), "Partial slope transforms are rejected");
+    }
+    {
+        MapDocument connected;
+        QString error;
+        require(connected.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}}, true), "Transform adjacent first");
+        require(connected.addPolyline({{1024,0},{2048,0},{2048,1024},{1024,1024}}, true), "Transform adjacent second");
+        MapDocument::TransformSelection targets; targets.sectors = {0,1};
+        const auto original = connected;
+        require(connected.transformSelection(targets, {1024,512}, 0, true, error), "Mirror connected sectors");
+        checkSideReferences(connected);
+        require(std::count_if(connected.walls().begin(), connected.walls().end(), [](const auto &w) { return w.isTwoSided(); }) == 1,
+                "Mirror retains portal");
+        require(connected.transformSelection(targets, {1024,512}, 0, true, error) && connected == original,
+                "Double mirror restores shared side properties");
+        targets.sectors = {0};
+        require(!connected.transformSelection(targets, {512,512}, 0, true, error) && connected == original,
+                "Reject mirroring across an unselected neighbor connection");
+        MapDocument holes, fragment;
+        require(holes.addPolyline({{0,0},{4096,0},{4096,4096},{0,4096}}, true), "Transform hole outer");
+        require(holes.addPolyline({{1024,1024},{2048,1024},{2048,2048},{1024,2048}}, true), "Transform hole inner");
+        require(holes.copySectors({0}, fragment, error), "Independent sector with hole");
+        const auto ring = fragment;
+        require(fragment.transformSelection(targets, {2048,2048}, 90, true, error), "Mirror hole loops");
+        checkSideReferences(fragment);
+        require(!occupied(fragment,{2560,1536}), "Mirrored hole stays empty");
+        require(fragment.transformSelection(targets, {2048,2048}, 90, true, error) && fragment == ring,
+                "Double mirror restores hole ordering");
+    }
+
     {
         MapDocument source, fragment;
         QString error;

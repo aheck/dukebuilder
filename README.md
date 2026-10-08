@@ -195,6 +195,21 @@ as saved. New edits after undo discard the redo branch. History retains at most
   focus cancels. Grid snapping applies; hold Alt/Option to move freely. Each
   confirmed move is one undo step. From the toolbar, movement starts when the
   pointer enters the map.
+- **R / Edit → Rotate selection / Rotate toolbar button:** rotate selected vertices,
+  lines, sectors, sprites, or the player start around the selection center. Move
+  the pointer for 15° angle increments (Alt for free rotation), enter an exact
+  clockwise angle, or use the ±90° buttons. Use **Pick pivot in map** or the
+  pivot coordinate fields to change the center. Click or Enter confirms;
+  Escape or Cancel discards the preview. Middle-drag and wheel navigation remain
+  available. The preview does not change map data; committing creates one undo step.
+- **Edit → Mirror selection horizontally/vertically / Mirror toolbar buttons:**
+  preview a reflection through the selection center along the active grid axes.
+  Horizontal flips the grid X coordinate; vertical flips grid Y. The dialog also
+  accepts a custom mirror-axis angle and pivot. Confirm or cancel as for rotation.
+  Sector transforms include their sprites and player start, including facing angles.
+  Floating sector pastes can be rotated or mirrored before placement; these edits
+  remain part of the single paste undo operation.
+
 - **A / Add sprite toolbar button:** in Sprites mode, press A to add a sprite at
   the pointer, then choose its texture. From the toolbar, click a placement point
   first. Escape cancels pending placement; cancelling the texture picker creates
@@ -206,6 +221,18 @@ as saved. New edits after undo discard the redo branch. History retains at most
   in Sprites mode; it has no selectable texture and is omitted from selections
   containing ordinary sprites.
 - **Alt:** temporarily disable snapping while placing or previewing a point.
+
+Transforms preserve portal connections, loop ordering, wall-side properties,
+and complete TROR stacks. Moving selected shared vertices also changes adjoining
+sectors; the preview includes their affected walls. Mirroring a whole sector
+requires including its connected neighbors. Partial edits to sloped sectors,
+incomplete TROR transforms, and mirrored relative-aligned floor/ceiling textures
+are rejected with an explanation. World-aligned textures retain their map-axis
+alignment; texture properties are retained rather than baking a texture rotation.
+Invalid boundaries, newly overlapping sector interiors, and out-of-range geometry
+are rejected without changing the map. Arbitrary angles round positions to integer
+map coordinates, so undo is the exact way to reverse a committed arbitrary rotation.
+
 
 Drawing snaps to existing vertices first, then to nearby walls, and otherwise to
 the grid. The wall preview shows where the new connection vertex will be placed;

@@ -90,7 +90,7 @@ QString macBundleExecutable(const QString &path)
 }
 #endif
 
-enum class ToolbarSymbol { New, Open, Save, Grid, Plain, Floor, Ceiling, Move, AddSprite };
+enum class ToolbarSymbol { New, Open, Save, Grid, Plain, Floor, Ceiling, Move, AddSprite, Rotate, MirrorHorizontal, MirrorVertical };
 
 // Draw at the requested size so toolbar icons remain crisp on high-DPI screens.
 class ToolbarIconEngine final : public QIconEngine
@@ -145,6 +145,16 @@ public:
                 painter->drawPolyline(QPolygonF{QPointF(-3, -6), QPointF(0, -9), QPointF(3, -6)});
                 painter->restore();
             }
+        } else if (m_symbol == ToolbarSymbol::Rotate) {
+            painter->drawArc(QRectF(4, 4, 16, 16), 30 * 16, 285 * 16);
+            painter->drawPolyline(QPolygonF{QPointF(16, 3), QPointF(21, 5), QPointF(19, 10)});
+        } else if (m_symbol == ToolbarSymbol::MirrorHorizontal || m_symbol == ToolbarSymbol::MirrorVertical) {
+            if (m_symbol == ToolbarSymbol::MirrorVertical) {
+                painter->translate(24, 0); painter->rotate(90);
+            }
+            painter->drawLine(QPointF(12, 2), QPointF(12, 22));
+            painter->drawPolygon(QPolygonF{QPointF(3, 18), QPointF(9, 6), QPointF(9, 18)});
+            painter->drawPolygon(QPolygonF{QPointF(21, 18), QPointF(15, 6), QPointF(15, 18)});
         } else if (m_symbol == ToolbarSymbol::AddSprite) {
             painter->drawEllipse(QRectF(3, 3, 12, 12));
             painter->drawLine(QPointF(9, 9), QPointF(13, 5));
@@ -1033,6 +1043,17 @@ MainWindow::MainWindow(QWidget *parent)
     moveAction->setToolTip("Move selection (M) — click to confirm, Escape to cancel");
     editor->addAction(moveAction);
     connect(moveAction, &QAction::triggered, editor, &MapEditor::moveSelection);
+    auto *rotateAction = editMenu->addAction(toolbarIcon(ToolbarSymbol::Rotate), "Rotate selection…");
+    rotateAction->setShortcut(QKeySequence(Qt::Key_R));
+    rotateAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    rotateAction->setAutoRepeat(false);
+    rotateAction->setToolTip("Rotate selection (R) — click to confirm, Escape to cancel");
+    editor->addAction(rotateAction);
+    auto *mirrorHorizontalAction = editMenu->addAction(toolbarIcon(ToolbarSymbol::MirrorHorizontal), "Mirror selection horizontally…");
+    auto *mirrorVerticalAction = editMenu->addAction(toolbarIcon(ToolbarSymbol::MirrorVertical), "Mirror selection vertically…");
+    connect(rotateAction, &QAction::triggered, editor, &MapEditor::rotateSelection);
+    connect(mirrorHorizontalAction, &QAction::triggered, editor, [editor] { editor->mirrorSelection(true); });
+    connect(mirrorVerticalAction, &QAction::triggered, editor, [editor] { editor->mirrorSelection(false); });
     auto *addSpriteAction = editMenu->addAction(toolbarIcon(ToolbarSymbol::AddSprite), "Add sprite");
     addSpriteAction->setShortcut(QKeySequence(Qt::Key_A));
     addSpriteAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
@@ -1042,6 +1063,9 @@ MainWindow::MainWindow(QWidget *parent)
     connect(addSpriteAction, &QAction::triggered, editor, &MapEditor::addSprite);
     editorToolBar->addSeparator();
     editorToolBar->addAction(moveAction);
+    editorToolBar->addAction(rotateAction);
+    editorToolBar->addAction(mirrorHorizontalAction);
+    editorToolBar->addAction(mirrorVerticalAction);
     editorToolBar->addAction(addSpriteAction);
     editMenu->addSeparator();
     auto *settingsAction = editMenu->addAction("&Settings");
@@ -1257,6 +1281,9 @@ MainWindow::MainWindow(QWidget *parent)
         const auto mode = static_cast<MapEditor::Mode>(modeGroup->checkedAction()->data().toInt());
         moveAction->setEnabled(in2D && mode != MapEditor::Mode::Draw
                                && !editor->scene()->selectedItems().empty());
+        for (auto *action : {rotateAction, mirrorHorizontalAction, mirrorVerticalAction})
+            action->setEnabled(in2D && mode != MapEditor::Mode::Draw
+                               && (!editor->scene()->selectedItems().empty() || editor->hasFloatingPaste()));
         addSpriteAction->setEnabled(in2D && mode == MapEditor::Mode::Sprites);
     };
     connect(modeGroup, &QActionGroup::triggered, editor, updatePlacementActions);
@@ -1522,6 +1549,8 @@ MainWindow::MainWindow(QWidget *parent)
     });
     view3D->continuousEditChanged = [editor](const QString &key) { editor->continuousEditKey = key; };
     editor->documentRestored = [=] {
+        // Selection restoration blocks scene signals; refresh after it is complete.
+        updatePlacementActions();
         if (view3D->isVisible() && !view3D->refreshDocument(editor->document())) {
             leave3D();
             statusBar()->showMessage("Map restored; returned to 2D because the 3D preview could not be rebuilt.", 5000);

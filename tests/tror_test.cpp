@@ -48,6 +48,22 @@ int main(int argc, char **argv)
     const auto path = dir.filePath("tror.map");
     QString error;
     {
+        auto transformed = room();
+        require(transformed.extendTror(0, true, 8192, error) == 1, error);
+        const auto original = transformed;
+        MapDocument::TransformSelection targets; targets.sectors = {0,1};
+        require(transformed.transformSelection(targets, {512,512}, 90, false, error), error);
+        require(transformed.validateTror(error), error);
+        require(transformed.transformSelection(targets, {512,512}, 0, true, error), error);
+        roundTrip(transformed, path, 9);
+        require(transformed.transformSelection(targets, {512,512}, 0, true, error), error);
+        require(transformed.transformSelection(targets, {512,512}, -90, false, error), error);
+        require(transformed == original, "TROR transforms restore explicit side links");
+        targets.sectors = {0};
+        require(!transformed.transformSelection(targets, {}, 45, false, error) && transformed == original,
+                "Incomplete TROR transform rejects atomically");
+    }
+    {
         auto original = room();
         require(original.extendTror(0, true, 8192, error) == 1, error);
         MapDocument fragment;

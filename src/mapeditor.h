@@ -15,10 +15,14 @@
 #include <utility>
 #include <vector>
 
+class QDialog;
+class QDoubleSpinBox;
+class QLabel;
 class QGraphicsPathItem;
 class QGraphicsEllipseItem;
 class QGraphicsSimpleTextItem;
 struct MapCheckResult;
+class QHideEvent;
 class QKeyEvent;
 class QMouseEvent;
 class QWheelEvent;
@@ -156,6 +160,8 @@ public:
     void resetSelectedWallTextureScale();
     void stickSelectedSpriteToWall();
     void moveSelection();
+    void rotateSelection();
+    void mirrorSelection(bool horizontal);
     void copySelectedSectors();
     void pasteCopiedSectors();
     bool hasFloatingPaste() const { return m_floatingPaste.has_value(); }
@@ -226,6 +232,8 @@ protected:
     void keyReleaseEvent(QKeyEvent *event) override;
     void focusOutEvent(QFocusEvent *event) override;
     void drawBackground(QPainter *painter, const QRectF &rect) override;
+    void drawForeground(QPainter *painter, const QRectF &rect) override;
+    void hideEvent(QHideEvent *event) override;
 
 private:
     struct FloatingSectorPaste {
@@ -248,6 +256,23 @@ private:
         std::optional<std::set<MapDocument::SectorId>> editingScope = std::nullopt;
     };
     struct Snapshot { MapDocument document; Selection selection; };
+    struct TransformGesture {
+        Snapshot before;
+        MapDocument preview;
+        MapDocument::TransformSelection targets;
+        QPointF pivot;
+        qreal angle = 0;
+        std::optional<qreal> pointerAngle;
+        qreal pointerBase = 0;
+        bool mirror = false, pickingPivot = false, valid = false, floating = false;
+        QDialog *dialog = nullptr;
+        QDoubleSpinBox *angleBox = nullptr, *pivotX = nullptr, *pivotY = nullptr;
+        QLabel *message = nullptr;
+    };
+    std::optional<TransformGesture> m_transformGesture;
+    void startTransform(bool mirror, bool horizontal = false);
+    void updateTransformPreview();
+    void finishTransform(bool cancel);
     class Edit;
     class SnapshotCommand;
     Selection selection() const;

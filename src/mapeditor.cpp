@@ -3,6 +3,10 @@
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QSpinBox>
+#include <QDoubleSpinBox>
+#include <QPushButton>
+#include <QLabel>
+#include <QHBoxLayout>
 #include "mapsave.h"
 
 #include <QApplication>
@@ -15,6 +19,7 @@
 #include <QGraphicsSceneHoverEvent>
 #include <QGraphicsSimpleTextItem>
 #include <QFocusEvent>
+#include <QHideEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QMessageBox>
@@ -659,6 +664,7 @@ void MapEditor::restore(const Snapshot &snapshot)
 
 void MapEditor::beginEdit(const QString &label, const QString &key)
 {
+    finishTransform(true);
     if (m_editDepth++ != 0) return;
     m_beforeEdit = Snapshot{m_document, selection()};
     m_editLabel = label;
@@ -705,6 +711,7 @@ void MapEditor::endEdit()
 
 void MapEditor::finishPendingEdit()
 {
+    finishTransform(true);
     m_addingSprite = false;
     if (m_keyboardMove) { finishKeyboardMove(true); return; }
     if (m_mouseEdit) {
@@ -716,6 +723,7 @@ void MapEditor::finishPendingEdit()
 
 void MapEditor::undo()
 {
+    if (m_transformGesture) { finishTransform(true); return; }
     if (m_floatingPaste) { cancelFloatingPaste(); reportStatus("Paste cancelled."); return; }
     finishPendingEdit();
     if (!m_drawingPoints.empty()) { cancelDrawing(); return; }
@@ -1995,6 +2003,7 @@ void MapEditor::updateFloatingPaste()
 
 void MapEditor::cancelFloatingPaste()
 {
+    finishTransform(true);
     m_floatingPaste.reset();
     auto *item = m_floatingPasteItem;
     m_floatingPasteItem = nullptr;
@@ -2034,8 +2043,191 @@ bool MapEditor::settleFloatingPaste(QString *failure)
     return true;
 }
 
+void MapEditor::rotateSelection() { startTransform(false); }
+void MapEditor::mirrorSelection(bool horizontal) { startTransform(true, horizontal); }
+
+void MapEditor::startTransform(bool mirror, bool horizontal)
+{
+    finishPendingEdit();
+    if (m_mode == Mode::Draw) { reportStatus("Select geometry or sprites before transforming."); return; }
+    clearSplitPreview();
+    TransformGesture gesture;
+    gesture.before = Snapshot{m_document, selection()};
+    gesture.floating = m_floatingPaste.has_value();
+    gesture.mirror = mirror;
+    gesture.angle = mirror ? m_scene->gridAngle() + (horizontal ? 90 : 0) : 0;
+    if (gesture.floating) {
+        m_floatingPaste->following = m_floatingPaste->dragging = false;
+        gesture.before.document = m_floatingPaste->fragment;
+        for (std::size_t s = 0; s < gesture.before.document.sectors().size(); ++s) gesture.targets.sectors.insert(s);
+    } else {
+        for (const auto &[role, id] : gesture.before.selection.items) {
+            if (role == vertexIdRole) gesture.targets.vertices.insert(id);
+            else if (role == wallIdRole) {
+                gesture.targets.vertices.insert(m_document.walls()[id].start);
+                gesture.targets.vertices.insert(m_document.walls()[id].end);
+            } else if (role == sectorIdRole) gesture.targets.sectors.insert(id);
+            else if (role == spriteIdRole) gesture.targets.sprites.insert(id);
+            else if (role < 0) gesture.targets.playerStart = true;
+        }
+    }
+    auto vertices = gesture.targets.vertices;
+    for (auto id : gesture.targets.sectors) {
+        const auto &sector = gesture.before.document.sectors()[id];
+        vertices.insert(sector.vertices.begin(), sector.vertices.end());
+    }
+    std::vector<QPointF> positions;
+    for (auto id : vertices) positions.push_back(gesture.before.document.vertices()[id].position);
+    for (auto id : gesture.targets.sprites) positions.push_back(gesture.before.document.sprites()[id].position);
+    if (gesture.targets.playerStart) positions.push_back(gesture.before.document.playerStart().position);
+    if (positions.empty()) { reportStatus("Select objects before transforming."); return; }
+    auto minimum = positions.front(), maximum = minimum;
+    for (const auto p : positions) {
+        minimum.setX(std::min(minimum.x(), p.x())); minimum.setY(std::min(minimum.y(), p.y()));
+        maximum.setX(std::max(maximum.x(), p.x())); maximum.setY(std::max(maximum.y(), p.y()));
+    }
+    gesture.pivot = (minimum + maximum) / 2;
+    if (gesture.floating) gesture.pivot += m_floatingPaste->offset;
+    auto *dialog = new QDialog(this, Qt::Tool);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle(mirror ? "Mirror selection" : "Rotate selection");
+    gesture.dialog = dialog;
+    auto *layout = new QFormLayout(dialog);
+    const auto spin = [dialog](qreal minimum, qreal maximum, qreal value) {
+        auto *box = new QDoubleSpinBox(dialog);
+        box->setRange(minimum, maximum); box->setDecimals(2); box->setValue(value);
+        return box;
+    };
+    gesture.angleBox = spin(-36000, 36000, gesture.angle);
+    gesture.angleBox->setObjectName("transformAngle");
+    gesture.angleBox->setSuffix("°");
+    layout->addRow(mirror ? "Mirror axis angle" : "Angle (clockwise)", gesture.angleBox);
+    if (!mirror) {
+        auto *row = new QHBoxLayout;
+        for (int delta : {-90, 90}) {
+            auto *button = new QPushButton(delta < 0 ? "−90°" : "+90°", dialog);
+            row->addWidget(button);
+            connect(button, &QPushButton::clicked, dialog, [this, delta] {
+                if (m_transformGesture) m_transformGesture->angleBox->setValue(m_transformGesture->angle + delta);
+            });
+        }
+        layout->addRow(row);
+    }
+    gesture.pivotX = spin(-sceneExtent, sceneExtent, gesture.pivot.x());
+    gesture.pivotY = spin(-sceneExtent, sceneExtent, gesture.pivot.y());
+    gesture.pivotX->setObjectName("transformPivotX");
+    gesture.pivotY->setObjectName("transformPivotY");
+    layout->addRow("Pivot X", gesture.pivotX); layout->addRow("Pivot Y", gesture.pivotY);
+    auto *pick = new QPushButton("Pick pivot in map", dialog);
+    layout->addRow(pick);
+    gesture.message = new QLabel(dialog);
+    gesture.message->setWordWrap(true); gesture.message->setMinimumWidth(300);
+    layout->addRow(gesture.message);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
+    layout->addRow(buttons);
+    m_transformGesture = std::move(gesture);
+    connect(m_transformGesture->angleBox, &QDoubleSpinBox::valueChanged, dialog, [this](double value) {
+        if (!m_transformGesture) return;
+        m_transformGesture->angle = value; m_transformGesture->pointerAngle.reset(); updateTransformPreview();
+    });
+    const auto pivotChanged = [this] {
+        if (!m_transformGesture) return;
+        auto &g = *m_transformGesture;
+        g.pivot = {g.pivotX->value(), g.pivotY->value()};
+        g.pointerAngle.reset(); updateTransformPreview();
+    };
+    connect(m_transformGesture->pivotX, &QDoubleSpinBox::valueChanged, dialog, pivotChanged);
+    connect(m_transformGesture->pivotY, &QDoubleSpinBox::valueChanged, dialog, pivotChanged);
+    connect(pick, &QPushButton::clicked, dialog, [this] {
+        if (!m_transformGesture) return;
+        m_transformGesture->pickingPivot = true;
+        m_transformGesture->message->setText("Click the new pivot in the map.");
+        setFocus();
+    });
+    connect(buttons, &QDialogButtonBox::accepted, dialog, [this] { finishTransform(false); });
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    connect(dialog, &QDialog::rejected, this, [this] { finishTransform(true); });
+    updateTransformPreview();
+    dialog->show();
+    setFocus();
+}
+
+void MapEditor::updateTransformPreview()
+{
+    if (!m_transformGesture) return;
+    auto &g = *m_transformGesture;
+    auto candidate = g.before.document;
+    QString error;
+    const auto offset = g.floating && m_floatingPaste ? m_floatingPaste->offset : QPointF{};
+    g.valid = candidate.transformSelection(g.targets, g.pivot - offset, g.angle, g.mirror, error);
+    if (g.valid) g.preview = std::move(candidate);
+    g.message->setText(g.valid
+        ? (g.mirror ? "Click or Enter to apply; Escape to cancel. The axis passes through the pivot."
+                    : "Click or Enter to apply; Escape to cancel. Rotation snaps to 15°; Alt allows free rotation.")
+        : error);
+    reportStatus(g.valid ? "Transform preview: click or Enter to apply; Escape to cancel." : error);
+    viewport()->update();
+}
+
+void MapEditor::finishTransform(bool cancel)
+{
+    if (!m_transformGesture) return;
+    if (!cancel && !m_transformGesture->valid) { reportStatus(m_transformGesture->message->text()); return; }
+    auto gesture = std::move(*m_transformGesture);
+    m_transformGesture.reset();
+    gesture.dialog->close();
+    if (!cancel) {
+        if (gesture.floating && m_floatingPaste) {
+            m_floatingPaste->fragment = std::move(gesture.preview);
+            m_floatingPaste->anchor = m_floatingPaste->fragment.vertices().front().position;
+            delete m_floatingPasteItem; m_floatingPasteItem = nullptr;
+            updateFloatingPaste();
+        } else {
+            Edit edit(this, gesture.mirror ? "Mirror selection" : "Rotate selection");
+            restore(Snapshot{std::move(gesture.preview), gesture.before.selection});
+        }
+    }
+    viewport()->update();
+    reportStatus(cancel ? "Transform cancelled." : "Selection transformed.");
+}
+
+void MapEditor::drawForeground(QPainter *painter, const QRectF &rect)
+{
+    QGraphicsView::drawForeground(painter, rect);
+    if (!m_transformGesture) return;
+    const auto &g = *m_transformGesture;
+    painter->save();
+    painter->setPen(cosmeticPen(g.valid ? QColor(80, 210, 255) : QColor(255, 90, 90), 2));
+    const qreal size = 8 / std::abs(transform().m11());
+    painter->drawLine(g.pivot - QPointF(size, 0), g.pivot + QPointF(size, 0));
+    painter->drawLine(g.pivot - QPointF(0, size), g.pivot + QPointF(0, size));
+    if (g.valid) {
+        const auto offset = g.floating && m_floatingPaste ? m_floatingPaste->offset : QPointF{};
+        painter->translate(offset);
+        auto vertices = g.targets.vertices;
+        for (auto id : g.targets.sectors) {
+            const auto &s = g.preview.sectors()[id]; vertices.insert(s.vertices.begin(), s.vertices.end());
+        }
+        for (const auto &wall : g.preview.walls()) {
+            if (vertices.count(wall.start) || vertices.count(wall.end))
+                painter->drawLine(g.preview.vertices()[wall.start].position, g.preview.vertices()[wall.end].position);
+        }
+        const auto arrow = [&](const auto &object) {
+            const auto radians = object.angle * std::acos(-1.0) / 180;
+            painter->drawEllipse(object.position, size / 2, size / 2);
+            painter->drawLine(object.position, object.position + QPointF(std::cos(radians), std::sin(radians)) * size * 2);
+        };
+        for (std::size_t id = 0; id < g.preview.sprites().size(); ++id) {
+            if (g.targets.sprites.count(id) || !(g.preview.sprites()[id] == g.before.document.sprites()[id])) arrow(g.preview.sprites()[id]);
+        }
+        if (g.targets.playerStart || !(g.preview.playerStart() == g.before.document.playerStart())) arrow(g.preview.playerStart());
+    }
+    painter->restore();
+}
+
 void MapEditor::moveSelection()
 {
+    finishTransform(true);
     if (m_floatingPaste) {
         m_floatingPaste->following = true;
         const auto pointer = viewport()->mapFromGlobal(QCursor::pos());
@@ -2193,6 +2385,24 @@ void MapEditor::createSpriteAt(const QPoint &pointer, bool disableSnapping, bool
 
 void MapEditor::mousePressEvent(QMouseEvent *event)
 {
+    if (m_transformGesture && event->button() == Qt::LeftButton && !m_spaceHeld) {
+        auto &gesture = *m_transformGesture;
+        if (gesture.pickingPivot) {
+            const auto pivot = snappedPosition(event->position().toPoint(), event->modifiers().testFlag(Qt::AltModifier));
+            gesture.pivot = pivot;
+            { const QSignalBlocker x(gesture.pivotX), y(gesture.pivotY);
+              gesture.pivotX->setValue(pivot.x()); gesture.pivotY->setValue(pivot.y()); }
+            gesture.pickingPivot = false;
+            gesture.pointerAngle.reset();
+            updateTransformPreview();
+        } else finishTransform(false);
+        m_consumeLeftRelease = true;
+        event->accept();
+        return;
+    }
+    if (m_transformGesture && event->button() != Qt::MiddleButton
+        && !(m_spaceHeld && event->button() == Qt::LeftButton)) { event->accept(); return; }
+
     if (m_floatingPaste && event->button() != Qt::MiddleButton && !m_spaceHeld) {
         if (m_floatingPaste->following && event->button() == Qt::LeftButton) {
             mouseMoveEvent(event);
@@ -2633,6 +2843,7 @@ void MapEditor::updateSplitPreview(const QPoint &position, bool disableSnapping)
 
 void MapEditor::mouseDoubleClickEvent(QMouseEvent *event)
 {
+    if (m_transformGesture) { event->accept(); return; }
     if (m_floatingPaste || m_keyboardMove || m_addingSprite) { mousePressEvent(event); return; }
     if (m_panning || (event->button() == Qt::LeftButton && m_spaceHeld)) {
         mousePressEvent(event);
@@ -2679,6 +2890,25 @@ void MapEditor::leaveEvent(QEvent *event)
 
 void MapEditor::mouseMoveEvent(QMouseEvent *event)
 {
+    if (m_transformGesture && !m_panning) {
+        auto &gesture = *m_transformGesture;
+        if (!gesture.mirror && !gesture.pickingPivot) {
+            const auto delta = mapToScene(event->position().toPoint()) - gesture.pivot;
+            if (QLineF({}, delta).length() > 1) {
+                const auto angle = std::atan2(delta.y(), delta.x()) * 180 / std::acos(-1.0);
+                if (!gesture.pointerAngle) { gesture.pointerAngle = angle; gesture.pointerBase = gesture.angle; }
+                auto value = gesture.pointerBase + angle - *gesture.pointerAngle;
+                if (!event->modifiers().testFlag(Qt::AltModifier)) value = std::round(value / 15) * 15;
+                const QSignalBlocker blocker(gesture.angleBox);
+                gesture.angleBox->setValue(value);
+                gesture.angle = gesture.angleBox->value();
+                updateTransformPreview();
+            }
+        }
+        event->accept();
+        return;
+    }
+
     if (m_floatingPaste && !m_panning && (m_floatingPaste->dragging || m_floatingPaste->following)) {
         auto offset = m_floatingPaste->dragOffset + mapToScene(event->position().toPoint()) - m_floatingPaste->dragStart;
         if (!event->modifiers().testFlag(Qt::AltModifier))
@@ -3018,6 +3248,14 @@ void MapEditor::chooseSpriteTexture(MapDocument::SpriteId spriteId)
 
 void MapEditor::keyPressEvent(QKeyEvent *event)
 {
+    if (m_transformGesture) {
+        if (event->key() == Qt::Key_Space) m_spaceHeld = true;
+        else if (event->key() == Qt::Key_Escape) finishTransform(true);
+        else if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) finishTransform(false);
+        event->accept();
+        return;
+    }
+
     if (m_floatingPaste) {
         if (event->key() == Qt::Key_Escape || event->key() == Qt::Key_Delete) {
             cancelFloatingPaste();
@@ -3249,6 +3487,12 @@ void MapEditor::keyReleaseEvent(QKeyEvent *event)
     QGraphicsView::keyReleaseEvent(event);
 }
 
+void MapEditor::hideEvent(QHideEvent *event)
+{
+    finishTransform(true);
+    QGraphicsView::hideEvent(event);
+}
+
 void MapEditor::focusOutEvent(QFocusEvent *event)
 {
     if (m_floatingPaste) {
@@ -3381,6 +3625,7 @@ bool MapEditor::commitDrawing(const std::vector<QPointF> &points, bool close, bo
 
 void MapEditor::cancelDrawing()
 {
+    finishTransform(true);
     m_drawingPoints.clear();
     if (m_previewItem) {
         m_scene->removeItem(m_previewItem);

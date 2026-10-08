@@ -163,6 +163,17 @@ public:
     void removeWalls(const std::vector<WallId> &wallIds);
     // Split an edge in place, preserving sector order, loops and both wall sides.
     [[nodiscard]] std::optional<VertexId> splitWall(WallId wallId, const QPointF &position);
+    struct TransformSelection {
+        std::set<VertexId> vertices;
+        std::set<SectorId> sectors;
+        std::set<SpriteId> sprites;
+        bool playerStart = false;
+    };
+    // Rigid rotation, or reflection across an axis at angleDegrees, around pivot.
+    // Sector selection includes its sprites and player start. Failure is atomic.
+    bool transformSelection(const TransformSelection &selection, QPointF pivot,
+                            qreal angleDegrees, bool mirror, QString &error);
+
     // A drag reference avoids cumulative rounding across successive mouse moves.
     void setVertexPositions(const std::vector<std::pair<VertexId, QPointF>> &positions,
                             const MapDocument *scaleReference = nullptr);

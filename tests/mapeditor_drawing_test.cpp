@@ -12,6 +12,8 @@
 #include <QTimer>
 #include <QGraphicsItem>
 #include <QSpinBox>
+#include <QDoubleSpinBox>
+#include <QPushButton>
 #include <QMessageBox>
 #include <QAbstractButton>
 #include <QtPlugin>
@@ -423,6 +425,83 @@ int main(int argc, char **argv)
         QKeyEvent event(QEvent::KeyPress, code, Qt::NoModifier);
         QApplication::sendEvent(&editor, &event);
     };
+    {
+        MapDocument original;
+        require(original.addPolyline({{0,0},{1024,0},{1024,512},{0,512}}, true), "Transform UI source");
+        original.setPlayerStartPosition({256,256});
+        const auto sprite = original.addSprite({128,128});
+        original.setSpriteAngle(sprite, 30);
+        editor.recoverDocument(original, {});
+        editor.clearEditingScope();
+        editor.setMode(MapEditor::Mode::Sectors);
+        editor.centerOn(512,256);
+        click({512,256});
+        const auto angleBox = [&]() -> QDoubleSpinBox * {
+            for (auto *box : editor.findChildren<QDoubleSpinBox *>("transformAngle"))
+                if (box->isVisible()) return box;
+            require(false, "Transform angle control exists");
+            return nullptr;
+        };
+        editor.rotateSelection();
+        angleBox()->setValue(90);
+        require(editor.document() == original && editor.undoStack()->count() == 0,
+                "Rotation preview leaves document and history untouched");
+        key(Qt::Key_Escape);
+        require(editor.document() == original && editor.scene()->selectedItems().size() == 1,
+                "Rotation cancellation preserves selection and geometry");
+        editor.rotateSelection();
+        angleBox()->setValue(90);
+        key(Qt::Key_Return);
+        const auto rotated = editor.document();
+        require(!(rotated == original) && editor.undoStack()->count() == 1,
+                "Exact rotation commits one undo operation");
+        require(rotated.sprites()[0].angle == 120 && rotated.playerStart().angle == 90,
+                "Sector rotation includes directional objects");
+        editor.undo(); require(editor.document() == original, "Rotation undo restores all properties");
+        editor.redo(); require(editor.document() == rotated, "Rotation redo restores all properties");
+        editor.undo();
+        editor.mirrorSelection(true);
+        key(Qt::Key_Return);
+        require(editor.document().sprites()[0].position == QPointF(896,128)
+                && editor.document().sprites()[0].angle == 150, "Horizontal mirror flips X and facing");
+        editor.undo(); require(editor.document() == original, "Mirror is undoable");
+        editor.rotateSelection();
+        for (auto *button : editor.findChildren<QPushButton *>())
+            if (button->isVisible() && button->text() == "Pick pivot in map") button->click();
+        click({0,0});
+        angleBox()->setValue(90);
+        key(Qt::Key_Return);
+        require(editor.document().vertices()[1].position == QPointF(0,1024),
+                "Custom pivot rotation uses picked origin");
+        editor.undo();
+        editor.rotateSelection();
+        for (auto *box : editor.findChildren<QDoubleSpinBox *>("transformPivotX"))
+            if (box->isVisible()) box->setValue(131072);
+        angleBox()->setValue(180);
+        key(Qt::Key_Return);
+        require(editor.document() == original && angleBox()->isVisible(),
+                "Invalid preview cannot commit and remains adjustable");
+        key(Qt::Key_Escape);
+        editor.rotateSelection();
+        hover({1024,256}); hover({512,768});
+        require(angleBox()->value() == 90, "Pointer rotation uses pivot-relative angle");
+        key(Qt::Key_Escape);
+        editor.rotateSelection();
+        angleBox()->setValue(90);
+        editor.setMode(MapEditor::Mode::Lines);
+        require(editor.document() == original,
+                "Mode switch cancels preview");
+        editor.setMode(MapEditor::Mode::Sectors);
+        click({512,256});
+        editor.copySelectedSectors(); editor.pasteCopiedSectors();
+        require(editor.hasFloatingPaste(), "Transform floating paste source");
+        editor.rotateSelection(); angleBox()->setValue(90); key(Qt::Key_Return);
+        require(editor.hasFloatingPaste() && editor.document() == original,
+                "Transforming a floating paste keeps placement pending");
+        key(Qt::Key_Escape);
+        require(!editor.hasFloatingPaste() && editor.document() == original,
+                "Cancelling transformed paste leaves source intact");
+    }
     for (auto mode : {MapEditor::Mode::Vertices, MapEditor::Mode::Lines, MapEditor::Mode::Sectors}) {
         editor.recoverDocument(source, {});
         editor.clearEditingScope();

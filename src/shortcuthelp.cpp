@@ -81,6 +81,8 @@ QString content(bool threeD)
             {"Left click / left-drag rectangle", "Select objects in the active selection mode."},
             {"Shift + left click", "Add/remove an object from the selection."},
             {"M, then move pointer", "Move selected vertices, lines, sectors, sprites, or the player start. Left click or Enter confirms; Escape cancels. Alt/Option disables grid snapping."},
+            {"R / Rotate selection (Edit menu / toolbar)", "Preview pointer rotation in 15° increments (Alt for free rotation), enter an exact clockwise angle, or use ±90°. Pick a custom pivot in the map or enter its coordinates. Click/Enter confirms; Escape cancels."},
+            {"Mirror selection horizontally / vertically", "Reflect across the active grid axes through the selection center. Adjust the pivot or axis in the dialog; click/Enter confirms. Also works on floating sector pastes."},
             {"Right-drag selection", "Move selected vertices, lines, sectors, sprites, or the player start. Hold Alt to move freely."},
             {"Double-click shadow vertex", "In Vertices mode, split the hovered line at the preview point. Grid snapping applies; Alt allows free placement."},
             {"Delete", "Delete selected vertices, lines, sectors, or sprites. Deleting an inner sector leaves a hole; the player start cannot be deleted."},
