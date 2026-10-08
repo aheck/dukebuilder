@@ -1402,6 +1402,7 @@ void MapEditor::recoverDocument(const MapDocument &document, const std::vector<Q
     setMode(Mode::Draw);
     restore(Snapshot{document, Selection{{}, {}, Mode::Draw, false}});
     m_recoveredDirty = true;
+    if (!points.empty()) m_drawTool = DrawTool::Freeform;
     m_drawingPoints = points;
     if (!points.empty()) updatePreview(points.back());
     centerOn(document.playerStart().position);
@@ -2542,13 +2543,25 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
             return;
         }
         updateSplitPreview(event->position().toPoint(), disableSnapping);
-        addDrawingPoint(snappedPosition(event->position().toPoint(), disableSnapping));
+        const auto point = snappedPosition(event->position().toPoint(), disableSnapping);
+        if (m_drawTool == DrawTool::Freeform) {
+            addDrawingPoint(point);
+        } else {
+            m_shapeSquare = event->modifiers().testFlag(Qt::ShiftModifier);
+            if (m_drawingPoints.empty()) {
+                m_drawingPoints.push_back(point);
+                updatePreview(point);
+            } else {
+                updatePreview(point);
+                finishDrawing(true, false);
+            }
+        }
         event->accept();
         return;
     }
 
     if (event->button() == Qt::RightButton && !m_drawingPoints.empty()) {
-        finishDrawing(false);
+        finishDrawing(m_drawTool != DrawTool::Freeform, m_drawTool == DrawTool::Freeform);
         event->accept();
         return;
     }
@@ -2832,6 +2845,7 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
     const QRectF bounds = m_scene->sceneRect();
     position.setX(std::clamp(position.x(), bounds.left(), bounds.right()));
     position.setY(std::clamp(position.y(), bounds.top(), bounds.bottom()));
+    m_shapeSquare = event->modifiers().testFlag(Qt::ShiftModifier);
     updatePreview(position);
 
     if (m_cursorStatusCallback && !m_drawingPoints.empty()) {
@@ -3215,7 +3229,7 @@ void MapEditor::keyPressEvent(QKeyEvent *event)
     }
     if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
         && !m_drawingPoints.empty()) {
-        finishDrawing(false);
+        finishDrawing(m_drawTool != DrawTool::Freeform, m_drawTool == DrawTool::Freeform);
         event->accept();
         return;
     }
@@ -3253,6 +3267,49 @@ void MapEditor::focusOutEvent(QFocusEvent *event)
     QGraphicsView::focusOutEvent(event);
 }
 
+void MapEditor::setDrawTool(DrawTool tool)
+{
+    if (m_drawTool != tool) cancelDrawing();
+    m_drawTool = tool;
+    setMode(Mode::Draw);
+    reportStatus(tool == DrawTool::Freeform
+        ? "Draw: click vertices | Close: click first vertex | Cancel: Esc"
+        : "Shape: click anchor, then size | Rectangle: Shift for square | Cancel: Esc");
+}
+
+void MapEditor::setShapeSides(int sides)
+{
+    m_shapeSides = std::clamp(sides, 3, 128);
+    if (!m_drawingPoints.empty() && m_drawTool != DrawTool::Freeform) updatePreview(m_shapeCursor);
+}
+
+std::vector<QPointF> MapEditor::shapePoints(const QPointF &cursor) const
+{
+    if (m_drawingPoints.empty()) return {};
+    const auto anchor = m_drawingPoints.front();
+    if (m_drawTool == DrawTool::Rectangle) {
+        const auto a = m_scene->toGrid(anchor);
+        auto delta = m_scene->toGrid(cursor) - a;
+        if (m_shapeSquare) {
+            const auto side = std::max(std::abs(delta.x()), std::abs(delta.y()));
+            delta = QPointF(std::copysign(side, delta.x()), std::copysign(side, delta.y()));
+        }
+        return {anchor, m_scene->fromGrid(a + QPointF(delta.x(), 0)),
+                m_scene->fromGrid(a + delta), m_scene->fromGrid(a + QPointF(0, delta.y()))};
+    }
+    const auto delta = cursor - anchor;
+    const auto radius = std::hypot(delta.x(), delta.y());
+    const auto angle = m_drawTool == DrawTool::Circle ? 0.0 : std::atan2(delta.y(), delta.x());
+    std::vector<QPointF> points;
+    for (int i = 0; i < m_shapeSides; ++i) {
+        const auto theta = angle + 2.0 * std::acos(-1.0) * i / m_shapeSides;
+        // Build coordinates are integers; do not snap individual corners to the grid.
+        points.emplace_back(std::round(anchor.x() + radius * std::cos(theta)),
+                            std::round(anchor.y() + radius * std::sin(theta)));
+    }
+    return points;
+}
+
 void MapEditor::addDrawingPoint(const QPointF &position)
 {
     if (!m_drawingPoints.empty() && position == m_drawingPoints.back()) {
@@ -3283,15 +3340,39 @@ void MapEditor::addDrawingPoint(const QPointF &position)
 
 bool MapEditor::finishDrawing(bool close, bool discardOnFailure)
 {
+    return commitDrawing(m_drawTool == DrawTool::Freeform ? m_drawingPoints : shapePoints(m_shapeCursor),
+                         close, discardOnFailure);
+}
+
+bool MapEditor::commitDrawing(const std::vector<QPointF> &points, bool close, bool discardOnFailure)
+{
     Edit edit(this, "Draw geometry");
     QString error;
+    if (m_drawTool != DrawTool::Freeform) {
+        qreal area = 0;
+        for (std::size_t i = 0; i < points.size(); ++i) {
+            const auto a = points[i], b = points[(i + 1) % points.size()];
+            if (!m_scene->sceneRect().contains(a) || QLineF(a, b).length() < 1.0) {
+                reportStatus("Shape is too small or outside Build map coordinate range");
+                return false;
+            }
+            area += a.x() * b.y() - a.y() * b.x();
+        }
+        if (points.size() < 3 || std::abs(area) < 1.0) {
+            reportStatus("Shape must have a nonzero area");
+            return false;
+        }
+    }
     const auto oldCount = m_document.sectors().size();
-    const bool sectorCreated = m_document.addPolyline(m_drawingPoints, close, &error, m_editingScope);
+    const bool sectorCreated = m_document.addPolyline(points, close, &error, m_editingScope);
     if (sectorCreated && m_editingScope) {
         for (auto id = oldCount; id < m_document.sectors().size(); ++id) { m_editingScope->insert(id); }
         rememberScopeTopology();
     }
-    if (!sectorCreated && !discardOnFailure) return false;
+    if (!sectorCreated && !discardOnFailure) {
+        reportStatus(error.isEmpty() ? "Cannot create this shape" : error);
+        return false;
+    }
     m_drawingPoints.clear();
     rebuildScene();
     reportStatus(sectorCreated ? "Sector created" : error.isEmpty() ? "Drawing discarded" : error);
@@ -3316,11 +3397,14 @@ void MapEditor::updatePreview(const QPointF &cursorPosition)
         return;
     }
 
-    QPainterPath path(m_drawingPoints.front());
-    for (std::size_t index = 1; index < m_drawingPoints.size(); ++index) {
-        path.lineTo(m_drawingPoints[index]);
+    m_shapeCursor = cursorPosition;
+    const auto points = m_drawTool == DrawTool::Freeform ? m_drawingPoints : shapePoints(cursorPosition);
+    QPainterPath path(points.front());
+    for (std::size_t index = 1; index < points.size(); ++index) {
+        path.lineTo(points[index]);
     }
-    path.lineTo(cursorPosition);
+    if (m_drawTool == DrawTool::Freeform) path.lineTo(cursorPosition);
+    else path.closeSubpath();
 
     if (!m_previewItem) {
         m_previewItem = m_scene->addPath(path, cosmeticPen(QColor(80, 210, 255), 2.0));
@@ -3333,7 +3417,15 @@ void MapEditor::updatePreview(const QPointF &cursorPosition)
     const QLineF segment(m_drawingPoints.back(), cursorPosition);
     const qreal length = segment.length();
     m_previewLengthItem->setVisible(length > 0.0);
-    m_previewLengthItem->setText(QString::number(length, 'f', 1));
+    if (m_drawTool == DrawTool::Rectangle) {
+        m_previewLengthItem->setText(QString("%1 × %2")
+            .arg(QLineF(points[0], points[1]).length(), 0, 'f', 1)
+            .arg(QLineF(points[1], points[2]).length(), 0, 'f', 1));
+    } else if (m_drawTool != DrawTool::Freeform) {
+        m_previewLengthItem->setText(QString("Radius %1 | %2 sides").arg(length, 0, 'f', 1).arg(m_shapeSides));
+    } else {
+        m_previewLengthItem->setText(QString::number(length, 'f', 1));
+    }
     m_previewLengthItem->setPos(segment.center());
     const QRectF labelBounds = m_previewLengthItem->boundingRect();
     // Keep the label horizontal and its gap fixed in pixels at every zoom.

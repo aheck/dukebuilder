@@ -100,7 +100,7 @@ Save and Check Map still apply the full validation rules.
 Duke Builder writes a recovery snapshot every minute while there are unsaved
 changes. These snapshots are separate from your `.map` files and do not change
 the saved/unsaved state. They preserve unfinished drawings, untextured sprites,
-and other work that cannot yet be exported as a valid Build map. Active drags
+and other work that cannot yet be exported as a valid Build map. Active drags and unfinished rectangle, circle, or regular-polygon previews
 are skipped until the next interval. Both 2D and 3D edits are included; the 3D
 preview's temporary player position is never stored.
 
@@ -140,6 +140,13 @@ as saved. New edits after undo discard the redo branch. History retains at most
 
 ## 2D editor controls
 
+- **Drawing tool dropdown:** choose Freeform, Rectangle, Circle, or Regular polygon.
+  Rectangle uses two opposite corners along the active grid axes; hold Shift on
+  the second click for a square. Circle and Regular polygon use a center click
+  followed by a radius click. The Sides control sets 3–128 straight walls;
+  polygon rotation follows the pointer. Alt disables control-point snapping.
+  Click again or press Enter to commit; Escape cancels. Invalid shapes stay
+  available for adjustment. Each completed shape is one undo operation.
 - **Left click:** place connected wall vertices. Lines can be drawn at any angle.
 - **Click the first vertex:** close the current shape and create a sector.
 - **Click an existing wall:** connect to it, splitting it at the connection if needed.

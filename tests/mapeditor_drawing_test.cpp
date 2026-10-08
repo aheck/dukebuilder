@@ -54,6 +54,67 @@ int main(int argc, char **argv)
                             Qt::RightButton, Qt::NoButton, Qt::NoModifier);
         QApplication::sendEvent(editor.viewport(), &release);
     };
+    // Shape tools preview without changing the map, then commit one undo step.
+    editor.setZoomPercent(200);
+    editor.centerOn(0, 0);
+    QApplication::processEvents();
+    for (const auto tool : {MapEditor::DrawTool::Rectangle, MapEditor::DrawTool::Circle,
+                            MapEditor::DrawTool::Polygon}) {
+        editor.newMap();
+        editor.setDrawTool(tool);
+        editor.setShapeSides(tool == MapEditor::DrawTool::Circle ? 16 : 5);
+        click({0, 0});
+        require(editor.document().sectors().empty() && !editor.drawingPoints().empty(),
+                "Shape anchor only starts a preview");
+        require(!editor.canAutosave(), "Do not recover a shape anchor as a freeform drawing");
+        click({0, 0});
+        require(editor.document().sectors().empty() && !editor.drawingPoints().empty(),
+                "Degenerate shape remains adjustable");
+        click({1024, 1024});
+        require(editor.document().sectors().size() == 1 && editor.drawingPoints().empty(),
+                "Second shape click creates a sector");
+        const auto count = tool == MapEditor::DrawTool::Rectangle ? 4u
+                         : tool == MapEditor::DrawTool::Circle ? 16u : 5u;
+        require(editor.document().walls().size() == count, "Shape has requested wall count");
+        require(editor.undoStack()->count() == 1, "Shape creates one undo entry");
+        editor.undo();
+        require(editor.document().sectors().empty(), "Undo removes the complete shape");
+        editor.redo();
+        require(editor.document().walls().size() == count, "Redo restores the complete shape");
+        click({-2048, -2048});
+        QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+        QApplication::sendEvent(&editor, &escape);
+        require(editor.drawingPoints().empty() && editor.document().walls().size() == count,
+                "Escape cancels only the shape preview");
+    }
+    editor.newMap();
+    editor.setDrawTool(MapEditor::DrawTool::Freeform);
+
+    editor.setDrawTool(MapEditor::DrawTool::Rectangle);
+    auto *gridScene = static_cast<MapScene *>(editor.scene());
+    gridScene->setGridAngle(0.4);
+    click({0, 0});
+    click(gridScene->fromGrid({1024, 512}), Qt::ShiftModifier);
+    require(editor.document().walls().size() == 4, "Rotated square is created");
+    const auto &square = editor.document().vertices();
+    const auto edgeA = square[1].position - square[0].position;
+    const auto edgeB = square[2].position - square[1].position;
+    require(std::abs(QPointF::dotProduct(edgeA, edgeB)) < 0.01
+            && std::abs(QLineF({}, edgeA).length() - QLineF({}, edgeB).length()) < 0.01,
+            "Shift rectangle keeps equal perpendicular sides on rotated grid");
+    gridScene->setGridAngle(0);
+    editor.newMap();
+    click({0, 0});
+    click({1024, 1024});
+    click({1024, 0});
+    click({2048, 1024});
+    require(editor.document().sectors().size() == 2, "Rectangle attaches to neighboring sector");
+    require(std::count_if(editor.document().walls().begin(), editor.document().walls().end(),
+            [](const auto &wall) { return wall.forwardSector && wall.reverseSector; }) == 1,
+            "Adjacent rectangles share a portal wall");
+    editor.newMap();
+    editor.setDrawTool(MapEditor::DrawTool::Freeform);
+
     MapDocument source;
     require(source.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}}, true), "Create source room");
     source.setPlayerStartPosition({512,512});

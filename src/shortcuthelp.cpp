@@ -66,6 +66,9 @@ QString content(bool threeD)
             {"F12", "Reset the grid orientation."}
         });
         html += section("Drawing", {
+            {"Drawing tool dropdown", "Freeform places individual vertices. Rectangle uses two opposite corners; Circle and Regular polygon use center then radius. Sides controls the number of walls."},
+            {"Shift (Rectangle)", "Constrain the rectangle to a square along the active grid axes."},
+            {"Enter / Right click (shapes)", "Commit the preview as one undo operation. Invalid shapes remain adjustable."},
             {"Left click", "Place a connected wall vertex."},
             {"Click the first vertex", "Close the shape and create a sector (at least three vertices)."},
             {"Click an existing wall", "Connect to the wall; finish automatically when the chain forms a sector with existing walls."},

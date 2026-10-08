@@ -56,6 +56,11 @@ public:
         Sprites,
     };
 
+    enum class DrawTool { Freeform, Rectangle, Circle, Polygon };
+    void setDrawTool(DrawTool tool);
+    DrawTool drawTool() const { return m_drawTool; }
+    void setShapeSides(int sides);
+
     enum class SectorFill { Plain, Floor, Ceiling };
     void setSectorFill(SectorFill fill);
     [[nodiscard]] SectorFill sectorFill() const { return m_sectorFill; }
@@ -165,7 +170,7 @@ public:
     std::function<void()> documentRestored;
     // Set only for the duration of a continuous 3D edit callback.
     QString continuousEditKey;
-    bool canAutosave() const { return !m_floatingPaste && !m_mouseEdit && m_editDepth == 0; }
+    bool canAutosave() const { return !(m_drawTool != DrawTool::Freeform && !m_drawingPoints.empty()) && !m_floatingPaste && !m_mouseEdit && m_editDepth == 0; }
     const std::vector<QPointF> &drawingPoints() const { return m_drawingPoints; }
     void recoverDocument(const MapDocument &document, const std::vector<QPointF> &points);
     void showMapIssue(const MapCheckResult &issue);
@@ -266,6 +271,8 @@ private:
     QPointF snappedPosition(const QPoint &viewportPosition, bool disableSnapping) const;
     void addDrawingPoint(const QPointF &position);
     bool finishDrawing(bool close, bool discardOnFailure = true);
+    bool commitDrawing(const std::vector<QPointF> &points, bool close, bool discardOnFailure);
+    std::vector<QPointF> shapePoints(const QPointF &cursor) const;
     void cancelDrawing();
     void updatePreview(const QPointF &cursorPosition);
     void updateSplitPreview(const QPoint &position, bool disableSnapping);
@@ -320,6 +327,10 @@ private:
     bool m_spriteDragMoved = false;
     bool m_draggingPlayerStart = false;
     bool m_clickedPlayerStart = false;
+    DrawTool m_drawTool = DrawTool::Freeform;
+    int m_shapeSides = 16;
+    QPointF m_shapeCursor;
+    bool m_shapeSquare = false;
     Mode m_mode = Mode::Draw;
     bool m_spritesVisible = true;
     int m_gameStartDifficulty = 0;
