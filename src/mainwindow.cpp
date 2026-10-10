@@ -31,6 +31,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHeaderView>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QIconEngine>
@@ -452,6 +453,86 @@ MainWindow::MainWindow(QWidget *parent)
     auto *propertiesPanel = new QWidget(propertiesDock);
     auto *propertiesLayout = new QVBoxLayout(propertiesPanel);
     propertiesLayout->setContentsMargins(0, 0, 0, 0);
+    auto *trorLayersPanel = new QGroupBox("TROR Layers", propertiesPanel);
+    trorLayersPanel->setObjectName("TrorLayersPanel");
+    auto *layersLayout = new QVBoxLayout(trorLayersPanel);
+    auto *layersStatus = new QLabel(trorLayersPanel);
+    layersStatus->setWordWrap(true);
+    layersLayout->addWidget(layersStatus);
+    auto *layersList = new QTreeWidget(trorLayersPanel);
+    layersList->setObjectName("TrorLayersList");
+    layersList->setAccessibleName("TROR layers, top to bottom");
+    layersList->setColumnCount(2);
+    layersList->setHeaderLabels({"Layer", "Height range (Z)"});
+    layersList->setRootIsDecorated(false);
+    layersList->setAlternatingRowColors(true);
+    layersList->setMinimumHeight(90);
+    layersList->setMaximumHeight(200);
+    layersList->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    layersList->header()->setSectionResizeMode(1, QHeaderView::Stretch);
+    layersLayout->addWidget(layersList);
+    auto *showAllLayers = new QPushButton("Show all layers", trorLayersPanel);
+    showAllLayers->setObjectName("ShowAllTrorLayers");
+    showAllLayers->setToolTip("Clear the editing filter and show all map geometry.");
+    layersLayout->addWidget(showAllLayers);
+    propertiesLayout->addWidget(trorLayersPanel);
+    trorLayersPanel->hide();
+    // Selection is temporarily empty during scene rebuilds. Refresh after the
+    // current edit/selection operation finishes, preserving the stack context.
+    auto *layersRefresh = new QTimer(trorLayersPanel);
+    layersRefresh->setSingleShot(true);
+    layersRefresh->setInterval(0);
+    editor->trorLayersChanged = [layersRefresh] { layersRefresh->start(); };
+    connect(trorLayersPanel, &QObject::destroyed, editor, [editor] { editor->trorLayersChanged = {}; });
+    connect(layersRefresh, &QTimer::timeout, trorLayersPanel, [=] {
+        const auto layers = editor->trorLayers();
+        const QSignalBlocker blocker(layersList);
+        layersList->clear();
+        trorLayersPanel->setVisible(!layers.empty() && views->currentWidget() == editor);
+        int active = -1;
+        const auto relatedLayers = [&](const auto &sectors) {
+            QStringList names;
+            for (std::size_t i = 0; i < layers.size(); ++i) {
+                if (std::any_of(sectors.begin(), sectors.end(), [&](auto id) { return layers[i].sectors.count(id); }))
+                    names.append(QString("Layer %1").arg(i + 1));
+            }
+            return names.isEmpty() ? QString("None") : names.join(", ");
+        };
+        for (std::size_t index = 0; index < layers.size(); ++index) {
+            const auto &layer = layers[index];
+            const auto title = QString("Layer %1 · %2 sector%3%4").arg(index + 1).arg(layer.sectors.size())
+                .arg(layer.sectors.size() == 1 ? "" : "s").arg(layer.active ? " (editing)" : "");
+            auto *row = new QTreeWidgetItem(layersList, {title,
+                QString("%1 … %2").arg(layer.ceilingZ, 0, 'f', 0).arg(layer.floorZ, 0, 'f', 0)});
+            row->setData(0, Qt::UserRole, QVariant::fromValue<qulonglong>(*layer.sectors.begin()));
+            QStringList ids, bunches;
+            for (auto id : layer.sectors) {
+                ids.append(QString::number(id));
+                const auto &sector = editor->document().sectors()[id];
+                for (auto bunch : {sector.ceilingBunch, sector.floorBunch})
+                    if (bunch && !bunches.contains(QString::number(*bunch))) bunches.append(QString::number(*bunch));
+            }
+            const auto tooltip = QString("Sectors: %1\nAbove: %2\nBelow: %3\nTROR bunches: %4\nHeight range includes slopes; smaller Build Z is higher.")
+                .arg(ids.join(", "), relatedLayers(layer.above), relatedLayers(layer.below), bunches.join(", "));
+            row->setToolTip(0, tooltip); row->setToolTip(1, tooltip);
+            if (layer.active) {
+                active = static_cast<int>(index);
+                auto font = row->font(0); font.setBold(true); row->setFont(0, font);
+                layersList->setCurrentItem(row);
+            }
+        }
+        layersStatus->setText(active >= 0 ? QString("Editing Layer %1. Other layers are dimmed.").arg(active + 1)
+            : editor->editingScope() ? "Custom editing filter. Choose a layer to edit."
+                                     : "All layers editable. Choose a layer to isolate it.");
+        showAllLayers->setEnabled(editor->editingScope().has_value());
+    });
+    connect(layersList, &QTreeWidget::currentItemChanged, editor, [=](QTreeWidgetItem *row, QTreeWidgetItem *) {
+        if (!row) return;
+        editor->activateTrorLayer(row->data(0, Qt::UserRole).toULongLong());
+        layersRefresh->start();
+    });
+    connect(showAllLayers, &QPushButton::clicked, editor, [=] { editor->clearEditingScope(); layersRefresh->start(); });
+    connect(views, &QStackedWidget::currentChanged, layersRefresh, [layersRefresh](int) { layersRefresh->start(); });
     propertiesLayout->addWidget(propertiesControl, 1);
     const auto createPreview = [](QWidget *parent, const QString &name) {
         auto *preview = new QPushButton(parent);

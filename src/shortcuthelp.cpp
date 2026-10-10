@@ -97,6 +97,7 @@ QString content(bool threeD)
             {"Player-start arrow", "Select and right-drag in Sprites mode. It has no selectable texture."}
         });
         html += section("Overlapping geometry", {
+            {"TROR Layers (above Properties)", "Select a sector in a TROR stack to reveal connected layers. Click a row to edit it with surrounding geometry dimmed; Show all layers clears the filter. The list stays available while editing objects in that stack."},
             {"Ambiguous click", "Choose the intended object instead of selecting an arbitrary overlapping object. Cancel leaves the map unchanged."},
             {"Tools → Toggle sector isolation", "Limit picking, snapping, and drawing to selected sectors; press again or use I to show all sectors."},
             {"I", "Toggle sector isolation: isolate selected sectors, then show all sectors on the next press."},

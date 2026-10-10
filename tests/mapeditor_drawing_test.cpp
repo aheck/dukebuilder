@@ -542,9 +542,15 @@ int main(int argc, char **argv)
     editor.setMode(MapEditor::Mode::Vertices);
     editor.centerOn(512,512);
     click({0,0}); click({1024,0}, Qt::ShiftModifier);
-    editor.moveSelection(); hover({0,0}); hover({-100,0}, Qt::AltModifier);
-    const auto freeDelta = editor.mapToScene(editor.mapFromScene(QPointF(-100,0)))
-        - editor.mapToScene(editor.mapFromScene(QPointF(0,0)));
+    // Toolbar movement starts at the center of the selected vertices.
+    const QPointF selectionCenter(512,0);
+    editor.moveSelection();
+    require(editor.document() == source, "Starting toolbar move leaves the selection in place");
+    hover(selectionCenter);
+    require(editor.document() == source, "Centered pointer leaves the selection in place");
+    hover(selectionCenter + QPointF(-100,0), Qt::AltModifier);
+    const auto freeDelta = editor.mapToScene(editor.mapFromScene(selectionCenter + QPointF(-100,0)))
+        - selectionCenter;
     require(editor.document().vertices()[0].position == freeDelta
         && editor.document().vertices()[1].position == QPointF(1024,0) + freeDelta,
         "Alt moves multiple selected vertices freely while preserving spacing");

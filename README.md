@@ -376,6 +376,19 @@ sector and uses its local floor height.
 New to TROR? Open **Help → Mini Tutorials → TROR: Stacked Rooms (Beginner)** for a
 step-by-step example with a larger upper room and a smaller lower room.
 
+Select a sector in a TROR stack to reveal **TROR Layers** above Properties in
+2D. Each row groups sectors connected by ordinary wall portals; rows follow
+TROR connections from top to bottom. Height ranges include slopes, and tooltips
+show sector IDs, connected layers above/below, and bunch IDs. Branches appear as
+separate rows. Cyclic connections use height and sector ID as a stable fallback.
+
+Click a row to edit that layer. The active row is marked **editing**, while
+surrounding geometry is dimmed. Camera position and zoom stay unchanged.
+**Show all layers** clears the editing filter for the whole map. The list stays
+available when selecting walls, vertices, or sprites in the stack, or when
+clearing selection; selecting an unrelated area hides it. Layer navigation
+creates no undo entries, and the list refreshes after edits and undo/redo.
+
 **Tools → TROR / Layers** provides layer isolation, navigation above/below,
 and commands to extend a selected sector's ceiling upward or floor downward.
 Extension creates a matching room and isolates it for editing. To connect two

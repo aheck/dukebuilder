@@ -196,6 +196,16 @@ public:
     void resetGridOrientation();
     void isolateSelectedSectors();
     void toggleSectorIsolation();
+    struct TrorLayer {
+        std::set<MapDocument::SectorId> sectors;
+        std::set<MapDocument::SectorId> above, below;
+        qreal ceilingZ = 0, floorZ = 0;
+        bool active = false;
+    };
+    // Retains the current stack while selection changes within it.
+    std::vector<TrorLayer> trorLayers();
+    bool activateTrorLayer(MapDocument::SectorId seed);
+    std::function<void()> trorLayersChanged;
     void isolateCurrentLayer();
     void goTrorLayer(bool floor);
     void extendSelectedTror(bool floor);
@@ -311,6 +321,7 @@ private:
     void applyEditingScope();
     void rememberScopeTopology();
     std::optional<MapDocument::SectorId> trorTarget();
+    std::optional<MapDocument::SectorId> m_trorLayerSeed;
     bool resolveDrawingScope(const QPointF &position);
     bool resolveAmbiguousPick(const QPoint &position);
     QList<QGraphicsItem *> pickItems(const QPoint &position) const;

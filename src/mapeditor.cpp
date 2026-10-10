@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 
 namespace {
 constexpr qreal sceneExtent = 131072.0;
@@ -1381,6 +1382,7 @@ bool MapEditor::openMap(const QString &filename, QString &error, bool asUnsavedC
     m_wallSideReversed = false;
     finishPendingEdit();
     m_undoStack.clear();
+    m_trorLayerSeed.reset();
     m_document = std::move(loaded);
     m_editingScope.reset();
     m_savedDocument = m_document;
@@ -1408,6 +1410,7 @@ void MapEditor::recoverDocument(const MapDocument &document, const std::vector<Q
     finishPendingEdit();
     m_undoStack.clear();
     setMode(Mode::Draw);
+    m_trorLayerSeed.reset();
     restore(Snapshot{document, Selection{{}, {}, Mode::Draw, false}});
     m_recoveredDirty = true;
     if (!points.empty()) m_drawTool = DrawTool::Freeform;
@@ -1453,6 +1456,7 @@ void MapEditor::newMap()
     finishPendingEdit();
     m_undoStack.clear();
     cancelDrawing();
+    m_trorLayerSeed.reset();
     m_document.clear();
     m_savedDocument = m_document;
     m_recoveredDirty = false;
@@ -1617,6 +1621,7 @@ bool MapEditor::setEditingScope(std::optional<std::set<MapDocument::SectorId>> s
 
 void MapEditor::applyEditingScope()
 {
+    if (trorLayersChanged) trorLayersChanged();
     if (editingScopeChanged) {
         QString text = !m_editingScope ? "All sectors" : m_editingScope->empty() ? "Independent drawing"
             : QString("%1 editable sector(s)").arg(m_editingScope->size());
@@ -1690,6 +1695,128 @@ std::optional<MapDocument::SectorId> MapEditor::trorTarget()
     const auto choice = QInputDialog::getItem(this, "TROR sector", "Choose a sector on the active layer:", choices, 0, false, &ok);
     if (!ok) { return std::nullopt; }
     return *std::next(candidates.begin(), choices.indexOf(choice));
+}
+
+std::vector<MapEditor::TrorLayer> MapEditor::trorLayers()
+{
+    const auto &sectors = m_document.sectors();
+    std::set<MapDocument::SectorId> owners;
+    const auto addWall = [&](MapDocument::WallId id) {
+        if (id >= m_document.walls().size()) return;
+        const auto &wall = m_document.walls()[id];
+        if (wall.forwardSector) owners.insert(*wall.forwardSector);
+        if (wall.reverseSector) owners.insert(*wall.reverseSector);
+    };
+    const auto addObject = [&](const auto &object) {
+        if (object.sectorId) owners.insert(*object.sectorId);
+        else {
+            const auto candidates = m_document.sectorsAt(object.position);
+            owners.insert(candidates.begin(), candidates.end());
+        }
+    };
+    for (auto *item : m_scene->selectedItems()) {
+        if (dynamic_cast<SectorItem *>(item)) owners.insert(item->data(sectorIdRole).toULongLong());
+        else if (dynamic_cast<WallItem *>(item)) addWall(item->data(wallIdRole).toULongLong());
+        else if (dynamic_cast<VertexItem *>(item)) {
+            const auto vertex = item->data(vertexIdRole).toULongLong();
+            for (std::size_t id = 0; id < sectors.size(); ++id)
+                if (std::find(sectors[id].vertices.begin(), sectors[id].vertices.end(), vertex) != sectors[id].vertices.end())
+                    owners.insert(id);
+        } else if (dynamic_cast<SpriteItem *>(item)) {
+            const auto id = item->data(spriteIdRole).toULongLong();
+            if (id < m_document.sprites().size()) addObject(m_document.sprites()[id]);
+        } else if (dynamic_cast<PlayerStartItem *>(item)) addObject(m_document.playerStart());
+    }
+    if (m_mode == Mode::Sectors && !owners.empty()) {
+        m_trorLayerSeed = m_sectorSelectionOrder.empty() ? *owners.begin() : m_sectorSelectionOrder.front();
+    } else if (m_editingScope && !m_editingScope->empty()) {
+        // Also follow the existing above/below and isolation menu commands.
+        m_trorLayerSeed = *m_editingScope->begin();
+    }
+    if (!m_trorLayerSeed || *m_trorLayerSeed >= sectors.size()) {
+        m_trorLayerSeed.reset();
+        return {};
+    }
+    std::vector<TrorLayer> layers;
+    std::map<MapDocument::SectorId, std::size_t> membership;
+    const auto addLayer = [&](MapDocument::SectorId seed) {
+        if (membership.count(seed)) return;
+        TrorLayer layer;
+        layer.sectors = m_document.layerSectors(seed);
+        for (auto id : layer.sectors) membership[id] = layers.size();
+        layers.push_back(std::move(layer));
+    };
+    addLayer(*m_trorLayerSeed);
+    bool connected = false;
+    for (std::size_t index = 0; index < layers.size(); ++index) {
+        // Adding a neighboring layer can reallocate the vector.
+        const auto members = layers[index].sectors;
+        for (auto id : members) {
+            for (bool floor : {false, true}) {
+                const auto neighbors = m_document.verticalNeighbors(id, floor);
+                connected |= !neighbors.empty();
+                for (auto peer : neighbors) {
+                    addLayer(peer);
+                    (floor ? layers[index].below : layers[index].above).insert(peer);
+                }
+            }
+        }
+    }
+    if (!connected || (!owners.empty() && std::none_of(owners.begin(), owners.end(),
+                                                       [&](auto id) { return membership.count(id); }))) {
+        m_trorLayerSeed.reset();
+        return {};
+    }
+    for (auto &layer : layers) {
+        layer.ceilingZ = std::numeric_limits<qreal>::max();
+        layer.floorZ = std::numeric_limits<qreal>::lowest();
+        layer.active = m_editingScope && *m_editingScope == layer.sectors;
+        for (auto id : layer.sectors) {
+            const auto &sector = sectors[id];
+            const auto a = m_document.vertices()[sector.vertices.front()].position;
+            const auto b = m_document.vertices()[sector.vertices[sector.nextWallIndex(0)]].position;
+            const auto d = b - a;
+            const auto length = std::hypot(d.x(), d.y());
+            for (auto vertex : sector.vertices) {
+                const auto p = m_document.vertices()[vertex].position - a;
+                const auto distance = length > 0 ? (d.x()*p.y() - d.y()*p.x()) / (256 * length) : 0;
+                layer.ceilingZ = std::min(layer.ceilingZ, sector.ceilingz + ((sector.ceilingstat & 2) ? sector.ceilingheinum * distance : 0));
+                layer.floorZ = std::max(layer.floorZ, sector.floorz + ((sector.floorstat & 2) ? sector.floorheinum * distance : 0));
+            }
+        }
+    }
+    // Topological order respects branches even when sloped height ranges overlap.
+    // Cyclic connections fall back to height and sector ID for a stable display.
+    std::vector<TrorLayer> ordered;
+    std::set<std::size_t> remaining;
+    for (std::size_t i = 0; i < layers.size(); ++i) remaining.insert(i);
+    const auto higher = [&](std::size_t a, std::size_t b) {
+        return layers[a].ceilingZ != layers[b].ceilingZ ? layers[a].ceilingZ < layers[b].ceilingZ
+            : *layers[a].sectors.begin() < *layers[b].sectors.begin();
+    };
+    while (!remaining.empty()) {
+        std::optional<std::size_t> next;
+        for (auto i : remaining) {
+            if (std::any_of(layers[i].above.begin(), layers[i].above.end(),
+                           [&](auto id) { return membership.at(id) != i && remaining.count(membership.at(id)); })) continue;
+            if (!next || higher(i, *next)) next = i;
+        }
+        if (!next) next = *std::min_element(remaining.begin(), remaining.end(), higher);
+        ordered.push_back(layers[*next]);
+        remaining.erase(*next);
+    }
+    return ordered;
+}
+
+bool MapEditor::activateTrorLayer(MapDocument::SectorId seed)
+{
+    const auto layers = trorLayers();
+    const auto layer = std::find_if(layers.begin(), layers.end(), [&](const auto &entry) { return entry.sectors.count(seed); });
+    if (layer == layers.end()) return false;
+    if (!setEditingScope(layer->sectors)) return false;
+    m_trorLayerSeed = seed;
+    if (trorLayersChanged) trorLayersChanged();
+    return true;
 }
 
 void MapEditor::isolateCurrentLayer()
@@ -3820,6 +3947,7 @@ void MapEditor::rebuildScene()
 
 void MapEditor::updateProperties() const
 {
+    if (trorLayersChanged) trorLayersChanged();
     std::optional<MapDocument::WallId> firstWall;
     const auto selected = m_scene->selectedItems();
     if (m_propertiesCallback && m_mode == Mode::Sectors && selected.size() == 1
