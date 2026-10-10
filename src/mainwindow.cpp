@@ -1210,6 +1210,30 @@ MainWindow::MainWindow(QWidget *parent)
     });
 
     editorToolBar->addSeparator();
+    auto *drawToolCombo = new QComboBox(editorToolBar);
+    drawToolCombo->setAccessibleName("Drawing tool");
+    drawToolCombo->addItems({"Freeform", "Rectangle", "Circle", "Regular polygon"});
+    editorToolBar->addWidget(drawToolCombo);
+    auto *shapeSides = new QSpinBox(editorToolBar);
+    shapeSides->setRange(3, 128);
+    shapeSides->setValue(16);
+    shapeSides->setPrefix("Sides: ");
+    shapeSides->setAccessibleName("Shape sides");
+    editorToolBar->addWidget(shapeSides);
+    shapeSides->setVisible(false);
+    connect(shapeSides, &QSpinBox::valueChanged, editor, &MapEditor::setShapeSides);
+    connect(drawToolCombo, &QComboBox::activated, editor, [=](int index) {
+        modeGroup->actions().front()->trigger();
+        editor->setDrawTool(static_cast<MapEditor::DrawTool>(index));
+        shapeSides->setVisible(index >= 2);
+        editor->setFocus();
+    });
+    connect(views, &QStackedWidget::currentChanged, drawToolCombo, [=](int) {
+        drawToolCombo->setEnabled(views->currentWidget() == editor);
+        shapeSides->setEnabled(views->currentWidget() == editor);
+    });
+
+    editorToolBar->addSeparator();
     auto *difficultyLabel = new QLabel("Testing:", editorToolBar);
     difficultyLabel->setContentsMargins(6, 0, 0, 0);
     editorToolBar->addWidget(difficultyLabel);
@@ -1332,30 +1356,6 @@ MainWindow::MainWindow(QWidget *parent)
     addModeAction("Vertices", QKeySequence(Qt::Key_V), MapEditor::Mode::Vertices);
     addModeAction("Sectors", QKeySequence(Qt::Key_S), MapEditor::Mode::Sectors);
     addModeAction("Sprites", QKeySequence(Qt::Key_T), MapEditor::Mode::Sprites);
-
-    editorToolBar->addSeparator();
-    auto *drawToolCombo = new QComboBox(editorToolBar);
-    drawToolCombo->setAccessibleName("Drawing tool");
-    drawToolCombo->addItems({"Freeform", "Rectangle", "Circle", "Regular polygon"});
-    editorToolBar->addWidget(drawToolCombo);
-    auto *shapeSides = new QSpinBox(editorToolBar);
-    shapeSides->setRange(3, 128);
-    shapeSides->setValue(16);
-    shapeSides->setPrefix("Sides: ");
-    shapeSides->setAccessibleName("Shape sides");
-    editorToolBar->addWidget(shapeSides);
-    shapeSides->setVisible(false);
-    connect(shapeSides, &QSpinBox::valueChanged, editor, &MapEditor::setShapeSides);
-    connect(drawToolCombo, &QComboBox::activated, editor, [=](int index) {
-        modeGroup->actions().front()->trigger();
-        editor->setDrawTool(static_cast<MapEditor::DrawTool>(index));
-        shapeSides->setVisible(index >= 2);
-        editor->setFocus();
-    });
-    connect(views, &QStackedWidget::currentChanged, drawToolCombo, [=](int) {
-        drawToolCombo->setEnabled(views->currentWidget() == editor);
-        shapeSides->setEnabled(views->currentWidget() == editor);
-    });
 
     const auto updatePlacementActions = [=] {
         const bool in2D = views->currentWidget() == editor;
