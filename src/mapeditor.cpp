@@ -1467,7 +1467,10 @@ void MapEditor::newMap()
 
 void MapEditor::setMode(Mode mode)
 {
-    if (mode != m_mode && !settleFloatingPaste()) return;
+    if (mode != m_mode && !settleFloatingPaste()) {
+        if (modeChanged) modeChanged(m_mode);
+        return;
+    }
     finishPendingEdit();
     ++m_historyGeneration;
     if (m_mode == mode) {
@@ -1476,6 +1479,7 @@ void MapEditor::setMode(Mode mode)
 
     cancelDrawing();
     m_mode = mode;
+    if (modeChanged) modeChanged(m_mode);
     clearSplitPreview();
     m_scene->clearSelection();
     setDragMode(mode == Mode::Vertices || mode == Mode::Lines || mode == Mode::Sectors

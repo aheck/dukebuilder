@@ -188,6 +188,7 @@ public:
     [[nodiscard]] bool hasUnsavedChanges() const;
     bool openMap(const QString &filename, QString &error, bool asUnsavedCopy = false);
     void setMode(Mode mode);
+    std::function<void(Mode)> modeChanged;
     void setSpritesVisible(bool visible);
     void setGameStartDifficulty(int difficulty);
     void setGameStartEnemiesEnabled(bool enabled);

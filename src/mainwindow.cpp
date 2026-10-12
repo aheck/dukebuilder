@@ -91,7 +91,7 @@ QString macBundleExecutable(const QString &path)
 }
 #endif
 
-enum class ToolbarSymbol { New, Open, Save, Grid, Plain, Floor, Ceiling, Move, AddSprite, Rotate, MirrorHorizontal, MirrorVertical };
+enum class ToolbarSymbol { DrawMode, LinesMode, VerticesMode, SectorsMode, SpritesMode, New, Open, Save, Grid, Plain, Floor, Ceiling, Move, AddSprite, Rotate, MirrorHorizontal, MirrorVertical };
 
 // Draw at the requested size so toolbar icons remain crisp on high-DPI screens.
 class ToolbarIconEngine final : public QIconEngine
@@ -112,7 +112,33 @@ public:
         const QColor ink = palette.color(group, QPalette::ButtonText);
         const QColor accent = palette.color(group, QPalette::Highlight);
         painter->setPen(QPen(ink, 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        if (m_symbol == ToolbarSymbol::New) {
+        if (m_symbol == ToolbarSymbol::DrawMode) {
+            painter->setBrush(accent);
+            painter->drawPolygon(QPolygonF{QPointF(4, 20), QPointF(6, 14),
+                QPointF(17, 3), QPointF(21, 7), QPointF(10, 18)});
+            painter->drawLine(QPointF(14, 6), QPointF(18, 10));
+        } else if (m_symbol == ToolbarSymbol::LinesMode) {
+            painter->setPen(QPen(accent, 2.5));
+            painter->drawLine(QPointF(5, 19), QPointF(19, 5));
+            painter->setBrush(ink);
+            painter->drawRect(QRectF(3, 17, 4, 4));
+            painter->drawRect(QRectF(17, 3, 4, 4));
+        } else if (m_symbol == ToolbarSymbol::VerticesMode) {
+            painter->drawPolygon(QPolygonF{QPointF(5, 19), QPointF(8, 4), QPointF(20, 15)});
+            painter->setBrush(accent);
+            for (const auto point : {QPointF(5, 19), QPointF(8, 4), QPointF(20, 15)}) {
+                painter->drawEllipse(point, 2.5, 2.5);
+            }
+        } else if (m_symbol == ToolbarSymbol::SectorsMode) {
+            painter->setBrush(accent);
+            painter->drawPolygon(QPolygonF{QPointF(4, 5), QPointF(17, 3),
+                QPointF(21, 14), QPointF(14, 21), QPointF(3, 17)});
+        } else if (m_symbol == ToolbarSymbol::SpritesMode) {
+            painter->drawEllipse(QRectF(4, 4, 16, 16));
+            painter->setBrush(accent);
+            painter->drawPolygon(QPolygonF{QPointF(9, 15), QPointF(11, 10),
+                QPointF(20, 4), QPointF(14, 13)});
+        } else if (m_symbol == ToolbarSymbol::New) {
             // Folded document with a plus sign.
             painter->drawPolygon(QPolygonF{QPointF(5, 3), QPointF(14, 3), QPointF(19, 8),
                                           QPointF(19, 21), QPointF(5, 21)});
@@ -1338,29 +1364,34 @@ MainWindow::MainWindow(QWidget *parent)
         modeLabel->setVisible(!in3D);
     });
 
-    const auto addModeAction = [modeMenu, modeGroup, modeLabel, editor](
+    const auto addModeAction = [modeMenu, modeGroup, editor, editorToolBar, gridAction](
                                    const QString &name,
                                    const QKeySequence &shortcut,
-                                   MapEditor::Mode mode,
+                                   MapEditor::Mode mode, ToolbarSymbol symbol,
                                    bool checked = false) {
-        auto *action = modeMenu->addAction(name);
+        auto *action = modeMenu->addAction(toolbarIcon(symbol), name);
+        action->setObjectName("mode" + name + "Action");
+        action->setToolTip(name + " mode (" + shortcut.toString(QKeySequence::NativeText) + ")");
+        editorToolBar->insertAction(gridAction, action);
         action->setActionGroup(modeGroup);
         action->setData(static_cast<int>(mode));
         action->setCheckable(true);
         action->setChecked(checked);
         action->setShortcut(shortcut);
-        QObject::connect(action, &QAction::triggered, modeLabel, [modeLabel, editor, name, mode] {
+        QObject::connect(action, &QAction::triggered, editor, [editor, mode] {
             editor->setMode(mode);
-            modeLabel->setText("Mode: " + name);
+            editor->setFocus();
         });
         return action;
     };
 
-    addModeAction("Draw", QKeySequence(Qt::CTRL | Qt::Key_D), MapEditor::Mode::Draw, true);
-    addModeAction("Lines", QKeySequence(Qt::Key_L), MapEditor::Mode::Lines);
-    addModeAction("Vertices", QKeySequence(Qt::Key_V), MapEditor::Mode::Vertices);
-    addModeAction("Sectors", QKeySequence(Qt::Key_S), MapEditor::Mode::Sectors);
-    addModeAction("Sprites", QKeySequence(Qt::Key_T), MapEditor::Mode::Sprites);
+    addModeAction("Draw", QKeySequence(Qt::CTRL | Qt::Key_D), MapEditor::Mode::Draw, ToolbarSymbol::DrawMode, true);
+    addModeAction("Lines", QKeySequence(Qt::Key_L), MapEditor::Mode::Lines, ToolbarSymbol::LinesMode);
+    addModeAction("Vertices", QKeySequence(Qt::Key_V), MapEditor::Mode::Vertices, ToolbarSymbol::VerticesMode);
+    addModeAction("Sectors", QKeySequence(Qt::Key_S), MapEditor::Mode::Sectors, ToolbarSymbol::SectorsMode);
+    addModeAction("Sprites", QKeySequence(Qt::Key_T), MapEditor::Mode::Sprites, ToolbarSymbol::SpritesMode);
+
+    editorToolBar->insertSeparator(gridAction);
 
     const auto updatePlacementActions = [=] {
         const bool in2D = views->currentWidget() == editor;
@@ -1371,6 +1402,16 @@ MainWindow::MainWindow(QWidget *parent)
             action->setEnabled(in2D && mode != MapEditor::Mode::Draw
                                && (!editor->scene()->selectedItems().empty() || editor->hasFloatingPaste()));
         addSpriteAction->setEnabled(in2D && mode == MapEditor::Mode::Sprites);
+    };
+    editor->modeChanged = [=](MapEditor::Mode mode) {
+        for (auto *action : modeGroup->actions()) {
+            if (action->data().toInt() == static_cast<int>(mode)) {
+                action->setChecked(true);
+                modeLabel->setText("Mode: " + action->text());
+                break;
+            }
+        }
+        updatePlacementActions();
     };
     connect(modeGroup, &QActionGroup::triggered, editor, updatePlacementActions);
     connect(editor->scene(), &QGraphicsScene::selectionChanged, editor, updatePlacementActions);
