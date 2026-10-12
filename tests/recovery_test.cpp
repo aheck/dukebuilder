@@ -3,6 +3,8 @@
 #include <QTemporaryDir>
 #include <QFile>
 #include <QProcess>
+#include <QJsonDocument>
+#include <QCryptographicHash>
 #include <cstdlib>
 #include <iostream>
 static void require(bool ok, const char *message) {
@@ -33,6 +35,8 @@ int main(int argc, char **argv) {
     snapshot.drawingPoints = {{4000.5,1000.25},{5000,1000}};
     snapshot.sourceFilename = directory.filePath("original.map");
     snapshot.timestamp = QDateTime::currentDateTimeUtc();
+    snapshot.referenceImage = {{"file", "/tmp/guide.png"}, {"x", 12.5}, {"y", 40},
+        {"width", 1024}, {"height", 512}, {"rotation", 30}, {"opacity", 0.5}, {"locked", true}};
     const auto path = RecoveryFile::newPath(directory.path());
     {
         RecoveryFile file(path);
@@ -47,6 +51,15 @@ int main(int argc, char **argv) {
     require(recovered.document == snapshot.document && recovered.drawingPoints == snapshot.drawingPoints
             && recovered.sourceFilename == snapshot.sourceFilename && recovered.timestamp == snapshot.timestamp,
             "lossless recovery of invalid map, holes, fields and unfinished drawing");
+    require(recovered.referenceImage == snapshot.referenceImage, "Recovery preserves reference-image metadata");
+    // Version 2 had the same map payload without the trailing reference JSON.
+    auto oldPayload = RecoveryCodec::encode(snapshot).mid(QByteArray("DUKE-RECOVERY-3\n").size()+32);
+    oldPayload.chop(4 + QJsonDocument(snapshot.referenceImage).toJson(QJsonDocument::Compact).size());
+    const auto oldData = QByteArray("DUKE-RECOVERY-2\n")
+        + QCryptographicHash::hash(oldPayload,QCryptographicHash::Sha256) + oldPayload;
+    RecoverySnapshot oldSnapshot;
+    require(RecoveryCodec::decode(oldData,oldSnapshot,error) && oldSnapshot.referenceImage.isEmpty()
+        && oldSnapshot.document == snapshot.document, "Recovery version 2 remains readable");
     const auto previous = recovered.document;
     auto data = RecoveryCodec::encode(snapshot);
     data[data.size()-1] = char(data.back() ^ 1);

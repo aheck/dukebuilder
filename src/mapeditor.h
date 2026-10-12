@@ -1,6 +1,8 @@
 #pragma once
 
 #include "mapdocument.h"
+#include "referenceimage.h"
+#include <QPointer>
 
 #include <QGraphicsScene>
 #include <QGraphicsView>
@@ -37,6 +39,7 @@ public:
     void setGridVisible(bool visible);
     [[nodiscard]] bool isGridVisible() const { return m_gridVisible; }
     void paintBackground(QPainter *painter, const QRectF &rect);
+    std::function<void(QPainter *)> paintReference;
     void setGridAngle(qreal angle);
     [[nodiscard]] qreal gridAngle() const { return m_gridAngle; }
     [[nodiscard]] QPointF toGrid(const QPointF &point) const;
@@ -178,11 +181,17 @@ public:
     std::function<void()> documentRestored;
     // Set only for the duration of a continuous 3D edit callback.
     QString continuousEditKey;
-    bool canAutosave() const { return !(m_drawTool != DrawTool::Freeform && !m_drawingPoints.empty()) && !m_floatingPaste && !m_mouseEdit && m_editDepth == 0; }
+    bool canAutosave() const { return !m_referenceGesture && !m_referenceCalibrating && !(m_drawTool != DrawTool::Freeform && !m_drawingPoints.empty()) && !m_floatingPaste && !m_mouseEdit && m_editDepth == 0; }
     const std::vector<QPointF> &drawingPoints() const { return m_drawingPoints; }
     void recoverDocument(const MapDocument &document, const std::vector<QPointF> &points);
     void showMapIssue(const MapCheckResult &issue);
     void newMap();
+    void showReferenceImageControls();
+    bool loadReferenceImage(const QString &filename, QString &error);
+    QJsonObject referenceImageMetadata() const;
+    bool restoreReferenceImage(const QJsonObject &metadata, QString &error);
+    const std::optional<ReferenceImage> &referenceImage() const { return m_referenceImage; }
+    std::function<void(const QString &)> referenceImageWarning;
     [[nodiscard]] std::set<int> usedTextureTiles() const { return m_document.usedTextureTiles(); }
     bool saveMap(const QString &filename, QString &error);
     [[nodiscard]] bool hasUnsavedChanges() const;
@@ -249,6 +258,20 @@ protected:
     void hideEvent(QHideEvent *event) override;
 
 private:
+    std::optional<ReferenceImage> m_referenceImage, m_savedReferenceImage;
+    QPointer<QDialog> m_referenceDialog;
+    std::function<void()> m_refreshReferenceControls;
+    struct ReferenceGesture { ReferenceImage before; QPointF start; int corner = -1; };
+    std::optional<ReferenceGesture> m_referenceGesture;
+    bool m_referenceCalibrating = false;
+    std::optional<QPointF> m_referenceCalibrationStart;
+    void referenceImageUpdated();
+    void finishReferenceGesture(bool cancel);
+    bool referenceMousePress(QMouseEvent *event);
+    bool referenceMouseMove(QMouseEvent *event);
+    void paintReferenceHandles(QPainter *painter);
+    bool saveReferenceImage(const QString &mapFilename, QString &error) const;
+    void readReferenceImage(const QString &mapFilename);
     struct FloatingSectorPaste {
         MapDocument fragment;
         QPointF anchor, offset, dragStart, dragOffset;
@@ -268,7 +291,7 @@ private:
         bool reversed;
         std::optional<std::set<MapDocument::SectorId>> editingScope = std::nullopt;
     };
-    struct Snapshot { MapDocument document; Selection selection; };
+    struct Snapshot { MapDocument document; Selection selection; std::optional<ReferenceImage> reference; };
     struct TransformGesture {
         Snapshot before;
         MapDocument preview;

@@ -1419,6 +1419,15 @@ MainWindow::MainWindow(QWidget *parent)
     updatePlacementActions();
 
     auto *toolsMenu = menuBar()->addMenu("&Tools");
+    auto *referenceAction = toolsMenu->addAction("Reference Image…");
+    referenceAction->setObjectName("referenceImageAction");
+    connect(referenceAction, &QAction::triggered, editor, &MapEditor::showReferenceImageControls);
+    connect(views, &QStackedWidget::currentChanged, editor, [=] {
+        referenceAction->setEnabled(views->currentWidget() == editor);
+    });
+    editor->referenceImageWarning = [this](const QString &error) {
+        QMessageBox::warning(this, "Reference image", error);
+    };
     auto *isolateAction = toolsMenu->addAction("Toggle sector isolation");
     isolateAction->setShortcut(QKeySequence(Qt::Key_I));
     isolateAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
@@ -1827,7 +1836,7 @@ MainWindow::MainWindow(QWidget *parent)
         if (!editor->canAutosave()) return;
         if (!editor->hasUnsavedChanges()) { m_recovery->remove(); return; }
         RecoverySnapshot snapshot{editor->document(), editor->drawingPoints(),
-            m_mapFilename.isEmpty() ? m_recoveryOrigin : m_mapFilename, QDateTime::currentDateTimeUtc()};
+            m_mapFilename.isEmpty() ? m_recoveryOrigin : m_mapFilename, QDateTime::currentDateTimeUtc(), editor->referenceImageMetadata()};
         QString error;
         if (!m_recovery->write(snapshot, error))
             statusBar()->showMessage("Autosave failed: " + error, 10000);
@@ -1871,6 +1880,8 @@ MainWindow::MainWindow(QWidget *parent)
                 break;
             }
             editor->recoverDocument(snapshot.document, snapshot.drawingPoints);
+            editor->restoreReferenceImage(snapshot.referenceImage, error);
+            if (!error.isEmpty()) QMessageBox::warning(this, "Recovered reference image", error);
             m_recoveryOrigin = snapshot.sourceFilename;
             m_mapFilename.clear(); // Save As protects the original map on disk.
             setWindowFilePath({});

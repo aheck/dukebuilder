@@ -2,6 +2,8 @@
 #include <QCryptographicHash>
 #include <QDataStream>
 #include <QDir>
+#include <QJsonDocument>
+#include <QJsonParseError>
 #include <QFile>
 #include <QSaveFile>
 #include <QStandardPaths>
@@ -13,7 +15,8 @@
 
 namespace {
 constexpr qint64 maximumBytes = 64 * 1024 * 1024;
-const QByteArray magic("DUKE-RECOVERY-2\n");
+const QByteArray magic("DUKE-RECOVERY-3\n");
+const QByteArray previousMagic("DUKE-RECOVERY-2\n");
 const QByteArray legacyMagic("DUKE-RECOVERY-1\n");
 // A fixed stream version and explicit integer widths make snapshots independent
 // of compiler layout, platform word size, and the Qt version used at runtime.
@@ -152,6 +155,8 @@ QByteArray RecoveryCodec::encode(RecoverySnapshot snapshot)
     archive.field(d.m_vertices); archive.field(d.m_walls); archive.field(d.m_sectors);
     archive.field(d.m_sprites); archive.field(d.m_playerStart); archive.field(d.m_complexTopology);
     archive.field(snapshot.drawingPoints); archive.field(snapshot.sourceFilename); archive.field(snapshot.timestamp);
+    auto reference = QJsonDocument(snapshot.referenceImage).toJson(QJsonDocument::Compact);
+    archive.field(reference);
     if (payload.size() > maximumBytes) throw std::runtime_error("Recovery snapshot exceeds 64 MiB.");
     return magic + QCryptographicHash::hash(payload, QCryptographicHash::Sha256) + payload;
 }
@@ -161,7 +166,7 @@ bool RecoveryCodec::decode(const QByteArray &data, RecoverySnapshot &snapshot, Q
     error.clear();
     try {
         const bool legacy = data.startsWith(legacyMagic);
-        if (data.size() > maximumBytes + magic.size() + 32 || (!data.startsWith(magic) && !legacy)
+        if (data.size() > maximumBytes + magic.size() + 32 || (!data.startsWith(magic) && !data.startsWith(previousMagic) && !legacy)
             || data.size() < magic.size() + 32) Archive::fail();
         auto payload = data.mid(magic.size() + 32);
         if (QCryptographicHash::hash(payload, QCryptographicHash::Sha256) != data.mid(magic.size(),32)) Archive::fail();
@@ -173,6 +178,14 @@ bool RecoveryCodec::decode(const QByteArray &data, RecoverySnapshot &snapshot, Q
         archive.field(d.m_vertices); archive.field(d.m_walls); archive.field(d.m_sectors);
         archive.field(d.m_sprites); archive.field(d.m_playerStart); archive.field(d.m_complexTopology);
         archive.field(candidate.drawingPoints); archive.field(candidate.sourceFilename); archive.field(candidate.timestamp);
+        if (data.startsWith(magic)) {
+            QByteArray reference;
+            archive.field(reference);
+            QJsonParseError parse;
+            const auto json = QJsonDocument::fromJson(reference, &parse);
+            if (reference.size() > 65536 || parse.error != QJsonParseError::NoError || !json.isObject()) Archive::fail();
+            candidate.referenceImage = json.object();
+        }
         if (!stream.atEnd()) Archive::fail();
         // Allow unfinished/game-invalid maps, but reject unsafe internal references.
         for (const auto &w : d.m_walls) {

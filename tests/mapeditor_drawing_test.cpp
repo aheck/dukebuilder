@@ -13,6 +13,9 @@
 #include <QGraphicsItem>
 #include <QSpinBox>
 #include <QDoubleSpinBox>
+#include <QCheckBox>
+#include <QJsonDocument>
+#include <QFile>
 #include <QPushButton>
 #include <QMessageBox>
 #include <QAbstractButton>
@@ -953,5 +956,117 @@ int main(int argc, char **argv)
     require(!editor.saveMap(pasteDirectory.filePath("invalid.map"), pasteError)
         && !pasteError.isEmpty() && editor.hasFloatingPaste(), "Save reports an invalid paste without discarding it");
     key(Qt::Key_Escape);
+
+    // Reference images remain editor metadata through transforms and map I/O.
+    {
+        QTemporaryDir directory;
+        const auto imagePath = directory.filePath("guide.png");
+        QImage image(400,200,QImage::Format_ARGB32);
+        image.fill(QColor(180,80,40));
+        require(image.save(imagePath), "Write reference PNG fixture");
+        editor.recoverDocument(source, {});
+        editor.setMode(MapEditor::Mode::Vertices);
+        editor.centerOn(512,512);
+        QString error;
+        require(editor.loadReferenceImage(imagePath,error), "Load reference PNG");
+        require(editor.referenceImage() && editor.referenceImage()->locked
+            && editor.document() == source && editor.hasUnsavedChanges(), "Image loads locked without changing map geometry");
+        editor.undo(); require(!editor.referenceImage(), "Undo reference load");
+        editor.redo(); require(editor.referenceImage().has_value(), "Redo reference load");
+        editor.showReferenceImageControls();
+        auto *dialog = editor.findChild<QDialog *>("referenceImageDialog");
+        require(dialog, "Reference controls available");
+        const auto number = [&](const char *name) {
+            auto *box = dialog->findChild<QDoubleSpinBox *>(name);
+            require(box, "Reference numeric control"); return box;
+        };
+        auto *lock = dialog->findChild<QCheckBox *>("referenceLocked");
+        auto *visible = dialog->findChild<QCheckBox *>("referenceVisible");
+        number("referenceX")->setValue(0); number("referenceY")->setValue(0);
+        number("referenceWidth")->setValue(1024);
+        require(editor.referenceImage()->size == QSizeF(1024,512), "Numeric resize preserves image aspect ratio");
+        number("referenceRotation")->setValue(30);
+        require(editor.referenceImage()->rotation == 30, "Reference rotation control");
+        number("referenceRotation")->setValue(0);
+        number("referenceOpacity")->setValue(35);
+        require(std::abs(editor.referenceImage()->opacity-0.35) < 0.00001, "Reference opacity control");
+        visible->setChecked(false); require(!editor.referenceImage()->visible, "Reference hide control");
+        visible->setChecked(true);
+        click({0,0});
+        require(editor.scene()->selectedItems().size() == 1 && editor.document() == source,
+            "Locked image permits selecting map geometry beneath it");
+        lock->setChecked(false);
+        dialog->hide();
+        const auto before = *editor.referenceImage();
+        const auto dragImage = [&](QPointF from, QPointF to, bool cancel) {
+            auto local = editor.mapFromScene(from);
+            QMouseEvent press(QEvent::MouseButtonPress, local, editor.viewport()->mapToGlobal(local),
+                Qt::LeftButton, Qt::LeftButton, Qt::AltModifier);
+            QApplication::sendEvent(editor.viewport(), &press);
+            hover(to, Qt::AltModifier);
+            if (cancel) key(Qt::Key_Escape);
+            else {
+                local = editor.mapFromScene(to);
+                QMouseEvent release(QEvent::MouseButtonRelease, local, editor.viewport()->mapToGlobal(local),
+                    Qt::LeftButton, Qt::NoButton, Qt::AltModifier);
+                QApplication::sendEvent(editor.viewport(), &release);
+            }
+        };
+        const auto count = editor.undoStack()->count();
+        dragImage({512,256},{768,512},false);
+        require(editor.referenceImage()->position != before.position && editor.document() == source
+            && editor.undoStack()->count() == count+1, "Image drag is one undoable edit independent of geometry");
+        editor.undo(); require(*editor.referenceImage() == before, "Undo image drag restores transform");
+        dragImage({512,256},{768,512},true);
+        require(*editor.referenceImage() == before, "Escape cancels image drag");
+        dragImage({1024,512},{1536,768},false);
+        require(editor.referenceImage()->size.width() > 1024 && editor.referenceImage()->position == QPointF(0,0)
+            && std::abs(editor.referenceImage()->size.width()/editor.referenceImage()->size.height()-2) < 0.00001,
+            "Corner resizing preserves aspect and opposite anchor");
+        editor.undo();
+        auto *calibrate = dialog->findChild<QPushButton *>("calibrateReferenceImage");
+        calibrate->click();
+        click({256,256});
+        QTimer timer;
+        QObject::connect(&timer, &QTimer::timeout, &editor, [&] {
+            if (auto *input = qobject_cast<QInputDialog *>(QApplication::activeModalWidget())) {
+                input->setDoubleValue(1024); input->accept();
+            }
+        });
+        timer.start(1); click({768,256}); timer.stop();
+        require(std::abs(editor.referenceImage()->size.width()-2048) < 4
+            && editor.document() == source, "Two-point calibration sets map scale without editing map geometry");
+        editor.undo(); require(*editor.referenceImage() == before, "Undo calibration restores reference transform");
+        lock->setChecked(true);
+        const auto metadata = editor.referenceImageMetadata();
+        const auto mapPath = directory.filePath("reference.map");
+        require(editor.saveMap(mapPath,error), "Save map and reference sidecar");
+        require(!editor.hasUnsavedChanges(), "Saved reference marks editor clean");
+        QFile sidecar(mapPath + ".dukebuilder.json");
+        require(sidecar.open(QIODevice::ReadOnly), "Reference sidecar exists");
+        const auto json = QJsonDocument::fromJson(sidecar.readAll()).object(); sidecar.close();
+        require(json["referenceImage"].toObject()["file"].toString() == "guide.png", "Sidecar uses relative image paths");
+        MapDocument plain;
+        require(plain.openMap(mapPath,error) && plain.sprites().size() == source.sprites().size(), "Build map contains no reference sprite");
+        editor.newMap(); require(!editor.referenceImage(), "New map clears reference image");
+        require(editor.openMap(mapPath,error) && editor.referenceImageMetadata() == metadata
+            && !editor.referenceImage()->image.isNull() && !editor.hasUnsavedChanges(), "Reopen restores image, transform and clean state");
+        require(!editor.loadReferenceImage(directory.filePath("missing.png"),error)
+            && editor.referenceImageMetadata() == metadata, "Failed image replacement preserves reference");
+        // Missing external images retain placement and emit a useful warning.
+        require(QFile::rename(imagePath,directory.filePath("moved.png")), "Move image fixture");
+        QString warning;
+        editor.referenceImageWarning = [&](const QString &message) { warning = message; };
+        require(editor.openMap(mapPath,error) && !warning.isEmpty() && editor.referenceImage()->image.isNull()
+            && editor.referenceImageMetadata() == metadata, "Missing image preserves metadata and reports warning");
+        require(editor.loadReferenceImage(directory.filePath("moved.png"),error)
+            && editor.referenceImage()->size == before.size, "Relinking image preserves placement");
+        editor.referenceImageWarning = {};
+        dialog->findChild<QPushButton *>("removeReferenceImage")->click();
+        require(!editor.referenceImage(), "Remove reference image");
+        require(editor.saveMap(mapPath,error) && editor.openMap(mapPath,error) && !editor.referenceImage(),
+            "Removed reference stays removed after reopen");
+        dialog->close();
+    }
 
 }

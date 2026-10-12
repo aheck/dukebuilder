@@ -1,6 +1,7 @@
 #pragma once
 #include "mapdocument.h"
 #include <QDateTime>
+#include <QJsonObject>
 #include <QLockFile>
 #include <memory>
 
@@ -9,6 +10,7 @@ struct RecoverySnapshot {
     std::vector<QPointF> drawingPoints;
     QString sourceFilename;
     QDateTime timestamp;
+    QJsonObject referenceImage = {};
 };
 
 // A lock is held for this object's lifetime. Destruction deliberately keeps the

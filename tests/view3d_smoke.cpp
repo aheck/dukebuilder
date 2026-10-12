@@ -28,6 +28,10 @@
 #include <QtPlugin>
 #include <iostream>
 #include <cmath>
+#ifdef DUKE_BUILDER_STATIC_JPEG_PLUGIN
+Q_IMPORT_PLUGIN(QJpegPlugin)
+#endif
+
 #ifdef DUKE_BUILDER_STATIC_XCB_PLUGIN
 Q_IMPORT_PLUGIN(QXcbIntegrationPlugin)
 Q_IMPORT_PLUGIN(QXcbGlxIntegrationPlugin)
@@ -105,6 +109,26 @@ int main(int argc, char **argv)
         if (auto *v = dynamic_cast<MapView3D *>(widget)) { view = v; }
     }
     require(editor && view, "view widgets");
+    if (argc == 3 && QString::fromLocal8Bit(argv[2]) == "--reference-image") {
+        QImage image(400,200,QImage::Format_RGB32);
+        image.fill(QColor(240,40,20));
+        const auto path = settings.filePath("reference.jpg");
+        require(image.save(path), "JPEG plugin writes fixture");
+        const auto before = editor->viewport()->grab().toImage();
+        QString error;
+        require(editor->loadReferenceImage(path,error), error.toUtf8().constData());
+        require(!editor->referenceImage()->image.isNull(), "JPEG reference decodes");
+        auto *action = window.findChild<QAction *>("referenceImageAction");
+        require(action && action->isEnabled(), "Reference image menu action is available in 2D");
+        action->trigger();
+        QTest::qWait(50);
+        require(editor->findChild<QDialog *>("referenceImageDialog"), "Reference image controls open");
+        const auto after = editor->viewport()->grab().toImage();
+        require(!after.isNull() && before != after, "Reference image renders in 2D viewport");
+        std::cout << "JPEG reference loading, controls and rendering passed\n";
+        return 0;
+    }
+
     {
         MapDocument adjacent;
         require(adjacent.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}}, true),

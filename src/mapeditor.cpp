@@ -8,6 +8,15 @@
 #include <QLabel>
 #include <QHBoxLayout>
 #include "mapsave.h"
+#include <QFileDialog>
+#include <QImageReader>
+#include <QCheckBox>
+#include <QJsonDocument>
+#include <QJsonParseError>
+#include <QFileInfo>
+#include <QDir>
+#include <QSaveFile>
+#include <QFile>
 
 #include <QApplication>
 #include <QCursor>
@@ -580,7 +589,7 @@ public:
         if (!other || !before || key != other->key || other->time - time > 500) return false;
         after = other->after;
         time = other->time;
-        if (before->document == after->document) setObsolete(true);
+        if (before->document == after->document && before->reference == after->reference) setObsolete(true);
         return true;
     }
     std::size_t bytes() const {
@@ -637,6 +646,8 @@ void MapEditor::restore(const Snapshot &snapshot)
     m_draggedVertices.clear(); m_draggedWalls.clear(); m_draggedSectors.clear();
     m_draggedSprites.clear();
     m_document = snapshot.document;
+    m_referenceImage = snapshot.reference;
+    referenceImageUpdated();
     m_editingScope = snapshot.selection.editingScope;
     rememberScopeTopology();
     m_wallSideReversed = snapshot.selection.reversed;
@@ -667,7 +678,7 @@ void MapEditor::beginEdit(const QString &label, const QString &key)
 {
     finishTransform(true);
     if (m_editDepth++ != 0) return;
-    m_beforeEdit = Snapshot{m_document, selection()};
+    m_beforeEdit = Snapshot{m_document, selection(), m_referenceImage};
     m_editLabel = label;
     m_editKey = key.isEmpty() ? QString{} : key + ":" + QString::number(m_historyGeneration);
 }
@@ -677,7 +688,7 @@ void MapEditor::endEdit()
     if (--m_editDepth != 0) return;
     auto before = std::move(*m_beforeEdit);
     m_beforeEdit.reset();
-    if (before.document == m_document) return;
+    if (before.document == m_document && before.reference == m_referenceImage) return;
     QString topologyError;
     if (!m_document.validateTopologyChange(before.document, topologyError)) {
         restore(before);
@@ -698,7 +709,7 @@ void MapEditor::endEdit()
     if (m_editLabel.startsWith("Change") && afterSelection.items.empty())
         afterSelection = before.selection;
     m_undoStack.push(new SnapshotCommand(this, std::move(before),
-        Snapshot{m_document, std::move(afterSelection)}, m_editLabel, m_editKey));
+        Snapshot{m_document, std::move(afterSelection), m_referenceImage}, m_editLabel, m_editKey));
     // Drop oldest payloads above 128 MiB; always retain the newest operation.
     std::size_t bytes = 0;
     for (int i = m_undoStack.count() - 1; i >= 0; --i) {
@@ -713,6 +724,9 @@ void MapEditor::endEdit()
 void MapEditor::finishPendingEdit()
 {
     if (m_mouseEdit) clearAxisConstraint();
+    finishReferenceGesture(false);
+    m_referenceCalibrating = false;
+    m_referenceCalibrationStart.reset();
     finishTransform(true);
     m_addingSprite = false;
     if (m_keyboardMove) { finishKeyboardMove(true); return; }
@@ -800,6 +814,7 @@ void MapScene::paintBackground(QPainter *painter, const QRectF &rect)
         return;
     }
     painter->fillRect(visibleRect, QColor(24, 26, 31));
+    if (paintReference) paintReference(painter);
 
     if (!m_gridVisible) {
         return;
@@ -853,6 +868,15 @@ MapEditor::MapEditor(QWidget *parent)
 {
     m_undoStack.setUndoLimit(100);
     setScene(m_scene);
+    m_scene->paintReference = [this](QPainter *painter) {
+        if (!m_referenceImage || !m_referenceImage->visible || m_referenceImage->image.isNull()) return;
+        painter->save();
+        painter->setOpacity(m_referenceImage->opacity);
+        painter->setRenderHint(QPainter::SmoothPixmapTransform);
+        painter->setTransform(m_referenceImage->transform(), true);
+        painter->drawImage(QRectF(0,0,1,1), m_referenceImage->image);
+        painter->restore();
+    };
     connect(m_scene, &QGraphicsScene::selectionChanged, this, [this] {
         if (m_floatingPasteItem && !m_floatingPasteItem->isSelected()) {
             // Defer destruction until Qt has finished changing the scene selection.
@@ -1351,7 +1375,7 @@ void MapEditor::setSectorHeight(std::size_t sector, bool floor, qreal height)
 
 bool MapEditor::hasUnsavedChanges() const
 {
-    return m_floatingPaste || m_recoveredDirty || !m_drawingPoints.empty() || !(m_document == m_savedDocument);
+    return m_referenceImage != m_savedReferenceImage || m_floatingPaste || m_recoveredDirty || !m_drawingPoints.empty() || !(m_document == m_savedDocument);
 }
 
 bool MapEditor::saveMap(const QString &filename, QString &error)
@@ -1363,6 +1387,11 @@ bool MapEditor::saveMap(const QString &filename, QString &error)
         return false;
     }
     if (!saveBuildMap(m_document, filename, error)) return false;
+    if (!saveReferenceImage(filename, error)) {
+        error = "Map saved, but reference-image settings could not be saved: " + error;
+        return false;
+    }
+    m_savedReferenceImage = m_referenceImage;
     m_savedDocument = m_document;
     m_recoveredDirty = false;
     m_undoStack.setClean();
@@ -1402,6 +1431,8 @@ bool MapEditor::openMap(const QString &filename, QString &error, bool asUnsavedC
     centerOn(m_document.playerStart().position);
     setCursor(Qt::CrossCursor);
     updateProperties();
+    readReferenceImage(filename);
+    m_savedReferenceImage = m_referenceImage;
     reportStatus("Map opened");
     return true;
 }
@@ -1413,7 +1444,7 @@ void MapEditor::recoverDocument(const MapDocument &document, const std::vector<Q
     m_undoStack.clear();
     setMode(Mode::Draw);
     m_trorLayerSeed.reset();
-    restore(Snapshot{document, Selection{{}, {}, Mode::Draw, false}});
+    restore(Snapshot{document, Selection{{}, {}, Mode::Draw, false}, std::nullopt});
     m_recoveredDirty = true;
     if (!points.empty()) m_drawTool = DrawTool::Freeform;
     m_drawingPoints = points;
@@ -1460,6 +1491,9 @@ void MapEditor::newMap()
     cancelDrawing();
     m_trorLayerSeed.reset();
     m_document.clear();
+    m_referenceImage.reset();
+    m_savedReferenceImage.reset();
+    referenceImageUpdated();
     m_savedDocument = m_document;
     m_recoveredDirty = false;
     rebuildScene();
@@ -2262,7 +2296,7 @@ void MapEditor::startTransform(bool mirror, bool horizontal)
     if (m_mode == Mode::Draw) { reportStatus("Select geometry or sprites before transforming."); return; }
     clearSplitPreview();
     TransformGesture gesture;
-    gesture.before = Snapshot{m_document, selection()};
+    gesture.before = Snapshot{m_document, selection(), m_referenceImage};
     gesture.floating = m_floatingPaste.has_value();
     gesture.mirror = mirror;
     gesture.angle = mirror ? m_scene->gridAngle() + (horizontal ? 90 : 0) : 0;
@@ -2403,7 +2437,7 @@ void MapEditor::finishTransform(bool cancel)
             updateFloatingPaste();
         } else {
             Edit edit(this, gesture.mirror ? "Mirror selection" : "Rotate selection");
-            restore(Snapshot{std::move(gesture.preview), gesture.before.selection});
+            restore(Snapshot{std::move(gesture.preview), gesture.before.selection, gesture.before.reference});
         }
     }
     viewport()->update();
@@ -2413,6 +2447,7 @@ void MapEditor::finishTransform(bool cancel)
 void MapEditor::drawForeground(QPainter *painter, const QRectF &rect)
 {
     QGraphicsView::drawForeground(painter, rect);
+    paintReferenceHandles(painter);
     if (m_axisConstraint != AxisConstraint::None) {
         if (const auto origin = axisOrigin()) {
             painter->save();
@@ -2649,6 +2684,7 @@ void MapEditor::createSpriteAt(const QPoint &pointer, bool disableSnapping, bool
 
 void MapEditor::mousePressEvent(QMouseEvent *event)
 {
+    if (referenceMousePress(event)) return;
     m_axisPointer = event->position().toPoint();
     // Custom right-drag handlers return before QGraphicsView can take focus.
     // Keep axis keys in the editor even after editing a property control.
@@ -3120,6 +3156,7 @@ void MapEditor::updateSplitPreview(const QPoint &position, bool disableSnapping)
 
 void MapEditor::mouseDoubleClickEvent(QMouseEvent *event)
 {
+    if (referenceMousePress(event)) return;
     if (m_transformGesture) { event->accept(); return; }
     if (m_floatingPaste || m_keyboardMove || m_addingSprite) { mousePressEvent(event); return; }
     if (m_panning || (event->button() == Qt::LeftButton && m_spaceHeld)) {
@@ -3167,6 +3204,7 @@ void MapEditor::leaveEvent(QEvent *event)
 
 void MapEditor::mouseMoveEvent(QMouseEvent *event)
 {
+    if (referenceMouseMove(event)) return;
     m_axisPointer = event->position().toPoint();
     if (m_transformGesture && !m_panning) {
         auto &gesture = *m_transformGesture;
@@ -3381,6 +3419,12 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
 
 void MapEditor::mouseReleaseEvent(QMouseEvent *event)
 {
+    if (m_referenceGesture && event->button() == Qt::LeftButton) {
+        referenceMouseMove(event);
+        finishReferenceGesture(false);
+        event->accept();
+        return;
+    }
     if (m_floatingPaste && event->button() == Qt::RightButton) {
         m_floatingPaste->dragging = false;
         clearAxisConstraint();
@@ -3554,6 +3598,17 @@ void MapEditor::chooseSpriteTexture(MapDocument::SpriteId spriteId)
 
 void MapEditor::keyPressEvent(QKeyEvent *event)
 {
+    if (m_referenceGesture || m_referenceCalibrating) {
+        if (event->key() == Qt::Key_Escape) {
+            finishReferenceGesture(true);
+            m_referenceCalibrating = false;
+            m_referenceCalibrationStart.reset();
+            viewport()->update();
+            reportStatus("Reference-image edit cancelled.");
+        }
+        event->accept();
+        return;
+    }
     if (axisOrigin() && !(event->modifiers() & (Qt::ControlModifier | Qt::MetaModifier))
         && (event->key() == Qt::Key_X || event->key() == Qt::Key_Y)) {
         if (!event->isAutoRepeat()) {
@@ -3822,12 +3877,17 @@ void MapEditor::keyReleaseEvent(QKeyEvent *event)
 
 void MapEditor::hideEvent(QHideEvent *event)
 {
+    finishReferenceGesture(true);
+    m_referenceCalibrating = false;
+    m_referenceCalibrationStart.reset();
+    if (m_referenceDialog) m_referenceDialog->hide();
     finishTransform(true);
     QGraphicsView::hideEvent(event);
 }
 
 void MapEditor::focusOutEvent(QFocusEvent *event)
 {
+    finishReferenceGesture(true);
     if (m_floatingPaste) {
         m_floatingPaste->dragging = m_floatingPaste->following = false;
         clearAxisConstraint();
@@ -4221,4 +4281,380 @@ void MapEditor::reportStatus(const QString &message) const
             : m_axisConstraint == AxisConstraint::X ? QString(" · X only (Y fixed)") : QString(" · Y only (X fixed)");
         m_statusCallback(message + suffix);
     }
+}
+
+namespace {
+const QPointF referenceCorners[] = {{0,0}, {1,0}, {1,1}, {0,1}};
+constexpr qreal maxReferenceSize = 262144;
+
+QImage readReferencePixels(const QString &filename, QString &error)
+{
+    QImageReader reader(filename);
+    reader.setAutoTransform(true);
+    const auto size = reader.size();
+    if (size.isValid() && qint64(size.width()) * size.height() > 64 * 1024 * 1024) {
+        error = "Reference image exceeds 64 megapixels.";
+        return {};
+    }
+    auto image = reader.read();
+    if (image.isNull()) error = "Cannot load reference image " + filename + ": " + reader.errorString();
+    return image;
+}
+}
+
+QJsonObject ReferenceImage::metadata(const QString &directory) const
+{
+    return {{"file", directory.isEmpty() ? filename : QDir(directory).relativeFilePath(filename)},
+        {"x", position.x()}, {"y", position.y()}, {"width", size.width()}, {"height", size.height()},
+        {"rotation", rotation}, {"opacity", opacity}, {"visible", visible}, {"locked", locked},
+        {"keepAspect", keepAspect}};
+}
+
+bool ReferenceImage::fromMetadata(const QJsonObject &json, const QString &directory,
+                                  ReferenceImage &result, QString &error)
+{
+    error.clear();
+    for (const auto *key : {"x", "y", "width", "height", "rotation", "opacity"}) {
+        if (!json[key].isDouble() || !std::isfinite(json[key].toDouble())) {
+            error = "Invalid reference-image number: " + QString(key); return false;
+        }
+    }
+    ReferenceImage value;
+    value.filename = json["file"].toString();
+    if (value.filename.isEmpty()) { error = "Reference-image filename is missing."; return false; }
+    value.filename = QFileInfo(QDir(directory).absoluteFilePath(value.filename)).absoluteFilePath();
+    value.position = {json["x"].toDouble(), json["y"].toDouble()};
+    value.size = {json["width"].toDouble(), json["height"].toDouble()};
+    value.rotation = json["rotation"].toDouble();
+    value.opacity = json["opacity"].toDouble();
+    value.visible = json["visible"].toBool(true);
+    value.locked = json["locked"].toBool(true);
+    value.keepAspect = json["keepAspect"].toBool(true);
+    if (std::abs(value.position.x()) > sceneExtent || std::abs(value.position.y()) > sceneExtent
+        || value.size.width() < 1 || value.size.height() < 1
+        || value.size.width() > maxReferenceSize || value.size.height() > maxReferenceSize
+        || std::abs(value.rotation) > 360 || value.opacity < 0 || value.opacity > 1) {
+        error = "Reference-image placement is outside the supported range."; return false;
+    }
+    // Retain placement even when the external file is missing, so loading and
+    // saving a map on another machine never silently discards the reference.
+    value.image = readReferencePixels(value.filename, error);
+    result = std::move(value);
+    return true;
+}
+
+void MapEditor::referenceImageUpdated()
+{
+    if (!m_referenceImage) {
+        m_referenceCalibrating = false;
+        m_referenceCalibrationStart.reset();
+    }
+    m_scene->invalidate(m_scene->sceneRect(), QGraphicsScene::BackgroundLayer);
+    viewport()->update();
+    if (m_refreshReferenceControls) m_refreshReferenceControls();
+}
+
+QJsonObject MapEditor::referenceImageMetadata() const
+{
+    return m_referenceImage ? m_referenceImage->metadata() : QJsonObject{};
+}
+
+bool MapEditor::restoreReferenceImage(const QJsonObject &metadata, QString &error)
+{
+    error.clear();
+    if (metadata.isEmpty()) m_referenceImage.reset();
+    else {
+        ReferenceImage reference;
+        if (!ReferenceImage::fromMetadata(metadata, {}, reference, error)) return false;
+        m_referenceImage = std::move(reference);
+    }
+    referenceImageUpdated();
+    return true;
+}
+
+bool MapEditor::loadReferenceImage(const QString &filename, QString &error)
+{
+    error.clear();
+    auto image = readReferencePixels(filename, error);
+    if (image.isNull()) return false;
+    finishPendingEdit();
+    Edit edit(this, "Load reference image");
+    ReferenceImage reference = m_referenceImage.value_or(ReferenceImage{});
+    reference.filename = QFileInfo(filename).absoluteFilePath();
+    reference.image = image;
+    if (!m_referenceImage) {
+        reference.size = QSizeF(image.size());
+        const auto center = mapToScene(viewport()->rect().center());
+        reference.position = center - QPointF(reference.size.width()/2, reference.size.height()/2);
+        reference.position.setX(std::clamp(reference.position.x(), -sceneExtent, sceneExtent));
+        reference.position.setY(std::clamp(reference.position.y(), -sceneExtent, sceneExtent));
+    }
+    m_referenceImage = std::move(reference);
+    referenceImageUpdated();
+    return true;
+}
+
+bool MapEditor::saveReferenceImage(const QString &mapFilename, QString &error) const
+{
+    const QString filename = mapFilename + ".dukebuilder.json";
+    if (!m_referenceImage && !QFileInfo::exists(filename)) return true;
+    QJsonObject json{{"version", 1}, {"referenceImage", m_referenceImage
+        ? QJsonValue(m_referenceImage->metadata(QFileInfo(mapFilename).absolutePath())) : QJsonValue::Null}};
+    QSaveFile file(filename);
+    const auto bytes = QJsonDocument(json).toJson();
+    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
+        error = file.errorString(); return false;
+    }
+    return true;
+}
+
+void MapEditor::readReferenceImage(const QString &mapFilename)
+{
+    m_referenceImage.reset();
+    m_referenceCalibrating = false;
+    m_referenceCalibrationStart.reset();
+    QFile file(mapFilename + ".dukebuilder.json");
+    QString error;
+    if (file.exists()) {
+        if (!file.open(QIODevice::ReadOnly)) error = file.errorString();
+        else if (file.size() > 65536) error = "Reference-image metadata exceeds 64 KiB.";
+        else {
+            QJsonParseError parse;
+            const auto doc = QJsonDocument::fromJson(file.readAll(), &parse);
+            const auto json = doc.object();
+            if (parse.error != QJsonParseError::NoError || !doc.isObject() || json["version"].toInt() != 1)
+                error = "Unsupported or invalid reference-image metadata.";
+            else if (!json["referenceImage"].isNull()) {
+                ReferenceImage reference;
+                if (ReferenceImage::fromMetadata(json["referenceImage"].toObject(),
+                        QFileInfo(mapFilename).absolutePath(), reference, error)) m_referenceImage = std::move(reference);
+            }
+        }
+    }
+    referenceImageUpdated();
+    if (!error.isEmpty()) {
+        if (referenceImageWarning) referenceImageWarning(error);
+        else reportStatus(error);
+    }
+}
+
+void MapEditor::showReferenceImageControls()
+{
+    if (m_referenceDialog) {
+        m_referenceDialog->show(); m_referenceDialog->raise(); m_referenceDialog->activateWindow(); return;
+    }
+    auto *dialog = new QDialog(this);
+    dialog->setObjectName("referenceImageDialog");
+    dialog->setWindowTitle("Reference image");
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    m_referenceDialog = dialog;
+    auto *layout = new QFormLayout(dialog);
+    auto *filename = new QLabel(dialog);
+    filename->setWordWrap(true);
+    filename->setTextFormat(Qt::PlainText);
+    layout->addRow(filename);
+    auto *load = new QPushButton("Load PNG / JPEG…", dialog);
+    load->setObjectName("loadReferenceImage");
+    layout->addRow(load);
+    const auto number = [&](const char *name, const QString &label, qreal low, qreal high) {
+        auto *box = new QDoubleSpinBox(dialog);
+        box->setObjectName(name); box->setRange(low, high); box->setDecimals(3);
+        box->setKeyboardTracking(false); layout->addRow(label, box); return box;
+    };
+    auto *x = number("referenceX", "X (map units)", -sceneExtent, sceneExtent);
+    auto *y = number("referenceY", "Y (map units)", -sceneExtent, sceneExtent);
+    auto *width = number("referenceWidth", "Width (map units)", 1, maxReferenceSize);
+    auto *height = number("referenceHeight", "Height (map units)", 1, maxReferenceSize);
+    auto *rotation = number("referenceRotation", "Rotation (degrees)", -360, 360);
+    auto *opacity = number("referenceOpacity", "Opacity (%)", 0, 100);
+    opacity->setDecimals(0);
+    const auto check = [&](const char *name, const QString &label) {
+        auto *box = new QCheckBox(label, dialog); box->setObjectName(name); layout->addRow(box); return box;
+    };
+    auto *aspect = check("referenceAspect", "Preserve aspect ratio");
+    auto *visible = check("referenceVisible", "Show image");
+    auto *locked = check("referenceLocked", "Lock image for tracing");
+    auto *calibrate = new QPushButton("Calibrate scale using two points…", dialog);
+    calibrate->setObjectName("calibrateReferenceImage"); layout->addRow(calibrate);
+    auto *remove = new QPushButton("Remove image", dialog);
+    remove->setObjectName("removeReferenceImage"); layout->addRow(remove);
+    auto *hint = new QLabel("Unlock to drag the image or its corner handles in the map. Lock it to draw walls on top. Alt disables move snapping. Escape cancels a drag or calibration.\n\nThe source image stays external; placement is saved beside the map.", dialog);
+    hint->setWordWrap(true); layout->addRow(hint);
+    auto *close = new QDialogButtonBox(QDialogButtonBox::Close, dialog); layout->addRow(close);
+    connect(close, &QDialogButtonBox::rejected, dialog, &QDialog::close);
+    const QPointer<QDialog> guard(dialog);
+    m_refreshReferenceControls = [=] {
+        if (!guard) return;
+        const bool present = m_referenceImage.has_value();
+        filename->setText(present ? m_referenceImage->filename
+            + (m_referenceImage->image.isNull() ? "\nImage unavailable. Reload the file to display it." : "") : "No reference image loaded.");
+        for (auto *box : {x,y,width,height,rotation,opacity}) box->setEnabled(present);
+        for (auto *box : {aspect,visible,locked}) box->setEnabled(present);
+        calibrate->setEnabled(present && !m_referenceImage->image.isNull()); remove->setEnabled(present);
+        if (!present) return;
+        const auto &r = *m_referenceImage;
+        const qreal values[] = {r.position.x(), r.position.y(), r.size.width(), r.size.height(), r.rotation, r.opacity*100};
+        int index = 0;
+        for (auto *box : {x,y,width,height,rotation,opacity}) { const QSignalBlocker blocker(box); box->setValue(values[index++]); }
+        { const QSignalBlocker blocker(aspect); aspect->setChecked(r.keepAspect); }
+        { const QSignalBlocker blocker(visible); visible->setChecked(r.visible); }
+        { const QSignalBlocker blocker(locked); locked->setChecked(r.locked); }
+    };
+    connect(load, &QPushButton::clicked, dialog, [this, dialog] {
+        const auto path = QFileDialog::getOpenFileName(dialog, "Load reference image", {}, "Images (*.png *.jpg *.jpeg *.PNG *.JPG *.JPEG)");
+        if (path.isEmpty()) return;
+        QString error;
+        if (!loadReferenceImage(path, error)) QMessageBox::warning(dialog, "Reference image", error);
+    });
+    for (auto *box : {x,y,width,height,rotation,opacity}) {
+        connect(box, &QDoubleSpinBox::valueChanged, dialog, [=](double) {
+            if (!m_referenceImage) return;
+            Edit edit(this, "Change reference image");
+            auto &r = *m_referenceImage;
+            const qreal ratio = r.size.width()/r.size.height();
+            qreal w = width->value(), h = height->value();
+            if (r.keepAspect && box == width) h = w/ratio;
+            if (r.keepAspect && box == height) w = h*ratio;
+            if (w < 1 || h < 1 || w > maxReferenceSize || h > maxReferenceSize) { referenceImageUpdated(); return; }
+            r.position = {x->value(), y->value()}; r.size = {w,h};
+            r.rotation = rotation->value(); r.opacity = opacity->value()/100;
+            referenceImageUpdated();
+        });
+    }
+    for (auto *box : {aspect,visible,locked}) {
+        connect(box, &QCheckBox::toggled, dialog, [=](bool) {
+            if (!m_referenceImage) return;
+            Edit edit(this, "Change reference image");
+            m_referenceImage->keepAspect = aspect->isChecked();
+            m_referenceImage->visible = visible->isChecked();
+            m_referenceImage->locked = locked->isChecked();
+            referenceImageUpdated();
+        });
+    }
+    connect(remove, &QPushButton::clicked, dialog, [this] {
+        Edit edit(this, "Remove reference image"); m_referenceImage.reset(); referenceImageUpdated();
+    });
+    connect(calibrate, &QPushButton::clicked, dialog, [this] {
+        if (!m_drawingPoints.empty() || m_floatingPaste) { reportStatus("Finish drawing or placing geometry before calibrating the image."); return; }
+        finishPendingEdit();
+        m_referenceCalibrating = true; m_referenceCalibrationStart.reset();
+        if (m_referenceImage && !m_referenceImage->visible) {
+            Edit edit(this, "Show reference image"); m_referenceImage->visible = true; referenceImageUpdated();
+        }
+        setFocus(); reportStatus("Calibration: click two points on the image, then enter their distance in map units. Escape cancels.");
+    });
+    m_refreshReferenceControls();
+    dialog->show();
+}
+
+void MapEditor::paintReferenceHandles(QPainter *painter)
+{
+    if (!m_referenceImage || !m_referenceImage->visible || m_referenceImage->image.isNull()) return;
+    painter->save();
+    painter->setPen(cosmeticPen(QColor(255,210,80), 1.5));
+    const auto transform = m_referenceImage->transform();
+    if (!m_referenceImage->locked) {
+        QPolygonF polygon;
+        for (const auto &corner : referenceCorners) polygon << transform.map(corner);
+        painter->drawPolygon(polygon);
+        const qreal handle = 5 / std::abs(this->transform().m11());
+        painter->setBrush(QColor(255,210,80));
+        for (const auto &point : polygon) painter->drawRect(QRectF(point-QPointF(handle,handle), QSizeF(handle*2,handle*2)));
+    }
+    if (m_referenceCalibrationStart) {
+        const auto point = *m_referenceCalibrationStart;
+        const qreal radius = 8 / std::abs(this->transform().m11());
+        painter->drawLine(point-QPointF(radius,0), point+QPointF(radius,0));
+        painter->drawLine(point-QPointF(0,radius), point+QPointF(0,radius));
+    }
+    painter->restore();
+}
+
+bool MapEditor::referenceMousePress(QMouseEvent *event)
+{
+    if (event->button() != Qt::LeftButton || m_spaceHeld || m_panning) return false;
+    if (!m_referenceImage || !m_referenceImage->visible || m_referenceImage->image.isNull()) return false;
+    const auto point = mapToScene(event->position().toPoint());
+    if (m_referenceCalibrating) {
+        if (!QRectF(0,0,1,1).contains(m_referenceImage->transform().inverted().map(point))) {
+            reportStatus("Choose a calibration point on the image."); event->accept(); return true;
+        }
+        if (!m_referenceCalibrationStart) { m_referenceCalibrationStart = point; viewport()->update(); }
+        else {
+            const auto anchor = *m_referenceCalibrationStart;
+            const auto distance = QLineF(anchor, point).length();
+            if (distance < 0.001) { reportStatus("Choose two distinct calibration points."); event->accept(); return true; }
+            m_referenceCalibrating = false; m_referenceCalibrationStart.reset();
+            bool ok = false;
+            const auto desired = QInputDialog::getDouble(this, "Calibrate reference image", "Distance between the points (map units)", distance, 1, maxReferenceSize, 3, &ok);
+            if (ok) {
+                const auto ratio = desired/distance;
+                const auto size = m_referenceImage->size * ratio;
+                const auto position = anchor + (m_referenceImage->position-anchor)*ratio;
+                if (size.width() < 1 || size.height() < 1 || size.width() > maxReferenceSize || size.height() > maxReferenceSize
+                    || std::abs(position.x()) > sceneExtent || std::abs(position.y()) > sceneExtent) reportStatus("Calibrated image would exceed the supported size or position range.");
+                else {
+                    Edit edit(this, "Calibrate reference image");
+                    m_referenceImage->size = size; m_referenceImage->position = position;
+                    referenceImageUpdated();
+                }
+            }
+            viewport()->update();
+        }
+        event->accept(); return true;
+    }
+    if (m_referenceImage->locked || m_transformGesture || m_keyboardMove || m_floatingPaste || !m_drawingPoints.empty()) return false;
+    const auto transform = m_referenceImage->transform();
+    int corner = -1;
+    for (int i = 0; i < 4; ++i) {
+        if (QLineF(QPointF(event->position()), QPointF(mapFromScene(transform.map(referenceCorners[i])))).length() <= 9) corner = i;
+    }
+    if (corner < 0 && !QRectF(0,0,1,1).contains(transform.inverted().map(point))) return false;
+    setFocus(Qt::MouseFocusReason);
+    finishPendingEdit();
+    beginEdit(corner < 0 ? "Move reference image" : "Resize reference image");
+    m_referenceGesture = ReferenceGesture{*m_referenceImage, point, corner};
+    event->accept(); return true;
+}
+
+bool MapEditor::referenceMouseMove(QMouseEvent *event)
+{
+    if (!m_referenceGesture) return false;
+    const auto &g = *m_referenceGesture;
+    auto reference = g.before;
+    const auto point = mapToScene(event->position().toPoint());
+    if (point == g.start) { event->accept(); return true; }
+    if (g.corner < 0) {
+        reference.position += point - g.start;
+        if (!event->modifiers().testFlag(Qt::AltModifier)) reference.position = m_scene->snapToGrid(reference.position);
+    } else {
+        const auto corner = referenceCorners[g.corner];
+        const auto opposite = referenceCorners[(g.corner+2)%4];
+        const auto anchor = g.before.transform().map(opposite);
+        QTransform rotation; rotation.rotate(g.before.rotation);
+        const auto handlePoint = g.before.transform().map(corner) + point - g.start;
+        const auto delta = rotation.inverted().map(handlePoint-anchor);
+        qreal width = std::max(1.0, delta.x()*(corner.x()-opposite.x()));
+        qreal height = std::max(1.0, delta.y()*(corner.y()-opposite.y()));
+        if (reference.keepAspect) {
+            const auto scale = std::max(width/g.before.size.width(), height/g.before.size.height());
+            width = g.before.size.width()*scale; height = g.before.size.height()*scale;
+        }
+        reference.size = {width,height};
+        reference.position = anchor - rotation.map(QPointF(opposite.x()*width, opposite.y()*height));
+    }
+    if (std::abs(reference.position.x()) <= sceneExtent && std::abs(reference.position.y()) <= sceneExtent
+        && reference.size.width() <= maxReferenceSize && reference.size.height() <= maxReferenceSize) {
+        m_referenceImage = std::move(reference); referenceImageUpdated();
+    }
+    event->accept(); return true;
+}
+
+void MapEditor::finishReferenceGesture(bool cancel)
+{
+    if (!m_referenceGesture) return;
+    const auto before = m_referenceGesture->before;
+    m_referenceGesture.reset();
+    if (cancel) { m_referenceImage = before; referenceImageUpdated(); }
+    endEdit();
 }
