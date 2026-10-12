@@ -94,6 +94,10 @@ public:
 
     struct Sprite {
         bool operator==(const Sprite &other) const;
+        bool floorAligned() const { return (cstat & 32) != 0; }
+        int slope() const;
+        void setSlope(int value);
+        void setAlignment(int alignment);
         QPointF position;
         qreal z = 0.0;
         qreal angle = 0.0;
@@ -106,6 +110,8 @@ public:
         int clipdist = 32;
         int xrepeat = 64;
         int yrepeat = 64;
+        // EDuke32 sloped sprites ((cstat & 48) == 48) store a signed 16-bit
+        // slope in these bytes, low byte first, instead of positional offsets.
         int xoffset = 0;
         int yoffset = 0;
         int statnum = 0;
@@ -187,6 +193,7 @@ public:
     SpriteId addSprite(const QPointF &position);
     // Snap to the nearest boundary of the sprite's sector; preserve Z/tags.
     bool stickSpriteToWall(SpriteId sprite, QString &error);
+    bool alignSpriteToSurface(SpriteId sprite, bool floor, QString &error);
     void removeSprites(const std::vector<SpriteId> &spriteIds);
     void setSpritePositions(const std::vector<std::pair<SpriteId, QPointF>> &positions);
     void setSpriteZ(SpriteId spriteId, qreal z);

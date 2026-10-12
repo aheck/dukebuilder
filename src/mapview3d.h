@@ -29,6 +29,7 @@ public:
     bool refreshDocument(const MapDocument &document);
     std::function<void(const QString &)> continuousEditChanged;
     void stickSpriteToWall();
+    void alignSpritesToSurface(bool floor);
     void resetTextureScale() { editTexture(Qt::Key_R, false); }
     std::function<void()> leave3D;
     std::function<std::optional<int>(int)> chooseTexture;

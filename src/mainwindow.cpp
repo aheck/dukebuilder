@@ -884,7 +884,7 @@ MainWindow::MainWindow(QWidget *parent)
                           {64,"One-sided"},{128,"Centered on Z"},{256,"Block hitscan"},
                           {512,"Reverse translucency"},{32768,"Invisible"}});
                 addChoice("Alignment", (sprite.cstat >> 4) & 3, MapEditor::Property::Alignment,
-                          {{0,"Face camera"},{1,"Wall aligned"},{2,"Floor aligned"}});
+                          {{0,"Face camera"},{1,"Wall aligned"},{2,"Floor aligned"},{3,"Sloped floor"}});
                 addProperty("Shade", QString::number(sprite.shade), MapEditor::Property::Shade);
                 auto paletteNumbers = textureBrowserWindow->paletteNumbers();
                 paletteNumbers.insert(sprite.palette);
@@ -896,8 +896,13 @@ MainWindow::MainWindow(QWidget *parent)
                 addProperty("Collision size", QString::number(sprite.clipdist), MapEditor::Property::Clipdist);
                 addProperty("X repeat", QString::number(sprite.xrepeat), MapEditor::Property::XRepeat);
                 addProperty("Y repeat", QString::number(sprite.yrepeat), MapEditor::Property::YRepeat);
-                addProperty("X offset", QString::number(sprite.xoffset), MapEditor::Property::XOffset);
-                addProperty("Y offset", QString::number(sprite.yoffset), MapEditor::Property::YOffset);
+                if (sprite.floorAligned()) {
+                    addProperty("Sprite slope", QString::number(sprite.slope()), MapEditor::Property::SpriteSlope);
+                }
+                if ((sprite.cstat & 48) != 48) {
+                    addProperty("X offset", QString::number(sprite.xoffset), MapEditor::Property::XOffset);
+                    addProperty("Y offset", QString::number(sprite.yoffset), MapEditor::Property::YOffset);
+                }
                 auto *advanced = advancedGroup();
                 addProperty("Status", QString::number(sprite.statnum), MapEditor::Property::Status, advanced);
                 addProperty("Owner", QString::number(sprite.owner), MapEditor::Property::Owner, advanced);
@@ -1466,6 +1471,17 @@ MainWindow::MainWindow(QWidget *parent)
         if (view3D->isVisible()) { view3D->stickSpriteToWall(); }
         else { editor->stickSelectedSpriteToWall(); }
     });
+    for (bool floor : {true, false}) {
+        auto *action = toolsMenu->addAction(floor ? "Align Sprites to Floor" : "Align Sprites to Ceiling");
+        action->setShortcut(QKeySequence(Qt::CTRL | (floor ? Qt::Key_PageDown : Qt::Key_PageUp)));
+        action->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+        action->setAutoRepeat(false);
+        editor->addAction(action);
+        connect(action, &QAction::triggered, this, [editor, view3D, floor] {
+            if (view3D->isVisible()) view3D->alignSpritesToSurface(floor);
+            else editor->alignSelectedSpritesToSurface(floor);
+        });
+    }
     auto *textureBrowserAction = toolsMenu->addAction("&Texture Browser");
     propertyDelegate->setTextureChooser(
         [textureBrowserWindow](std::optional<int> currentTexture) -> std::optional<int> {

@@ -283,6 +283,8 @@ static bool buildMap(const MapDocument &document, QString &error,
             out.clipdist = number<decltype(out.clipdist)>(source.clipdist, label + " clipdist");
             out.xrepeat = number<decltype(out.xrepeat)>(source.xrepeat, label + " xrepeat");
             out.yrepeat = number<decltype(out.yrepeat)>(source.yrepeat, label + " yrepeat");
+            // EDuke32 alignment 48 is a sloped floor sprite. Its signed slope
+            // occupies xoffset (low byte) and yoffset (high byte); keep both raw.
             out.xoffset = number<decltype(out.xoffset)>(source.xoffset, label + " xoffset");
             out.yoffset = number<decltype(out.yoffset)>(source.yoffset, label + " yoffset");
             out.statnum = number<decltype(out.statnum)>(source.statnum, label + " statnum");
@@ -295,7 +297,6 @@ static bool buildMap(const MapDocument &document, QString &error,
             out.cstat = bits(source.cstat, label + " cstat");
             out.lotag = bits(source.lotag, label + " lotag");
             out.hitag = bits(source.hitag, label + " hitag");
-            require((source.cstat & 48) != 48, label + ": invalid sprite alignment.");
         }
         target(Target::PlayerStart);
         const auto &start = document.playerStart();

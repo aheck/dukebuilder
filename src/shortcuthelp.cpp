@@ -35,11 +35,12 @@ QString content(bool threeD)
             {"T", "Show/hide solid labeled TROR connection planes."}
         });
         html += section("Heights and slopes", {
+            {"Ctrl + PageDown / PageUp", "Align selected or highlighted sprites to their sector floor / ceiling, matching slope and height."},
             {"Mouse wheel", "Raise/lower the selected (or otherwise highlighted) floor, ceiling, or sprite by 1024 Z units per notch. Wheel-up raises it."},
             {"Shift + wheel", "Raise/lower by a finer 128 Z units per notch."},
             {"Page Up / Page Down", "Raise/lower the selected (or highlighted) floor or ceiling by the same amount as one mouse-wheel notch. Hold Shift for the finer 128-unit step."},
             {"Ctrl + wheel", "Adjust all selected surfaces and sprites (or the highlight when nothing is selected) by 1 shade unit per notch. Wheel-up darkens; wheel-down brightens. Each batch is one undoable edit."},
-            {"Alt + wheel", "Change the selected (or otherwise highlighted) floor/ceiling slope by 256 per notch."},
+            {"Alt + wheel", "Change the selected (or otherwise highlighted) floor, ceiling, or floor-aligned sprite slope by 256 per notch."},
             {"Shift + Alt + wheel", "Change slope by a finer 16 per notch."},
             {"First wall (2D properties)", "Choose the slope axis in 2D. A nonzero slope enables the slope flag; returning to zero clears it."}
         });
@@ -52,7 +53,7 @@ QString content(bool threeD)
             {"A (wall multi-selection)", "Align connected selected walls to the pointed-at selected wall, preserving texture scale. Different textures and incompatible sides are skipped. One undo restores the batch."},
             {"O", "Stick the highlighted sprite to the nearest wall of its sector. Position and alignment change; height and tags are retained."}
         });
-        html += "<p>Wheel edits keep targeting the orange selection when you look away. Multi-selection supports shade, height, slope, and texture edits as one undoable batch. Heights skip walls; slopes affect only floors and ceilings; surface panning/scaling skip sprites. Ctrl+C samples the highlight; Ctrl+V applies the copied tile to the multi-selection. "
+        html += "<p>Wheel edits keep targeting the orange selection when you look away. Multi-selection supports shade, height, slope, and texture edits as one undoable batch. Heights skip walls; slopes affect floors, ceilings, and floor-aligned sprites; surface panning/scaling skip sprites. Ctrl+C samples the highlight; Ctrl+V applies the copied tile to the multi-selection. "
                 "This is a free-flight preview without collision or game simulation.</p>";
     } else {
         html += section("Modes and view", {
@@ -89,6 +90,8 @@ QString content(bool threeD)
             {"J", "Join selected adjacent sectors. Select the donor sector first, then Shift-click the others; its properties are retained."}
         });
         html += section("Sprites", {
+            {"Sprite slope (properties)", "Choose Floor aligned or Sloped floor alignment, then enter a signed slope. Zero makes the sprite flat; 4096 is a 45° incline."},
+            {"Ctrl + PageDown / PageUp", "Align selected sprites to their sector floor / ceiling. Matches slope and height as one undoable edit; also available in Tools."},
             {"Ctrl+C / Ctrl+V", "Copy selected sprites and paste duplicates one grid cell down and right. Requires Sprites mode."},
             {"A / Add sprite toolbar button", "In Sprites mode, add at the pointer with A, or click a placement point after using the toolbar. Choose a texture; cancelling the picker creates nothing."},
             {"Right click empty space", "Create a sprite in Sprites mode."},

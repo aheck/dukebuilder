@@ -66,6 +66,17 @@ struct MapView3DTest {
         view.syncSelection();
         view.editSelectedHeights(1, false, false);
     }
+    static void selectSlopeTargets(MapView3D &view) {
+        view.m_selection = {{DUKE_SURFACE_SPRITE, 0, false}, {DUKE_SURFACE_SPRITE, 1, false},
+                            {DUKE_SURFACE_SPRITE, 2, false}, {DUKE_SURFACE_FLOOR, 0, false}};
+        ++view.m_selectionRevision;
+        view.syncSelection();
+    }
+    static void selectOneSprite(MapView3D &view, std::size_t id) {
+        view.m_selection = {{DUKE_SURFACE_SPRITE, id, false}};
+        ++view.m_selectionRevision;
+        view.syncSelection();
+    }
     static std::size_t selected(const MapView3D &view) { return view.m_selection.size(); }
     static std::size_t selectionRevision(const MapView3D &view) { return view.m_selectionRevision; }
     static DukeCamera camera(const MapView3D &view) { return view.m_camera; }
@@ -127,7 +138,8 @@ int main(int argc, char **argv)
                 "Wall mass selection follows connected sides with matching textures");
     }
     // Optional original-game fixture: exercise entry and subsequent mesh rebuilds.
-    if (argc == 3 && QString::fromLocal8Bit(argv[2]) != "--tror-edit") {
+    if (argc == 3 && QString::fromLocal8Bit(argv[2]) != "--tror-edit"
+        && QString::fromLocal8Bit(argv[2]) != "--sprite-slopes") {
         MapDocument imported;
         QString error;
         require(imported.openMap(QString::fromLocal8Bit(argv[2]), error), error.toUtf8().constData());
@@ -155,6 +167,56 @@ int main(int argc, char **argv)
     require(room.addPolyline({{-4096,-4096},{4096,-4096},{4096,4096},{-4096,4096}}, true), "room");
     room.setSectorCeilingZ(0,-32768);
     QString error;
+    if (argc == 3 && QString::fromLocal8Bit(argv[2]) == "--sprite-slopes") {
+        auto fixture = room;
+        for (int i = 0; i < 3; ++i) {
+            auto id = fixture.addSprite({i * 256.0, 0});
+            auto sprite = fixture.sprites()[id];
+            sprite.texture = 1;
+            sprite.cstat = i == 2 ? 16 : 32;
+            fixture.setSprite(id, sprite);
+        }
+        editor->recoverDocument(fixture, {});
+        view->show();
+        QTest::qWait(100);
+        require(view->start(fixture, {0,0}, error), error.toUtf8().constData());
+        MapView3DTest::selectSlopeTargets(*view);
+        const auto wheel = [&](Qt::KeyboardModifiers modifiers) {
+            QWheelEvent event(QPointF(10,10), QPointF(10,10), {}, QPoint(0,120),
+                              Qt::NoButton, modifiers, Qt::NoScrollPhase, false);
+            QApplication::sendEvent(view, &event);
+        };
+        wheel(Qt::AltModifier | Qt::ShiftModifier);
+        require(editor->document().sprites()[0].slope() == 16
+                && editor->document().sprites()[1].slope() == 16
+                && editor->document().sprites()[2] == fixture.sprites()[2]
+                && editor->document().sectors()[0].floorheinum == 16,
+                "Fine wheel slopes eligible sprites and surfaces, skipping wall sprites");
+        require(editor->undoStack()->count() == 1, "Mixed slope edit creates one undo command");
+        editor->undo();
+        require(editor->document() == fixture, "Undo restores mixed slope edit");
+        editor->redo();
+        MapView3DTest::selectOneSprite(*view, 0);
+        wheel(Qt::AltModifier);
+        require(editor->document().sprites()[0].slope() == 272, "Single sprite coarse slope wheel");
+        const auto beforeAlign = editor->document();
+        QTest::keyClick(view, Qt::Key_PageDown, Qt::ControlModifier);
+        require(editor->document().sprites()[0].slope() == 16
+                && editor->document().sprites()[0].z == 256,
+                "Ctrl PageDown aligns slope and height to selected sprite sector");
+        editor->undo();
+        require(editor->document() == beforeAlign, "Undo 3D sprite alignment");
+        const auto beforeReset = editor->document().sprites()[0];
+        view->resetTextureScale();
+        require(editor->document().sprites()[0].slope() == beforeReset.slope(), "Texture reset preserves slope");
+        MapView3DTest::selectOneSprite(*view, 2);
+        const auto wallBefore = editor->document();
+        wheel(Qt::AltModifier);
+        require(editor->document() == wallBefore, "Alt wheel never moves a wall sprite");
+        view->stop();
+        std::cout << "Sprite slope wheel, alignment, reset and undo passed\n";
+        return 0;
+    }
     if (argc == 3) {
         auto linked = room;
         require(linked.extendTror(0,true,32768,error).has_value(), "3D linked fixture");

@@ -273,7 +273,10 @@ void MapView3D::updateSurfaceStatus()
 }
 void MapView3D::keyPressEvent(QKeyEvent *event)
 {
-    if (event->key() == Qt::Key_PageUp || event->key() == Qt::Key_PageDown) {
+    if ((event->key() == Qt::Key_PageUp || event->key() == Qt::Key_PageDown)
+        && event->modifiers().testFlag(Qt::ControlModifier)) {
+        if (!event->isAutoRepeat()) alignSpritesToSurface(event->key() == Qt::Key_PageDown);
+    } else if (event->key() == Qt::Key_PageUp || event->key() == Qt::Key_PageDown) {
         const QPoint position = rect().center();
         const auto modifiers = event->modifiers().testFlag(Qt::ShiftModifier)
             ? Qt::ShiftModifier : Qt::NoModifier;
@@ -421,8 +424,7 @@ void MapView3D::wheelEvent(QWheelEvent *event)
     }
     // Keep partial notches separate for height, slope, shade and coarse/fine edits.
     const bool fine = event->modifiers().testFlag(Qt::ShiftModifier);
-    const bool slopeEdit = (m_selection.size() > 1 || hit.kind != DUKE_SURFACE_SPRITE)
-        && event->modifiers().testFlag(Qt::AltModifier);
+    const bool slopeEdit = event->modifiers().testFlag(Qt::AltModifier);
     const int mode = shadeEdit ? 4 : (slopeEdit ? 2 : 0) + (fine ? 1 : 0);
     if (continuousEditChanged) continuousEditChanged(m_selection.empty()
         ? QString("wheel:%1:%2:%3:%4:%5").arg(int(hit.kind)).arg(hit.sector_index)
@@ -460,14 +462,22 @@ void MapView3D::wheelEvent(QWheelEvent *event)
         if (!steps || hit.sprite_index < 0
             || std::size_t(hit.sprite_index) >= m_snapshot.sprites().size()) { return; }
         auto sprite = m_snapshot.sprites()[hit.sprite_index];
-        // Build Z increases downward. Sprite modifiers do not edit sector slopes.
-        sprite.z -= steps * heightStep;
+        if (slopeEdit) {
+            if (!sprite.floorAligned()) {
+                if (statusMessage) statusMessage("Slope requires a floor-aligned sprite.");
+                return;
+            }
+            sprite.setSlope(sprite.slope() + steps * (fine ? 16 : 256));
+        } else {
+            sprite.z -= steps * heightStep;
+        }
         auto candidate = m_snapshot;
         candidate.setSprite(hit.sprite_index, sprite);
         if (!applySnapshot(std::move(candidate))) { return; }
         if (spriteChanged) { spriteChanged(hit.sprite_index, sprite); }
         if (statusMessage) {
-            statusMessage(QString("Sprite %1 Z: %2").arg(hit.sprite_index).arg(sprite.z));
+            statusMessage(QString("Sprite %1 %2: %3").arg(hit.sprite_index)
+                          .arg(slopeEdit ? "slope" : "Z").arg(slopeEdit ? sprite.slope() : sprite.z));
         }
         update();
         return;
@@ -526,9 +536,13 @@ void MapView3D::editSelectedHeights(int steps, bool fine, bool slopeEdit)
         if (!hitFromSelection(target)) return;
         if (target.kind == DUKE_SURFACE_WALL) continue;
         if (target.kind == DUKE_SURFACE_SPRITE) {
-            if (slopeEdit) continue;
             auto sprite = candidate.sprites()[target.id];
-            sprite.z -= delta;
+            if (slopeEdit) {
+                if (!sprite.floorAligned()) continue;
+                sprite.setSlope(sprite.slope() + steps * (fine ? 16 : 256));
+            } else {
+                sprite.z -= delta;
+            }
             candidate.setSprite(target.id, sprite);
         } else {
             auto sector = candidate.sectors()[target.id];
@@ -1096,8 +1110,11 @@ void MapView3D::editTexture(int key, bool scale,
             if (key == Qt::Key_R) {
                 sprite.xrepeat = 64;
                 sprite.yrepeat = 64;
-                sprite.xoffset = 0;
-                sprite.yoffset = 0;
+                // Alignment 48 uses the offset bytes for slope, not panning.
+                if ((sprite.cstat & 48) != 48) {
+                    sprite.xoffset = 0;
+                    sprite.yoffset = 0;
+                }
             } else {
                 // Sprite texture choice/paste is supported; surface UV shortcuts
                 // do not reinterpret sprite dimensions or offsets.
@@ -1236,6 +1253,35 @@ void MapView3D::alignSelectedWallTextures()
     if (result.approximate) { message += " Some offsets are approximate (Build panning limits)."; }
     if (result.closingSeam) { message += " A closing seam remains; scale was not stretched."; }
     report(message);
+}
+
+void MapView3D::alignSpritesToSurface(bool floor)
+{
+    if (!m_active || !m_renderer) return;
+    auto targets = m_selection;
+    if (targets.empty()) {
+        repaint();
+        DukeSurfaceHit hit{};
+        if (duke_renderer_get_hovered_surface(m_renderer, &hit)) {
+            if (const auto target = selectionFromHit(hit)) targets.push_back(*target);
+        }
+    }
+    auto candidate = m_snapshot;
+    QString error;
+    bool found = false;
+    for (const auto &target : targets) {
+        if (target.kind != DUKE_SURFACE_SPRITE) continue;
+        found = true;
+        if (!candidate.alignSpriteToSurface(target.id, floor, error)) {
+            if (statusMessage) statusMessage(error);
+            return;
+        }
+    }
+    if (!found) {
+        if (statusMessage) statusMessage("Select or point at a sprite to align.");
+        return;
+    }
+    commitSurfaceEdit(std::move(candidate), floor ? "Align sprites to floor" : "Align sprites to ceiling");
 }
 
 void MapView3D::stickSpriteToWall()

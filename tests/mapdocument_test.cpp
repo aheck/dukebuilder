@@ -53,6 +53,46 @@ void checkSideReferences(const MapDocument &document)
 int main()
 {
     {
+        MapDocument::Sprite sprite;
+        sprite.cstat = 32 | 64 | 4;
+        for (int slope : {-32768, -4096, -1, 0, 255, 4096, 32767}) {
+            sprite.setSlope(slope);
+            require(sprite.slope() == slope && (sprite.cstat & 68) == 68, "Slope codec preserves signed range and flags");
+        }
+        sprite.setSlope(90000);
+        require(sprite.slope() == 32767, "Slope clamps upper limit");
+        sprite.setAlignment(1);
+        require(sprite.xoffset == 0 && sprite.yoffset == 0 && sprite.slope() == 0, "Changing alignment clears packed slope offsets");
+        sprite.setSlope(4096);
+        require((sprite.cstat & 48) == 16, "Wall sprites cannot acquire a slope");
+        MapDocument doc;
+        QString error;
+        require(doc.addPolyline({{0,0},{4096,0},{4096,4096},{0,4096}}, true), "Slope alignment room");
+        const auto id = doc.addSprite({1024,2048});
+        auto sector = doc.sectors()[0];
+        sector.floorstat = sector.ceilingstat = 2;
+        sector.floorheinum = 512; sector.ceilingheinum = -256;
+        sector.ceilingz = -16384;
+        doc.setSector(0, sector);
+        require(doc.alignSpriteToSurface(id, true, error), "Align sprite to slope");
+        auto aligned = doc.sprites()[id];
+        require(aligned.angle == 270 && aligned.slope() == 512 && aligned.z == 4096 && !(aligned.cstat & 8), "Floor alignment matches plane and faces up");
+        require(doc.alignSpriteToSurface(id, false, error), "Align sprite to ceiling");
+        require(doc.sprites()[id].slope() == -256 && doc.sprites()[id].z == -18432 && (doc.sprites()[id].cstat & 8), "Ceiling alignment matches negative slope and faces down");
+        doc.setSprite(id, aligned);
+        const auto before = doc;
+        MapDocument::TransformSelection selection;
+        selection.sprites.insert(id);
+        require(doc.transformSelection(selection, {2048,2048}, 0, true, error), "Mirror sloped sprite");
+        require(doc.sprites()[id].angle == 90 && doc.sprites()[id].slope() == 512 && (doc.sprites()[id].cstat & 4), "Mirror reflects slope direction and texture axis");
+        require(doc.transformSelection(selection, {2048,2048}, 0, true, error) && doc == before, "Double mirror restores sloped sprite exactly");
+        require(doc.transformSelection(selection, {2048,2048}, 90, false, error), "Rotate sloped sprite");
+        require(doc.sprites()[id].angle == 0 && doc.sprites()[id].slope() == 512, "Rotation preserves signed slope");
+        const auto valid = doc;
+        require(!doc.alignSpriteToSurface(99, true, error) && doc == valid, "Invalid alignment is atomic");
+    }
+
+    {
         MapDocument transformed;
         QString error;
         require(transformed.addPolyline({{0,0},{1024,0},{1024,512},{0,512}}, true), "Transform source");

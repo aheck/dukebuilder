@@ -627,6 +627,25 @@ int main(int argc, char **argv)
     QApplication::sendEvent(&editor, &lostFocus);
     require(editor.document() == withSprite && editor.canAutosave(), "Losing focus cancels movement safely");
 
+    // Property edits and surface alignment participate in the normal undo stack.
+    editor.recoverDocument(withSprite, {});
+    editor.setMode(MapEditor::Mode::Sprites);
+    click({256,256});
+    editor.setSelectedProperty(MapEditor::Property::Alignment, 2);
+    editor.setSelectedProperty(MapEditor::Property::SpriteSlope, -4096);
+    require(editor.document().sprites()[0].slope() == -4096, "Sprite slope property edits packed representation");
+    editor.undo();
+    require(editor.document().sprites()[0].slope() == 0, "Undo slope property");
+    editor.redo();
+    require(editor.document().sprites()[0].slope() == -4096, "Redo slope property");
+    const auto beforeAlign = editor.document();
+    editor.alignSelectedSpritesToSurface(true);
+    require(editor.document().sprites()[0].slope() == 0
+            && editor.document().sprites()[0].z == editor.document().sectors()[0].floorz,
+            "Alignment action matches flat floor");
+    editor.undo();
+    require(editor.document() == beforeAlign, "Undo alignment restores slope and height");
+
     // Enter edits a selected sprite, but never the player start or an empty selection.
     editor.recoverDocument(withSprite, {});
     editor.setMode(MapEditor::Mode::Sprites);

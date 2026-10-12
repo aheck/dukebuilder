@@ -1176,8 +1176,9 @@ void MapEditor::setSelectedProperty(Property property, qreal value)
         case Property::YVelocity: updatedSprite.yvel = integer(-32768, 32767); break;
         case Property::ZVelocity: updatedSprite.zvel = integer(-32768, 32767); break;
         case Property::Extra: updatedSprite.extra = integer(-32768, 32767); break;
+        case Property::SpriteSlope: updatedSprite.setSlope(integer(-32768, 32767)); break;
         case Property::Alignment:
-            updatedSprite.cstat = (updatedSprite.cstat & ~48) | (integer(0, 2) << 4);
+            updatedSprite.setAlignment(integer(0, 3));
             break;
         default: changedAdditional = false; break;
         }
@@ -3358,6 +3359,27 @@ void MapEditor::joinSelectedSectors()
     }
     updateProperties();
     reportStatus(QString("Joined sectors using properties from sector %1.").arg(source));
+}
+
+void MapEditor::alignSelectedSpritesToSurface(bool floor)
+{
+    Edit edit(this, floor ? "Align sprites to floor" : "Align sprites to ceiling");
+    auto candidate = m_document;
+    std::set<MapDocument::SpriteId> ids;
+    for (auto *item : m_scene->selectedItems()) {
+        if (dynamic_cast<SpriteItem *>(item)) ids.insert(item->data(spriteIdRole).toULongLong());
+    }
+    if (ids.empty()) { reportStatus("Select sprites to align first."); return; }
+    QString error;
+    for (auto id : ids) {
+        if (!candidate.alignSpriteToSurface(id, floor, error)) { reportStatus(error); return; }
+    }
+    m_document = std::move(candidate);
+    rebuildScene();
+    for (auto *item : m_scene->items()) {
+        if (dynamic_cast<SpriteItem *>(item) && ids.count(item->data(spriteIdRole).toULongLong())) item->setSelected(true);
+    }
+    updateProperties();
 }
 
 void MapEditor::stickSelectedSpriteToWall()

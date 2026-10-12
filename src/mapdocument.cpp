@@ -66,6 +66,71 @@ void MapDocument::setSector(SectorId sectorId, const Sector &sector)
         || ((before.ceilingstat ^ sector.ceilingstat) & 2)) { propagateTrorPlane(sectorId, false); }
 }
 
+int MapDocument::Sprite::slope() const
+{
+    if ((cstat & 48) != 48) return 0;
+    const int bits = (xoffset & 255) | ((yoffset & 255) << 8);
+    return bits >= 32768 ? bits - 65536 : bits;
+}
+
+void MapDocument::Sprite::setSlope(int value)
+{
+    if (!floorAligned()) return;
+    value = std::clamp(value, -32768, 32767);
+    const unsigned bits = static_cast<unsigned>(value) & 65535;
+    const auto byte = [](unsigned b) { return b >= 128 ? int(b) - 256 : int(b); };
+    xoffset = byte(bits & 255);
+    yoffset = byte(bits >> 8);
+    cstat = (cstat & ~48) | (value ? 48 : 32);
+}
+
+void MapDocument::Sprite::setAlignment(int alignment)
+{
+    alignment = std::clamp(alignment, 0, 3);
+    if (((cstat & 48) == 48) != (alignment == 3)) {
+        // Positional offsets and packed slope bytes are not interchangeable.
+        xoffset = yoffset = 0;
+    }
+    cstat = (cstat & ~48) | (alignment << 4);
+}
+
+bool MapDocument::alignSpriteToSurface(SpriteId id, bool floor, QString &error)
+{
+    error.clear();
+    if (id >= m_sprites.size()) { error = "Select a sprite first."; return false; }
+    auto sprite = m_sprites[id];
+    auto owner = sprite.sectorId;
+    if (!owner || *owner >= m_sectors.size()) {
+        const auto owners = sectorsAt(sprite.position);
+        if (owners.size() != 1) { error = "Sprite needs an unambiguous sector assignment."; return false; }
+        owner = owners.front();
+    }
+    const auto &sector = m_sectors[*owner];
+    int slope = ((floor ? sector.floorstat : sector.ceilingstat) & 2)
+        ? (floor ? sector.floorheinum : sector.ceilingheinum) : 0;
+    qreal z = floor ? sector.floorz : sector.ceilingz;
+    if (slope) {
+        if (sector.vertices.size() < 2) { error = "Surface has no slope reference wall."; return false; }
+        const auto a = m_vertices[sector.vertices[0]].position;
+        const auto delta = m_vertices[sector.vertices[sector.nextWallIndex(0)]].position - a;
+        const auto length = std::hypot(delta.x(), delta.y());
+        if (length == 0) { error = "Surface slope reference wall has zero length."; return false; }
+        z += slope * (delta.x() * (sprite.position.y() - a.y())
+                      - delta.y() * (sprite.position.x() - a.x())) / (256.0 * length);
+        // Sprite slope runs opposite its angle; sector slope is perpendicular
+        // to the first wall. Quantize to the angle representable in a MAP.
+        const auto degrees = std::atan2(-delta.x(), delta.y()) * 180.0 / std::acos(-1.0);
+        sprite.angle = ((std::lround(degrees * 2048.0 / 360.0) + 2048) % 2048) * 360.0 / 2048.0;
+    }
+    sprite.setAlignment(2);
+    sprite.setSlope(slope);
+    sprite.z = std::round(z);
+    sprite.sectorId = owner;
+    sprite.cstat = (sprite.cstat & ~8) | (floor ? 0 : 8);
+    m_sprites[id] = sprite;
+    return true;
+}
+
 bool MapDocument::stickSpriteToWall(SpriteId id, QString &error)
 {
     error.clear();
@@ -147,7 +212,7 @@ bool MapDocument::stickSpriteToWall(SpriteId id, QString &error)
             double degrees = std::atan2(normal.y(), normal.x())*180.0/3.14159265358979323846;
             if (degrees < 0) { degrees += 360; }
             updated.angle = (std::lround(degrees*2048.0/360.0) % 2048)*360.0/2048.0;
-            updated.cstat = (updated.cstat & ~48) | 16;
+            updated.setAlignment(1);
             updated.sectorId = owner;
             m_sprites[id] = updated;
             return true;
@@ -301,6 +366,9 @@ bool MapDocument::transformSelection(const TransformSelection &selection, QPoint
         auto &sprite = candidate.m_sprites[id];
         sprite.position = position(sprite.position);
         sprite.angle = angle(sprite.angle);
+        // Reflection reverses the local across-sprite axis; the slope direction
+        // follows the transformed angle and retains its signed inclination.
+        if (mirror && sprite.floorAligned()) sprite.cstat ^= 4;
         if (!inBounds(sprite.position)) return fail("Transform exceeds Build map coordinate range.");
     }
     if (player) {

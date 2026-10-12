@@ -149,6 +149,7 @@ public:
         YVelocity,
         ZVelocity,
         Alignment,
+        SpriteSlope,
     };
 
     [[nodiscard]] const MapDocument &document() const { return m_document; }
@@ -159,6 +160,7 @@ public:
     void setSectorHeight(std::size_t sector, bool floor, qreal height);
     void resetSelectedWallTextureScale();
     void stickSelectedSpriteToWall();
+    void alignSelectedSpritesToSurface(bool floor);
     void moveSelection();
     void rotateSelection();
     void mirrorSelection(bool horizontal);

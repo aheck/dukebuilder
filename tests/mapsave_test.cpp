@@ -42,6 +42,40 @@ int main(int argc, char **argv)
     require(directory.isValid(), "Temporary directory");
     const QString path = directory.filePath("roundtrip.map");
     QString error;
+    // EDuke32 spriteSetSlope encoding: signed slope, low byte in xoffset.
+    // Import a binary fixture through libduke so the test does not depend on
+    // Duke Builder generating the representation that its own loader expects.
+    {
+        const QString fixturePath = directory.filePath("eduke-slopes.map");
+        auto fixture = room();
+        for (int i = 0; i < 7; ++i) {
+            const auto id = fixture.addSprite({i * 32.0, 0});
+            fixture.setSpriteTexture(id, 1);
+        }
+        require(saveBuildMap(fixture, fixturePath, error), error);
+        std::unique_ptr<DukeMapFile, decltype(&duke_map_file_free)> raw(duke_map_file_new(), duke_map_file_free);
+        require(duke_map_file_read_from_filename(raw.get(), QFile::encodeName(fixturePath).constData()), "Read slope fixture");
+        const int slopes[] = {0, 4096, -4096, 32767, -32768, 255, -1};
+        for (int i = 0; i < 7; ++i) {
+            auto &s = *raw->sprites[i];
+            const unsigned bits = static_cast<unsigned>(slopes[i]) & 65535;
+            s.cstat = 48 | 64 | ((i % 4) << 2);
+            s.xoffset = static_cast<int8_t>(bits & 255);
+            s.yoffset = static_cast<int8_t>(bits >> 8);
+            s.ang = i * 256;
+        }
+        require(duke_map_file_write_to_filename(raw.get(), QFile::encodeName(fixturePath).constData()), "Write EDuke32 slope bytes");
+        const auto original = read(fixturePath);
+        MapDocument loaded;
+        require(loaded.openMap(fixturePath, error), error);
+        for (int i = 0; i < 7; ++i) {
+            const auto &s = loaded.sprites()[i];
+            require(s.cstat == raw->sprites[i]->cstat && s.xoffset == raw->sprites[i]->xoffset
+                    && s.yoffset == raw->sprites[i]->yoffset, "Import preserves slope bytes and flags");
+        }
+        require(saveBuildMap(loaded, fixturePath, error), error);
+        require(read(fixturePath) == original, "EDuke32 sloped sprites round trip byte for byte");
+    }
     MapDocument box = room();
     box.setPlayerStartPosition({700,700});
     require(box.addPolyline({{-256,-256}, {256,-256}, {256,256}, {-256,256}}, true), "Draw raised box");
