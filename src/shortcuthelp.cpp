@@ -79,6 +79,8 @@ QString content(bool threeD)
             {"Alt", "Temporarily disable grid and wall snapping while placing or moving points."}
         });
         html += section("Selection and geometry", {
+            {"X / Y during movement", "Move only along map X / Y. Press again to unlock, or the other key to switch. Applies to right-drag and M moves, including sprites, player start, selections, and floating sector pastes. Alt disables snapping but keeps the constraint. A dashed guide shows the axis; each move starts unconstrained."},
+            {"X / Y while drawing or picking a pivot", "Constrain the next freeform segment from its last vertex, or pivot placement from its previous position. Drawing resets the constraint after each placed point. Rotated grids snap at intersections with the map-axis guide."},
             {"Left click / left-drag rectangle", "Select objects in the active selection mode."},
             {"Shift + left click", "Add/remove an object from the selection."},
             {"M, then move pointer", "Move selected vertices, lines, sectors, sprites, or the player start. Left click or Enter confirms; Escape cancels. Alt/Option disables grid snapping."},

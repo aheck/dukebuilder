@@ -426,6 +426,161 @@ int main(int argc, char **argv)
         QApplication::sendEvent(&editor, &event);
     };
     {
+        MapDocument fixture;
+        require(fixture.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}}, true), "Axis fixture");
+        fixture.setPlayerStartPosition({768,768});
+        const auto sprite = fixture.addSprite({256,256});
+        fixture.setSpriteTexture(sprite, 42);
+        for (bool drag : {false, true}) {
+            for (int kind = 0; kind < 5; ++kind) {
+                const auto mode = kind == 0 ? MapEditor::Mode::Vertices : kind == 1 ? MapEditor::Mode::Lines
+                    : kind == 2 ? MapEditor::Mode::Sectors : MapEditor::Mode::Sprites;
+                const QPointF grab = kind == 0 ? QPointF(0,0) : kind == 1 ? QPointF(512,0)
+                    : kind == 2 ? QPointF(512,512) : kind == 3 ? QPointF(256,256) : QPointF(768,768);
+                const auto position = [&]() {
+                    return kind < 3 ? editor.document().vertices()[0].position
+                        : kind == 3 ? editor.document().sprites()[0].position : editor.document().playerStart().position;
+                };
+                editor.recoverDocument(fixture, {});
+                editor.clearEditingScope();
+                editor.setMode(mode);
+                editor.centerOn(512,512);
+                click(grab);
+                const auto original = position();
+                if (drag) {
+                    const auto local = editor.mapFromScene(grab);
+                    QMouseEvent press(QEvent::MouseButtonPress, local, editor.viewport()->mapToGlobal(local),
+                        Qt::RightButton, Qt::RightButton, Qt::NoModifier);
+                    QApplication::sendEvent(editor.viewport(), &press);
+                } else editor.moveSelection();
+                hover(grab);
+                key(Qt::Key_X);
+                hover(grab + QPointF(-256,-256));
+                require(position() == original + QPointF(-256,0), "Axis X fixes Y for every movable object");
+                key(Qt::Key_Y);
+                require(position() == original + QPointF(0,-256), "Switch axis recomputes from original without drift");
+                key(Qt::Key_Y);
+                const auto freeDelta = drag && kind != 0
+                    ? editor.mapToScene(editor.mapFromScene(grab + QPointF(-256,-256)))
+                        - editor.mapToScene(editor.mapFromScene(grab)) : QPointF(-256,-256);
+                require(position() == original + freeDelta, "Repeat axis key restores free movement");
+                key(Qt::Key_X);
+                if (drag) {
+                    const auto local = editor.mapFromScene(grab + QPointF(-256,-256));
+                    QMouseEvent release(QEvent::MouseButtonRelease, local, editor.viewport()->mapToGlobal(local),
+                        Qt::RightButton, Qt::NoButton, Qt::NoModifier);
+                    QApplication::sendEvent(editor.viewport(), &release);
+                } else key(Qt::Key_Return);
+                require(position() == original + QPointF(-256,0) && editor.undoStack()->count() == 1,
+                    "Constrained movement commits one undo transaction");
+                const auto moved = editor.document();
+                editor.undo(); require(editor.document() == fixture, "Undo constrained movement");
+                editor.redo(); require(editor.document() == moved, "Redo constrained movement");
+            }
+        }
+        // Right-drag must reclaim keyboard focus from a property control.
+        // Deliver axis keys to the actual focused widget, unlike the direct
+        // editor events above, and exercise multiple selected lines/vertices.
+        for (auto mode : {MapEditor::Mode::Vertices, MapEditor::Mode::Lines}) {
+            editor.recoverDocument(fixture, {});
+            editor.setMode(mode);
+            editor.centerOn(512,512);
+            const auto grab = mode == MapEditor::Mode::Vertices ? QPointF(0,0) : QPointF(512,0);
+            click(grab);
+            click(mode == MapEditor::Mode::Vertices ? QPointF(1024,0) : QPointF(512,1024), Qt::ShiftModifier);
+            require(editor.scene()->selectedItems().size() == 2, "Select multiple objects for focused right drag");
+            QDoubleSpinBox property(editor.viewport());
+            property.move(0,0); property.show();
+            editor.activateWindow();
+            QApplication::processEvents();
+            property.setFocus();
+            QApplication::processEvents();
+            require(property.hasFocus() || property.isAncestorOf(QApplication::focusWidget()), "Property control initially owns focus");
+            const auto local = editor.mapFromScene(grab);
+            QMouseEvent press(QEvent::MouseButtonPress, local, editor.viewport()->mapToGlobal(local),
+                Qt::RightButton, Qt::RightButton, Qt::NoModifier);
+            QApplication::sendEvent(editor.viewport(), &press);
+            require(editor.hasFocus(), "Right drag transfers keyboard focus to editor");
+            QKeyEvent x(QEvent::KeyPress, Qt::Key_X, Qt::NoModifier);
+            QApplication::sendEvent(QApplication::focusWidget(), &x);
+            hover(grab + QPointF(-256,-256));
+            require(editor.document().vertices()[0].position == QPointF(-256,0)
+                && editor.document().vertices()[1].position == QPointF(768,0),
+                "Focused right-drag X constrains all selected endpoints");
+            QKeyEvent y(QEvent::KeyPress, Qt::Key_Y, Qt::AltModifier);
+            QApplication::sendEvent(QApplication::focusWidget(), &y);
+            hover(grab + QPointF(-128,-128), Qt::AltModifier);
+            require(editor.document().vertices()[0].position.x() == 0
+                && editor.document().vertices()[1].position.x() == 1024,
+                "Switching axis while Alt is held preserves fixed coordinate");
+            QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+            QApplication::sendEvent(QApplication::focusWidget(), &escape);
+            require(editor.document() == fixture && editor.undoStack()->count() == 0,
+                "Escape cancels constrained right-drag of multiple objects");
+        }
+        editor.recoverDocument(fixture, {});
+        editor.setMode(MapEditor::Mode::Vertices);
+        click({0,0}); click({1024,0}, Qt::ShiftModifier);
+        gridScene->setGridAngle(30);
+        editor.moveSelection(); hover({512,0}); key(Qt::Key_X); hover({212,173});
+        const auto delta = editor.document().vertices()[0].position;
+        require(delta.y() == 0 && editor.document().vertices()[1].position == QPointF(1024,0) + delta,
+            "Rotated-grid snapping keeps locked coordinate and selection spacing");
+        const auto grid = gridScene->toGrid(delta);
+        require(std::abs(grid.x() / 256 - std::round(grid.x() / 256)) < 0.00001,
+            "Constrained point lies on rotated grid line");
+        hover({212,173}, Qt::AltModifier);
+        const auto free = editor.mapToScene(editor.mapFromScene({212,173})).x() - 512;
+        require(std::abs(editor.document().vertices()[0].position.x() - free) < 0.00001
+            && editor.document().vertices()[0].position.y() == 0, "Alt disables snapping without unlocking axis");
+        key(Qt::Key_Escape);
+        require(editor.document() == fixture && editor.undoStack()->count() == 0, "Cancel constrained movement restores originals");
+        gridScene->setGridAngle(0);
+        editor.moveSelection(); hover({512,0}); hover({256,-256}); key(Qt::Key_Return);
+        require(editor.document().vertices()[0].position == QPointF(-256,-256), "Next move starts unconstrained");
+
+        // Pivot preview and acceptance share the same constrained coordinate.
+        for (bool mirror : {false, true}) {
+            editor.recoverDocument(fixture, {}); editor.setMode(MapEditor::Mode::Sectors); click({512,512});
+            if (mirror) editor.mirrorSelection(true); else editor.rotateSelection();
+            for (auto *button : editor.findChildren<QPushButton *>())
+                if (button->isVisible() && button->text() == "Pick pivot in map") button->click();
+            hover({512,512}); key(Qt::Key_X); hover({256,768});
+            QDoubleSpinBox *x = nullptr, *y = nullptr;
+            for (auto *box : editor.findChildren<QDoubleSpinBox *>("transformPivotX")) if (box->isVisible()) x = box;
+            for (auto *box : editor.findChildren<QDoubleSpinBox *>("transformPivotY")) if (box->isVisible()) y = box;
+            require(x && y && x->value() == 256 && y->value() == 512, "Constrained pivot previews along selection-center axis");
+            key(Qt::Key_Y);
+            require(x->value() == 512 && y->value() == 768, "Pivot axis switching uses original pivot");
+            click({256,768});
+            require(x->value() == 512 && y->value() == 768, "Pivot click accepts constrained preview");
+            key(Qt::Key_Escape);
+            require(editor.document() == fixture, "Pivot cancellation leaves geometry unchanged");
+        }
+        editor.recoverDocument(fixture, {}); editor.setMode(MapEditor::Mode::Sectors); click({512,512});
+        for (int code : {Qt::Key_C, Qt::Key_V}) {
+            QKeyEvent event(QEvent::KeyPress, code, Qt::ControlModifier);
+            QApplication::sendEvent(&editor, &event);
+        }
+        require(editor.hasFloatingPaste(), "Axis floating paste exists");
+        const auto pasteOrigin = editor.scene()->selectedItems().front()->pos();
+        editor.moveSelection(); hover({512,512}); key(Qt::Key_X); hover({2048,1024});
+        require(editor.scene()->selectedItems().front()->pos().y() == pasteOrigin.y(), "Floating paste movement fixes Y");
+        key(Qt::Key_Y);
+        require(editor.scene()->selectedItems().front()->pos().x() == pasteOrigin.x(), "Floating paste axis switch restores X");
+        key(Qt::Key_Escape);
+        require(!editor.hasFloatingPaste() && editor.document() == fixture, "Cancel constrained paste is atomic");
+        editor.newMap(); editor.setDrawTool(MapEditor::DrawTool::Freeform); editor.centerOn(512,512);
+        click({0,0}); key(Qt::Key_X); hover({512,256}); click({512,256});
+        require(editor.drawingPoints().back() == QPointF(512,0), "Draw segment constrained to X");
+        key(Qt::Key_Y); click({768,512});
+        require(editor.drawingPoints().back() == QPointF(512,512), "Next segment uses its own origin");
+        click({768,768});
+        require(editor.drawingPoints().back() == QPointF(768,768), "Drawing resets constraint after each point");
+        key(Qt::Key_Escape);
+        require(editor.drawingPoints().empty() && editor.document().sectors().empty(), "Cancel constrained drawing");
+    }
+    {
         MapDocument original;
         require(original.addPolyline({{0,0},{1024,0},{1024,512},{0,512}}, true), "Transform UI source");
         original.setPlayerStartPosition({256,256});

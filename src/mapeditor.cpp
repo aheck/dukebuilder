@@ -712,6 +712,7 @@ void MapEditor::endEdit()
 
 void MapEditor::finishPendingEdit()
 {
+    if (m_mouseEdit) clearAxisConstraint();
     finishTransform(true);
     m_addingSprite = false;
     if (m_keyboardMove) { finishKeyboardMove(true); return; }
@@ -2013,9 +2014,85 @@ bool MapEditor::resolveAmbiguousPick(const QPoint &position)
     return true;
 }
 
+std::optional<QPointF> MapEditor::axisOrigin() const
+{
+    if (m_transformGesture && m_transformGesture->pickingPivot) return m_axisPivotOrigin;
+    if (m_floatingPaste && (m_floatingPaste->following || m_floatingPaste->dragging))
+        return m_floatingPaste->anchor + m_floatingPaste->dragOffset;
+    if (m_draggingVertices || m_draggingSprites || m_keyboardMove) return m_vertexDragAnchor;
+    if (m_mode == Mode::Draw && m_drawTool == DrawTool::Freeform && !m_drawingPoints.empty())
+        return m_drawingPoints.back();
+    return std::nullopt;
+}
+
+QPointF MapEditor::constrainPoint(QPointF point, QPointF origin, bool snap) const
+{
+    if (m_axisConstraint == AxisConstraint::None) return snap ? m_scene->snapToGrid(point) : point;
+    const QPointF direction = m_axisConstraint == AxisConstraint::X ? QPointF(1,0) : QPointF(0,1);
+    qreal distance = QPointF::dotProduct(point - origin, direction);
+    if (snap) {
+        // Intersect the map-axis guide with the nearest grid line. Choosing
+        // the dominant grid component remains stable even on a rotated grid.
+        const auto gridOrigin = m_scene->toGrid(origin);
+        const auto gridDirection = m_scene->toGrid(direction);
+        const bool x = std::abs(gridDirection.x()) >= std::abs(gridDirection.y());
+        const qreal base = x ? gridOrigin.x() : gridOrigin.y();
+        const qreal scale = x ? gridDirection.x() : gridDirection.y();
+        const qreal spacing = m_scene->gridSize();
+        distance = (std::round((base + distance * scale) / spacing) * spacing - base) / scale;
+    }
+    return origin + direction * distance;
+}
+
+void MapEditor::clearAxisConstraint()
+{
+    const bool wasConstrained = m_axisConstraint != AxisConstraint::None;
+    m_axisConstraint = AxisConstraint::None;
+    if (wasConstrained) reportStatus("Axis constraint off.");
+    viewport()->update();
+}
+
 QPointF MapEditor::snappedPosition(const QPoint &viewportPosition, bool disableSnapping) const
 {
     const QPointF scenePosition = mapToScene(viewportPosition);
+    if (m_axisConstraint != AxisConstraint::None) {
+        if (const auto origin = axisOrigin()) {
+            if (!disableSnapping) {
+                // Only snap to vertices actually on the guide; never move the
+                // locked coordinate to reach a nearby off-axis vertex.
+                const auto projected = constrainPoint(scenePosition, *origin, false);
+                const qreal tolerance = snapRadiusPixels / std::max(std::abs(transform().m11()), 0.0001);
+                QPointF nearest;
+                qreal distance = tolerance;
+                bool found = false;
+                const auto consider = [&](QPointF p) {
+                    if (QLineF(p, constrainPoint(p, *origin, false)).length() > 0.00001) return;
+                    const auto d = QLineF(p, projected).length();
+                    if (d <= distance) { nearest = p; distance = d; found = true; }
+                };
+                for (std::size_t id = 0; id < m_document.vertices().size(); ++id)
+                    if (vertexEditable(id)) consider(m_document.vertices()[id].position);
+                for (const auto &point : m_drawingPoints) consider(point);
+                // An axis-constrained drawing segment can still meet a wall
+                // exactly, including a diagonal wall between grid crossings.
+                if (m_mode == Mode::Draw && !found) {
+                    for (std::size_t id = 0; id < m_document.walls().size(); ++id) {
+                        if (!wallEditable(id)) continue;
+                        const auto &wall = m_document.walls()[id];
+                        const auto a = m_document.vertices()[wall.start].position;
+                        const auto d = m_document.vertices()[wall.end].position - a;
+                        const bool alongX = m_axisConstraint == AxisConstraint::X;
+                        const auto extent = alongX ? d.y() : d.x();
+                        if (std::abs(extent) < 0.00001) continue;
+                        const auto t = ((alongX ? origin->y() : origin->x()) - (alongX ? a.y() : a.x())) / extent;
+                        if (t >= 0 && t <= 1) consider(a + t * d);
+                    }
+                }
+                if (found) return nearest;
+            }
+            return constrainPoint(scenePosition, *origin, !disableSnapping);
+        }
+    }
     if (disableSnapping) {
         return scenePosition;
     }
@@ -2135,6 +2212,7 @@ void MapEditor::updateFloatingPaste()
 
 void MapEditor::cancelFloatingPaste()
 {
+    clearAxisConstraint();
     finishTransform(true);
     m_floatingPaste.reset();
     auto *item = m_floatingPasteItem;
@@ -2272,6 +2350,9 @@ void MapEditor::startTransform(bool mirror, bool horizontal)
     connect(m_transformGesture->pivotY, &QDoubleSpinBox::valueChanged, dialog, pivotChanged);
     connect(pick, &QPushButton::clicked, dialog, [this] {
         if (!m_transformGesture) return;
+        clearAxisConstraint();
+        m_axisPivotOrigin = m_transformGesture->pivot;
+        m_axisPointer = mapFromScene(m_axisPivotOrigin);
         m_transformGesture->pickingPivot = true;
         m_transformGesture->message->setText("Click the new pivot in the map.");
         setFocus();
@@ -2293,6 +2374,11 @@ void MapEditor::updateTransformPreview()
     const auto offset = g.floating && m_floatingPaste ? m_floatingPaste->offset : QPointF{};
     g.valid = candidate.transformSelection(g.targets, g.pivot - offset, g.angle, g.mirror, error);
     if (g.valid) g.preview = std::move(candidate);
+    if (g.pickingPivot) {
+        g.message->setText("Click the pivot; X / Y restrict movement along map axes; Alt disables snapping.");
+        viewport()->update();
+        return;
+    }
     g.message->setText(g.valid
         ? (g.mirror ? "Click or Enter to apply; Escape to cancel. The axis passes through the pivot."
                     : "Click or Enter to apply; Escape to cancel. Rotation snaps to 15°; Alt allows free rotation.")
@@ -2305,6 +2391,7 @@ void MapEditor::finishTransform(bool cancel)
 {
     if (!m_transformGesture) return;
     if (!cancel && !m_transformGesture->valid) { reportStatus(m_transformGesture->message->text()); return; }
+    clearAxisConstraint();
     auto gesture = std::move(*m_transformGesture);
     m_transformGesture.reset();
     gesture.dialog->close();
@@ -2326,6 +2413,18 @@ void MapEditor::finishTransform(bool cancel)
 void MapEditor::drawForeground(QPainter *painter, const QRectF &rect)
 {
     QGraphicsView::drawForeground(painter, rect);
+    if (m_axisConstraint != AxisConstraint::None) {
+        if (const auto origin = axisOrigin()) {
+            painter->save();
+            auto pen = cosmeticPen(QColor(255, 190, 60), 1);
+            pen.setStyle(Qt::DashLine);
+            painter->setPen(pen);
+            if (m_axisConstraint == AxisConstraint::X)
+                painter->drawLine(QPointF(rect.left(), origin->y()), QPointF(rect.right(), origin->y()));
+            else painter->drawLine(QPointF(origin->x(), rect.top()), QPointF(origin->x(), rect.bottom()));
+            painter->restore();
+        }
+    }
     if (!m_transformGesture) return;
     const auto &g = *m_transformGesture;
     painter->save();
@@ -2359,11 +2458,13 @@ void MapEditor::drawForeground(QPainter *painter, const QRectF &rect)
 
 void MapEditor::moveSelection()
 {
+    clearAxisConstraint();
     finishTransform(true);
     if (m_floatingPaste) {
         m_floatingPaste->following = true;
         const auto pointer = viewport()->mapFromGlobal(QCursor::pos());
-        m_floatingPaste->dragStart = mapToScene(viewport()->rect().contains(pointer) ? pointer : viewport()->rect().center());
+        m_axisPointer = viewport()->rect().contains(pointer) ? pointer : viewport()->rect().center();
+        m_floatingPaste->dragStart = mapToScene(m_axisPointer);
         m_floatingPaste->dragOffset = m_floatingPaste->offset;
         setCursor(Qt::SizeAllCursor);
         setFocus(Qt::OtherFocusReason);
@@ -2414,6 +2515,7 @@ void MapEditor::moveSelection()
     m_spriteDragMoved = true; // Keyboard movement never opens the texture picker.
     const QPoint pointer = viewport()->mapFromGlobal(QCursor::pos());
     m_moveAwaitingPointer = !viewport()->rect().contains(pointer);
+    m_axisPointer = pointer;
     m_vertexDragStart = m_moveAwaitingPointer ? QPointF{} : mapToScene(pointer);
     // A stable anchor keeps the whole selection together when snapping.
     if (m_draggingVertices) {
@@ -2450,12 +2552,13 @@ void MapEditor::moveSelection()
                 viewportPosition = mapFromScene(center);
             }
             QCursor::setPos(viewport()->mapToGlobal(viewportPosition));
+            m_axisPointer = viewportPosition;
             m_vertexDragStart = center;
             m_moveAwaitingPointer = false;
         }
     }
     setCursor(Qt::SizeAllCursor);
-    reportStatus("Move: left-click or Enter to confirm; Escape to cancel; Alt/Option disables snapping.");
+    reportStatus("Move: X / Y constrains an axis; left-click or Enter confirms; Escape cancels; Alt disables snapping.");
 }
 
 void MapEditor::finishKeyboardMove(bool cancel)
@@ -2546,6 +2649,10 @@ void MapEditor::createSpriteAt(const QPoint &pointer, bool disableSnapping, bool
 
 void MapEditor::mousePressEvent(QMouseEvent *event)
 {
+    m_axisPointer = event->position().toPoint();
+    // Custom right-drag handlers return before QGraphicsView can take focus.
+    // Keep axis keys in the editor even after editing a property control.
+    if (event->button() == Qt::RightButton) setFocus(Qt::MouseFocusReason);
     if (m_transformGesture && event->button() == Qt::LeftButton && !m_spaceHeld) {
         auto &gesture = *m_transformGesture;
         if (gesture.pickingPivot) {
@@ -2554,6 +2661,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
             { const QSignalBlocker x(gesture.pivotX), y(gesture.pivotY);
               gesture.pivotX->setValue(pivot.x()); gesture.pivotY->setValue(pivot.y()); }
             gesture.pickingPivot = false;
+            clearAxisConstraint();
             gesture.pointerAngle.reset();
             updateTransformPreview();
         } else finishTransform(false);
@@ -2568,6 +2676,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
         if (m_floatingPaste->following && event->button() == Qt::LeftButton) {
             mouseMoveEvent(event);
             m_floatingPaste->following = false;
+            clearAxisConstraint();
             setCursor(Qt::CrossCursor);
             m_consumeLeftRelease = true;
             event->accept();
@@ -2583,6 +2692,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
                 return;
             }
             if (event->button() == Qt::RightButton) {
+                clearAxisConstraint();
                 m_floatingPaste->dragging = true;
                 m_floatingPaste->dragStart = position;
                 m_floatingPaste->dragOffset = m_floatingPaste->offset;
@@ -2682,6 +2792,8 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
         m_spriteDragMoved = false;
         m_spriteRightPressPosition = event->position().toPoint();
         m_vertexDragStart = mapToScene(m_spriteRightPressPosition);
+        m_vertexDragAnchor = sprite ? m_document.sprites()[sprite->data(spriteIdRole).toULongLong()].position
+                                    : m_document.playerStart().position;
         m_clickedPlayerStart = playerStart != nullptr;
         if (sprite) {
             m_clickedSprite = static_cast<MapDocument::SpriteId>(
@@ -2760,6 +2872,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
                     }
                 }
             }
+            m_vertexDragAnchor = m_draggedVertices.front().second;
             setCursor(Qt::ClosedHandCursor);
             event->accept();
             return;
@@ -2795,6 +2908,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
                     }
                 }
             }
+            m_vertexDragAnchor = m_draggedVertices.front().second;
             setCursor(Qt::ClosedHandCursor);
             event->accept();
             return;
@@ -2917,6 +3031,7 @@ void MapEditor::mousePressEvent(QMouseEvent *event)
         const auto point = snappedPosition(event->position().toPoint(), disableSnapping);
         if (m_drawTool == DrawTool::Freeform) {
             addDrawingPoint(point);
+            clearAxisConstraint();
         } else {
             m_shapeSquare = event->modifiers().testFlag(Qt::ShiftModifier);
             if (m_drawingPoints.empty()) {
@@ -2949,6 +3064,7 @@ void MapEditor::clearSplitPreview()
 void MapEditor::updateSplitPreview(const QPoint &position, bool disableSnapping)
 {
     clearSplitPreview();
+    if (m_axisConstraint != AxisConstraint::None) return;
     if (m_mode != Mode::Vertices && m_mode != Mode::Draw) return;
     const QPointF cursor = mapToScene(position);
     const qreal tolerance = snapRadiusPixels / std::abs(transform().m11());
@@ -3051,9 +3167,16 @@ void MapEditor::leaveEvent(QEvent *event)
 
 void MapEditor::mouseMoveEvent(QMouseEvent *event)
 {
+    m_axisPointer = event->position().toPoint();
     if (m_transformGesture && !m_panning) {
         auto &gesture = *m_transformGesture;
-        if (!gesture.mirror && !gesture.pickingPivot) {
+        if (gesture.pickingPivot) {
+            const auto pivot = snappedPosition(event->position().toPoint(), event->modifiers().testFlag(Qt::AltModifier));
+            gesture.pivot = pivot;
+            const QSignalBlocker x(gesture.pivotX), y(gesture.pivotY);
+            gesture.pivotX->setValue(pivot.x()); gesture.pivotY->setValue(pivot.y());
+            updateTransformPreview();
+        } else if (!gesture.mirror) {
             const auto delta = mapToScene(event->position().toPoint()) - gesture.pivot;
             if (QLineF({}, delta).length() > 1) {
                 const auto angle = std::atan2(delta.y(), delta.x()) * 180 / std::acos(-1.0);
@@ -3072,8 +3195,9 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
 
     if (m_floatingPaste && !m_panning && (m_floatingPaste->dragging || m_floatingPaste->following)) {
         auto offset = m_floatingPaste->dragOffset + mapToScene(event->position().toPoint()) - m_floatingPaste->dragStart;
-        if (!event->modifiers().testFlag(Qt::AltModifier))
-            offset = m_scene->snapToGrid(m_floatingPaste->anchor + offset) - m_floatingPaste->anchor;
+        offset = constrainPoint(m_floatingPaste->anchor + offset,
+            m_floatingPaste->anchor + m_floatingPaste->dragOffset,
+            !event->modifiers().testFlag(Qt::AltModifier)) - m_floatingPaste->anchor;
         m_floatingPaste->offset = offset;
         updateFloatingPaste();
         event->accept();
@@ -3099,8 +3223,9 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
         m_spriteDragMoved = true;
         setCursor(Qt::ClosedHandCursor);
         QPointF delta = mapToScene(event->position().toPoint()) - m_vertexDragStart;
-        if (m_keyboardMove && !event->modifiers().testFlag(Qt::AltModifier))
-            delta = m_scene->snapToGrid(m_vertexDragAnchor + delta) - m_vertexDragAnchor;
+        delta = constrainPoint(m_vertexDragAnchor + delta, m_vertexDragAnchor,
+            (m_keyboardMove || m_axisConstraint != AxisConstraint::None)
+                && !event->modifiers().testFlag(Qt::AltModifier)) - m_vertexDragAnchor;
         qreal minimumX = std::numeric_limits<qreal>::max();
         qreal maximumX = std::numeric_limits<qreal>::lowest();
         qreal minimumY = std::numeric_limits<qreal>::max();
@@ -3156,11 +3281,9 @@ void MapEditor::mouseMoveEvent(QMouseEvent *event)
 
     if (m_draggingVertices) {
         QPointF delta = mapToScene(event->position().toPoint()) - m_vertexDragStart;
-        if ((m_mode == Mode::Vertices || m_keyboardMove) && !event->modifiers().testFlag(Qt::AltModifier)) {
-            // Snap the grabbed vertex, preserving the click offset and the
-            // relative positions of all other vertices in the selection.
-            delta = m_scene->snapToGrid(m_vertexDragAnchor + delta) - m_vertexDragAnchor;
-        }
+        delta = constrainPoint(m_vertexDragAnchor + delta, m_vertexDragAnchor,
+            (m_mode == Mode::Vertices || m_keyboardMove || m_axisConstraint != AxisConstraint::None)
+                && !event->modifiers().testFlag(Qt::AltModifier)) - m_vertexDragAnchor;
         qreal minimumX = std::numeric_limits<qreal>::max();
         qreal maximumX = std::numeric_limits<qreal>::lowest();
         qreal minimumY = std::numeric_limits<qreal>::max();
@@ -3260,6 +3383,7 @@ void MapEditor::mouseReleaseEvent(QMouseEvent *event)
 {
     if (m_floatingPaste && event->button() == Qt::RightButton) {
         m_floatingPaste->dragging = false;
+        clearAxisConstraint();
         setCursor(Qt::CrossCursor);
         event->accept();
         return;
@@ -3430,6 +3554,32 @@ void MapEditor::chooseSpriteTexture(MapDocument::SpriteId spriteId)
 
 void MapEditor::keyPressEvent(QKeyEvent *event)
 {
+    if (axisOrigin() && !(event->modifiers() & (Qt::ControlModifier | Qt::MetaModifier))
+        && (event->key() == Qt::Key_X || event->key() == Qt::Key_Y)) {
+        if (!event->isAutoRepeat()) {
+            const auto axis = event->key() == Qt::Key_X ? AxisConstraint::X : AxisConstraint::Y;
+            m_axisConstraint = m_axisConstraint == axis ? AxisConstraint::None : axis;
+            clearSplitPreview();
+            QMouseEvent move(QEvent::MouseMove, QPointF(m_axisPointer),
+                QPointF(viewport()->mapToGlobal(m_axisPointer)), Qt::NoButton,
+                QApplication::mouseButtons(), event->modifiers());
+            mouseMoveEvent(&move);
+            reportStatus(m_axisConstraint == AxisConstraint::None ? "Axis constraint off. X / Y to constrain movement."
+                : m_axisConstraint == AxisConstraint::X ? "Move along map X (Y fixed). X to unlock; Y to switch; Alt disables snapping."
+                : "Move along map Y (X fixed). Y to unlock; X to switch; Alt disables snapping.");
+            viewport()->update();
+        }
+        event->accept();
+        return;
+    }
+    if (m_mouseEdit && !m_keyboardMove && (m_draggingVertices || m_draggingSprites)
+        && event->key() == Qt::Key_Escape) {
+        if (m_beforeEdit) { const auto before = *m_beforeEdit; restore(before); }
+        finishPendingEdit();
+        setCursor(Qt::CrossCursor);
+        event->accept();
+        return;
+    }
     if (m_transformGesture) {
         if (event->key() == Qt::Key_Space) m_spaceHeld = true;
         else if (event->key() == Qt::Key_Escape) finishTransform(true);
@@ -3448,6 +3598,7 @@ void MapEditor::keyPressEvent(QKeyEvent *event)
         if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
             m_floatingPaste->following = false;
             m_floatingPaste->dragging = false;
+            clearAxisConstraint();
             setCursor(Qt::CrossCursor);
             event->accept();
             return;
@@ -3679,6 +3830,7 @@ void MapEditor::focusOutEvent(QFocusEvent *event)
 {
     if (m_floatingPaste) {
         m_floatingPaste->dragging = m_floatingPaste->following = false;
+        clearAxisConstraint();
         setCursor(Qt::CrossCursor);
     }
     finishKeyboardMove(true);
@@ -3799,6 +3951,7 @@ bool MapEditor::commitDrawing(const std::vector<QPointF> &points, bool close, bo
         reportStatus(error.isEmpty() ? "Cannot create this shape" : error);
         return false;
     }
+    clearAxisConstraint();
     m_drawingPoints.clear();
     rebuildScene();
     reportStatus(sectorCreated ? "Sector created" : error.isEmpty() ? "Drawing discarded" : error);
@@ -3807,6 +3960,7 @@ bool MapEditor::commitDrawing(const std::vector<QPointF> &points, bool close, bo
 
 void MapEditor::cancelDrawing()
 {
+    clearAxisConstraint();
     finishTransform(true);
     m_drawingPoints.clear();
     if (m_previewItem) {
@@ -4063,6 +4217,8 @@ void MapEditor::updateProperties() const
 void MapEditor::reportStatus(const QString &message) const
 {
     if (m_statusCallback) {
-        m_statusCallback(message);
+        const auto suffix = m_axisConstraint == AxisConstraint::None || !axisOrigin() ? QString{}
+            : m_axisConstraint == AxisConstraint::X ? QString(" · X only (Y fixed)") : QString(" · Y only (X fixed)");
+        m_statusCallback(message + suffix);
     }
 }

@@ -306,6 +306,13 @@ private:
     bool m_moveAwaitingPointer = false;
     bool m_addingSprite = false;
     bool m_consumeLeftRelease = false;
+    enum class AxisConstraint { None, X, Y };
+    AxisConstraint m_axisConstraint = AxisConstraint::None;
+    QPoint m_axisPointer;
+    QPointF m_axisPivotOrigin;
+    std::optional<QPointF> axisOrigin() const;
+    QPointF constrainPoint(QPointF point, QPointF origin, bool snap) const;
+    void clearAxisConstraint();
     QPointF snappedPosition(const QPoint &viewportPosition, bool disableSnapping) const;
     void addDrawingPoint(const QPointF &position);
     bool finishDrawing(bool close, bool discardOnFailure = true);
