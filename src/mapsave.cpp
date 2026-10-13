@@ -86,7 +86,7 @@ static bool buildMap(const MapDocument &document, QString &error,
         if (issue) { issue->target = kind; issue->id = id; issue->reversed = reversed; }
     };
     try {
-        require(document.validateTror(error), error);
+        require(document.validateTror(error, validation == BuildMapValidation::Strict), error);
         const auto &sectors = document.sectors();
         require(!sectors.empty(), "The map has no closed sectors.");
         require(sectors.size() <= MAPV8_MAXSECTORS, "Version 8 supports at most 4096 sectors.");

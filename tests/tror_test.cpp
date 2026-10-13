@@ -79,6 +79,33 @@ int main(int argc, char **argv)
         require(original.pasteSectors(fragment, {8192,0}, error), error);
         roundTrip(original, path, 9);
     }
+    {
+        auto inverted = room();
+        require(inverted.extendTror(0, true, 8192, error) == 1, error);
+        auto sector = inverted.sectors()[0];
+        sector.ceilingz = sector.floorz + 1024;
+        inverted.setSector(0, sector);
+        const auto original = inverted;
+        require(!inverted.validateTror(error), "Editing rejects inverted TROR rooms");
+        require(!withBuildMap(inverted, error, [](DukeMapFile &, QString &) { return true; }),
+                "Strict export rejects inverted TROR rooms");
+        require(withBuildMap(inverted, error, [](DukeMapFile &map, QString &) {
+            return map.sectors[0]->ceilingz > map.sectors[0]->floorz;
+        }, BuildMapValidation::Preview), error);
+        require(inverted == original, "Preview preserves imported room heights");
+        inverted.setSectorFloorTexture(0, 1);
+        require(inverted.validateTopologyChange(original, error),
+                "Texture edits preserve unchanged imported inverted rooms: " + error);
+        sector.ceilingz += 1024;
+        inverted.setSector(0, sector);
+        require(!inverted.validateTopologyChange(original, error),
+                "Height edits cannot retain an inverted TROR room");
+        sector.floorBunch = 255;
+        inverted.setSector(0, sector);
+        require(!withBuildMap(inverted, error, [](DukeMapFile &, QString &) { return true; },
+                             BuildMapValidation::Preview),
+                "Preview still rejects broken TROR connections");
+    }
     // Reproduce the beginner tutorial: two visible rooms, three sectors.
     MapDocument tutorial;
     require(tutorial.addPolyline({{-2048,-2048},{2048,-2048},{2048,2048},{-2048,2048}},true), "Tutorial upper room");

@@ -417,7 +417,7 @@ bool MapDocument::transformSelection(const TransformSelection &selection, QPoint
 
 bool MapDocument::validateTopologyChange(const MapDocument &before, QString &error) const
 {
-    if (!validateTror(error)) { return false; }
+    if (!validateTror(error, true, &before)) { return false; }
     const auto fail = [&](const QString &why) { error = why; return false; };
     for (SectorId s = 0; s < m_sectors.size(); ++s) {
         const auto &sector = m_sectors[s];
@@ -2300,7 +2300,7 @@ bool MapDocument::hasTror() const
     return false;
 }
 
-bool MapDocument::validateTror(QString &error) const
+bool MapDocument::validateTror(QString &error, bool checkRoomHeights, const MapDocument *before) const
 {
     error.clear();
     if (!hasTror()) { return true; }
@@ -2330,10 +2330,24 @@ bool MapDocument::validateTror(QString &error) const
             ++members[*bunch][floor ? 1 : 0];
         }
         if (s.floorBunch || s.ceilingBunch) {
+            const bool unchangedRoom = before && id < before->sectors().size() && [&] {
+                const auto &old = before->sectors()[id];
+                if (s.vertices != old.vertices || s.loopStarts != old.loopStarts
+                    || s.floorBunch != old.floorBunch || s.ceilingBunch != old.ceilingBunch
+                    || s.floorz != old.floorz || s.ceilingz != old.ceilingz
+                    || s.floorheinum != old.floorheinum || s.ceilingheinum != old.ceilingheinum
+                    || ((s.floorstat ^ old.floorstat) & 2)
+                    || ((s.ceilingstat ^ old.ceilingstat) & 2)) { return false; }
+                for (auto v : s.vertices) {
+                    if (v >= before->vertices().size()
+                        || m_vertices[v].position != before->vertices()[v].position) { return false; }
+                }
+                return true;
+            }();
             for (auto v : s.vertices) {
                 const auto p = m_vertices[v].position;
                 const double ceiling = trorPlane(*this,id,false).at(p), floor = trorPlane(*this,id,true).at(p);
-                if (!std::isfinite(ceiling) || !std::isfinite(floor) || ceiling > floor) {
+                if (!std::isfinite(ceiling) || !std::isfinite(floor) || (checkRoomHeights && !unchangedRoom && ceiling > floor)) {
                     return fail("A TROR edit would invert a room's floor and ceiling.");
                 }
             }

@@ -23,8 +23,9 @@ bool saveBuildMap(const MapDocument &document, const QString &filename, QString 
 
 #include <functional>
 #include <libduke/map.h>
-// Preview retains reference/range checks but permits intersecting effect geometry
-// and uses existing sector membership. Save and Check Map always remain strict.
+// Preview retains reference/range and TROR connection checks but permits
+// intersecting effect geometry and inverted rooms, using existing sector
+// membership. Save and Check Map always remain strict.
 enum class BuildMapValidation { Strict, Preview };
 // Supply a validated, borrowed in-memory snapshot for the duration of consume.
 // The consumer must not retain map pointers; it can report failures via error.

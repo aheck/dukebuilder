@@ -152,7 +152,11 @@ public:
     // Validate changed boundaries without rejecting unchanged imported effect loops.
     bool validateTopologyChange(const MapDocument &before, QString &error) const;
     [[nodiscard]] bool hasTror() const;
-    bool validateTror(QString &error) const;
+    // Preview can retain imported inverted rooms; editing/export check their heights.
+    // A prior snapshot permits unchanged imported inversions during unrelated edits.
+    // Connection structure and finite surface heights are always validated.
+    bool validateTror(QString &error, bool checkRoomHeights = true,
+                      const MapDocument *before = nullptr) const;
     [[nodiscard]] std::set<SectorId> layerSectors(SectorId seed) const;
     [[nodiscard]] std::set<SectorId> verticalNeighbors(SectorId sector, bool floor) const;
     std::optional<SectorId> extendTror(SectorId sector, bool floor, qreal depth, QString &error);
