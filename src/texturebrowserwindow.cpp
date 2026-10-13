@@ -52,15 +52,12 @@ std::optional<TextureBrowserWindow::Selection> TextureBrowserWindow::chooseTextu
 
 const std::set<int> &TextureBrowserWindow::paletteNumbers() const
 {
+    m_browser->reloadIfArchivesChanged();
     return m_browser->paletteNumbers();
 }
 
 QImage TextureBrowserWindow::textureImage(int tile, int palette)
 {
-    QImage image = m_browser->textureImage(tile, palette);
-    if (image.isNull()) {
-        m_browser->reload();
-        image = m_browser->textureImage(tile, palette);
-    }
-    return image;
+    m_browser->reloadIfArchivesChanged();
+    return m_browser->textureImage(tile, palette);
 }

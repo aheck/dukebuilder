@@ -4,6 +4,7 @@
 #include <QMap>
 #include <QWidget>
 #include <QByteArray>
+#include <QStringList>
 
 #include <optional>
 #include <functional>
@@ -21,6 +22,9 @@ public:
     ~TextureBrowserWidget() override;
 
     void reload();
+    // Refresh cached images when the configured archive list changes. Missing
+    // tiles/palettes do not imply stale data; Reload handles in-place changes.
+    void reloadIfArchivesChanged();
     [[nodiscard]] std::optional<int> selectedTile() const;
     [[nodiscard]] QImage textureImage(int tile, int palette = 0) const;
     [[nodiscard]] const std::set<int> &paletteNumbers() const { return m_paletteNumbers; }
@@ -47,4 +51,5 @@ private:
     std::set<int> m_usedTiles;
     std::set<int> m_paletteNumbers{0};
     QString m_loadStatus;
+    QStringList m_loadedGrpPaths;
 };

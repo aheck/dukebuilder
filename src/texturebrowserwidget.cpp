@@ -143,6 +143,13 @@ TextureBrowserWidget::~TextureBrowserWidget()
     duke_palette_lookup_free(m_lookup);
 }
 
+void TextureBrowserWidget::reloadIfArchivesChanged()
+{
+    if (QSettings().value(grpFilesSettingsKey).toStringList() != m_loadedGrpPaths) {
+        reload();
+    }
+}
+
 void TextureBrowserWidget::reload()
 {
     m_textureList->clear();
@@ -151,6 +158,7 @@ void TextureBrowserWidget::reload()
     m_paletteNumbers = {0};
     m_loadStatus.clear();
     const QStringList grpPaths = QSettings().value(grpFilesSettingsKey).toStringList();
+    m_loadedGrpPaths = grpPaths;
     if (grpPaths.isEmpty()) {
         m_statusLabel->setText("No GRP files configured in Settings → Game Data.");
         return;
