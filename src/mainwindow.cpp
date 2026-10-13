@@ -1124,6 +1124,18 @@ MainWindow::MainWindow(QWidget *parent)
 
     fileMenu->addSeparator();
 
+    auto *referenceAction = fileMenu->addAction("Reference Image…");
+    referenceAction->setObjectName("referenceImageAction");
+    connect(referenceAction, &QAction::triggered, editor, &MapEditor::showReferenceImageControls);
+    connect(views, &QStackedWidget::currentChanged, editor, [=] {
+        referenceAction->setEnabled(views->currentWidget() == editor);
+    });
+    editor->referenceImageWarning = [this](const QString &error) {
+        QMessageBox::warning(this, "Reference image", error);
+    };
+
+    fileMenu->addSeparator();
+
     auto *quitAction = fileMenu->addAction("&Quit");
     quitAction->setShortcut(QKeySequence::Quit);
     connect(quitAction, &QAction::triggered, this, &QWidget::close);
@@ -1419,15 +1431,6 @@ MainWindow::MainWindow(QWidget *parent)
     updatePlacementActions();
 
     auto *toolsMenu = menuBar()->addMenu("&Tools");
-    auto *referenceAction = toolsMenu->addAction("Reference Image…");
-    referenceAction->setObjectName("referenceImageAction");
-    connect(referenceAction, &QAction::triggered, editor, &MapEditor::showReferenceImageControls);
-    connect(views, &QStackedWidget::currentChanged, editor, [=] {
-        referenceAction->setEnabled(views->currentWidget() == editor);
-    });
-    editor->referenceImageWarning = [this](const QString &error) {
-        QMessageBox::warning(this, "Reference image", error);
-    };
     auto *isolateAction = toolsMenu->addAction("Toggle sector isolation");
     isolateAction->setShortcut(QKeySequence(Qt::Key_I));
     isolateAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);

@@ -67,7 +67,7 @@ QString content(bool threeD)
             {"F12", "Reset the grid orientation."}
         });
         html += section("Reference image", {
-            {"Tools → Reference Image", "Load a PNG or JPEG as a tracing guide beneath the grid and map. Adjust position, dimensions, rotation, and opacity. Reference edits support Undo/Redo."},
+            {"File → Reference Image", "Load a PNG or JPEG as a tracing guide beneath the grid and map. Adjust position, dimensions, rotation, and opacity. Reference edits support Undo/Redo."},
             {"Unlock image", "Drag inside the image to move it; drag a corner to resize. Aspect ratio is preserved by default. Alt disables move snapping; Escape cancels. Lock the image again to draw and select geometry over it."},
             {"Calibrate scale", "Click two points on the image and enter their distance in map units. The first point stays in place."},
             {"Save", "Placement is saved in a .map.dukebuilder.json file beside the map. Keep this file and the source image with the map; the Build map itself contains no image data."}
