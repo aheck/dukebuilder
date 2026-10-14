@@ -169,7 +169,6 @@ class WallSideMarker final : public QGraphicsItem
 public:
     explicit WallSideMarker(QGraphicsItem *parent) : QGraphicsItem(parent)
     {
-        setFlag(ItemIgnoresTransformations);
         setAcceptedMouseButtons(Qt::NoButton);
         setZValue(2.0);
     }
@@ -206,10 +205,21 @@ public:
         : QGraphicsLineItem(line)
         , m_twoSided(twoSided)
     {
+        // Scene geometry is immutable: edits replace items in rebuildScene().
+        // Qt asks for bounds frequently while panning and hit-testing, so do
+        // not rebuild the stroked selection path on every query.
+        QPainterPath path;
+        path.moveTo(line.p1());
+        path.lineTo(line.p2());
+        QPainterPathStroker stroker;
+        stroker.setWidth(wallHitWidth);
+        stroker.setCapStyle(Qt::RoundCap);
+        m_hitShape = stroker.createStroke(path);
         m_sideMarker = new WallSideMarker(this);
         m_sideMarker->setPos(line.center());
         m_sideMarker->hide();
         setPen(cosmeticPen(m_twoSided ? twoSidedWallColor : wallColor, 1.6));
+        m_bounds = QGraphicsLineItem::boundingRect();
         setToolTip(m_twoSided ? "Two-sided wall between neighboring sectors" : "One-sided wall");
         setInteractive(false);
     }
@@ -243,16 +253,10 @@ public:
         update();
     }
 
-    QPainterPath shape() const override
-    {
-        QPainterPath path;
-        path.moveTo(line().p1());
-        path.lineTo(line().p2());
-        QPainterPathStroker stroker;
-        stroker.setWidth(wallHitWidth);
-        stroker.setCapStyle(Qt::RoundCap);
-        return stroker.createStroke(path);
-    }
+    QGraphicsItem *sideMarker() const { return m_sideMarker; }
+
+    QPainterPath shape() const override { return m_hitShape; }
+    QRectF boundingRect() const override { return m_bounds; }
 
 protected:
     QVariant itemChange(GraphicsItemChange change, const QVariant &value) override
@@ -286,6 +290,8 @@ protected:
     }
 
 private:
+    QPainterPath m_hitShape;
+    QRectF m_bounds;
     bool m_twoSided = false;
     bool m_firstWallHighlighted = false;
     WallSideMarker *m_sideMarker = nullptr;
@@ -295,14 +301,19 @@ private:
 class VertexItem final : public QGraphicsEllipseItem
 {
 public:
-    VertexItem()
+    explicit VertexItem(QCache<QString, QPixmap> &paintCache)
         : QGraphicsEllipseItem(-hoveredVertexRadiusPixels, -hoveredVertexRadiusPixels,
                                hoveredVertexRadiusPixels * 2.0,
                                hoveredVertexRadiusPixels * 2.0)
+        , m_paintCache(paintCache)
     {
-        setFlag(QGraphicsItem::ItemIgnoresTransformations);
+        // Position changes do not change these local bounds; geometry edits
+        // recreate the item. Hover/selection only change the painted radius.
+        m_bounds = QGraphicsEllipseItem::boundingRect();
         setInteractive(false);
     }
+
+    QRectF boundingRect() const override { return m_bounds; }
 
     void setInteractive(bool interactive)
     {
@@ -333,15 +344,35 @@ protected:
 
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
     {
-        const QColor color = isSelected() ? selectedColor : (m_hovered ? hoverColor : vertexColor);
-        painter->setPen(cosmeticPen(QColor(24, 26, 31), 1.0));
-        painter->setBrush(color);
-        const qreal radius = (m_hovered || isSelected())
-            ? hoveredVertexRadiusPixels : vertexRadiusPixels;
-        painter->drawEllipse(QPointF(0.0, 0.0), radius, radius);
+        const int state = isSelected() ? 2 : (m_hovered ? 1 : 0);
+        const qreal dpr = painter->device()->devicePixelRatioF();
+        const QString key = QString("vertex:%1:%2").arg(state).arg(dpr, 0, 'g', 17);
+        // Every vertex uses one of three tiny glyphs, independent of map zoom.
+        const int extent = qCeil(hoveredVertexRadiusPixels + 1.0);
+        if (!m_paintCache.contains(key)) {
+            QPixmap glyph(qCeil(2 * extent * dpr), qCeil(2 * extent * dpr));
+            glyph.setDevicePixelRatio(dpr);
+            glyph.fill(Qt::transparent);
+            {
+                QPainter p(&glyph);
+                p.setRenderHint(QPainter::Antialiasing);
+                p.translate(extent, extent);
+                p.setPen(cosmeticPen(QColor(24, 26, 31), 1.0));
+                p.setBrush(state == 2 ? selectedColor : (state == 1 ? hoverColor : vertexColor));
+                const qreal radius = state ? hoveredVertexRadiusPixels : vertexRadiusPixels;
+                p.drawEllipse(QPointF(0.0, 0.0), radius, radius);
+            }
+            const int cost = (glyph.width() * glyph.height() * glyph.depth() / 8 + 1023) / 1024;
+            m_paintCache.insert(key, new QPixmap(glyph), cost);
+        }
+        if (const auto *glyph = m_paintCache.object(key)) {
+            painter->drawPixmap(QPointF(-extent, -extent), *glyph);
+        }
     }
 
 private:
+    QRectF m_bounds;
+    QCache<QString, QPixmap> &m_paintCache;
     bool m_hovered = false;
 };
 
@@ -352,8 +383,13 @@ public:
         : QGraphicsPathItem(path)
     {
         setPen(Qt::NoPen);
+        // The path is replaced only by rebuilding the scene. Texture and
+        // selection changes leave its geometry unchanged.
+        m_bounds = QGraphicsPathItem::boundingRect();
         setInteractive(false);
     }
+
+    QRectF boundingRect() const override { return m_bounds; }
 
     void setTexture(const QImage &image)
     {
@@ -412,6 +448,7 @@ protected:
     }
 
 private:
+    QRectF m_bounds;
     QBrush m_texture = Qt::NoBrush;
     bool m_hovered = false;
 };
@@ -419,20 +456,22 @@ private:
 class SpriteItem final : public QGraphicsRectItem
 {
 public:
-    explicit SpriteItem(const QImage &texture, qreal angle)
+    explicit SpriteItem(const QImage &texture, qreal angle, QCache<QString, QPixmap> &paintCache)
         : QGraphicsRectItem(-22.0, -18.0, 44.0, 36.0)
         , m_texture(texture)
-        , m_monochromeTexture(texture.convertToFormat(QImage::Format_Grayscale8))
+        , m_paintCache(paintCache)
         , m_angle(angle)
     {
-        setFlag(QGraphicsItem::ItemIgnoresTransformations);
+        // Crop the rotated arrow instead of blending a mostly empty 78x78 image.
+        QTransform rotation;
+        rotation.rotate(m_angle);
+        m_arrowBounds = rotation.mapRect(QRectF(24, -7, 13, 14)).toAlignedRect();
         setInteractive(false);
     }
 
     void setTexture(const QImage &texture)
     {
         m_texture = texture;
-        m_monochromeTexture = texture.convertToFormat(QImage::Format_Grayscale8);
         update();
     }
 
@@ -471,41 +510,70 @@ protected:
 
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
     {
-        const QRectF body = rect();
-        QPainterPath rounded;
-        rounded.addRoundedRect(body, 8.0, 8.0);
-        painter->setClipPath(rounded);
-        painter->fillRect(body, QColor(42, 46, 54));
-        const QImage &texture = m_interactive ? m_texture : m_monochromeTexture;
-        if (!texture.isNull()) {
-            painter->drawImage(body.adjusted(4.0, 4.0, -4.0, -4.0), texture);
-        }
-        painter->setClipping(false);
-        painter->setBrush(Qt::NoBrush);
-        painter->setPen(cosmeticPen(
-            isSelected() ? selectedColor : (m_hovered ? hoverColor : vertexColor),
-            (isSelected() || m_hovered) ? 2.5 : 1.5));
-        painter->drawRoundedRect(body, 8.0, 8.0);
-        // Build angle zero points right; positive angles turn clockwise in
-        // the map's Y-down coordinates. Keep the thumbnail upright and place
-        // a fixed-pixel arrow outside it, visible at every zoom level.
-        painter->save();
-        painter->rotate(m_angle);
-        QPainterPath facing;
-        facing.moveTo(35, 0);
-        facing.lineTo(26, -5);
-        facing.lineTo(26, 5);
-        facing.closeSubpath();
-        painter->setPen(cosmeticPen(QColor(24,26,31), 1.5));
-        painter->setBrush(isSelected() ? selectedColor : (m_hovered ? hoverColor : vertexColor));
-        painter->drawPath(facing);
-        painter->restore();
+        const qreal dpr = painter->device()->devicePixelRatioF();
+        const int state = isSelected() ? 2 : (m_hovered ? 1 : 0);
+        const QColor color = isSelected() ? selectedColor : (m_hovered ? hoverColor : vertexColor);
+        const QString cardKey = QString("card:%1:%2:%3:%4")
+            .arg(m_texture.cacheKey()).arg(m_interactive).arg(state).arg(dpr, 0, 'g', 17);
+        const auto card = cachedPixmap(cardKey, {48, 40}, dpr, [&](QPainter &p) {
+            p.translate(24, 20);
+            const QRectF body = rect();
+            QPainterPath rounded;
+            rounded.addRoundedRect(body, 8.0, 8.0);
+            p.setClipPath(rounded);
+            p.fillRect(body, QColor(42, 46, 54));
+            const QImage texture = m_interactive ? m_texture
+                : m_texture.convertToFormat(QImage::Format_Grayscale8);
+            if (!texture.isNull()) {
+                p.drawImage(body.adjusted(4.0, 4.0, -4.0, -4.0), texture);
+            }
+            p.setClipping(false);
+            p.setBrush(Qt::NoBrush);
+            p.setPen(cosmeticPen(color, state ? 2.5 : 1.5));
+            p.drawRoundedRect(body, 8.0, 8.0);
+        });
+        painter->drawPixmap(QPointF(-24, -20), card);
 
+        // Cards share artwork across sprites; arrows share orientation/state.
+        // Keeping them separate avoids caching every tile/angle combination.
+        const QString arrowKey = QString("arrow:%1:%2:%3")
+            .arg(m_angle, 0, 'g', 17).arg(state).arg(dpr, 0, 'g', 17);
+        const auto arrow = cachedPixmap(arrowKey, m_arrowBounds.size(), dpr, [&](QPainter &p) {
+            p.translate(-m_arrowBounds.topLeft());
+            p.rotate(m_angle);
+            QPainterPath facing;
+            facing.moveTo(35, 0);
+            facing.lineTo(26, -5);
+            facing.lineTo(26, 5);
+            facing.closeSubpath();
+            p.setPen(cosmeticPen(QColor(24,26,31), 1.5));
+            p.setBrush(color);
+            p.drawPath(facing);
+        });
+        painter->drawPixmap(m_arrowBounds.topLeft(), arrow);
     }
 
 private:
+    template<typename Paint>
+    QPixmap cachedPixmap(const QString &key, const QSize &size, qreal dpr, Paint paint)
+    {
+        if (const auto *cached = m_paintCache.object(key)) { return *cached; }
+        QPixmap pixmap(qCeil(size.width() * dpr), qCeil(size.height() * dpr));
+        pixmap.setDevicePixelRatio(dpr);
+        pixmap.fill(Qt::transparent);
+        {
+            QPainter painter(&pixmap);
+            painter.setRenderHint(QPainter::Antialiasing);
+            paint(painter);
+        }
+        const int cost = (pixmap.width() * pixmap.height() * pixmap.depth() / 8 + 1023) / 1024;
+        m_paintCache.insert(key, new QPixmap(pixmap), cost);
+        return pixmap;
+    }
+
     QImage m_texture;
-    QImage m_monochromeTexture;
+    QCache<QString, QPixmap> &m_paintCache;
+    QRect m_arrowBounds;
     qreal m_angle = 0;
     bool m_hovered = false;
     bool m_interactive = false;
@@ -526,7 +594,6 @@ public:
         arrow.lineTo(-8.0, -3.0);
         arrow.closeSubpath();
         setPath(arrow);
-        setFlag(QGraphicsItem::ItemIgnoresTransformations);
         setInteractive(false);
     }
 
@@ -1606,6 +1673,7 @@ void MapEditor::setZoomPercent(qreal percent)
                                        minimumZoomScale, maximumZoomScale);
     const QPointF center = mapToScene(viewport()->rect().center());
     scale(targetScale / currentScale, targetScale / currentScale);
+    updateScreenSizedItems();
     centerOn(center);
     if (m_zoomCallback) {
         m_zoomCallback(targetScale / baseZoomScale * 100.0);
@@ -3486,6 +3554,7 @@ void MapEditor::wheelEvent(QWheelEvent *event)
     const qreal targetScale = std::clamp(currentScale * factor,
                                        minimumZoomScale, maximumZoomScale);
     scale(targetScale / currentScale, targetScale / currentScale);
+    updateScreenSizedItems();
     const QPointF after = mapToScene(event->position().toPoint());
     translate(after.x() - before.x(), after.y() - before.y());
     if (m_zoomCallback) {
@@ -4101,6 +4170,21 @@ void MapEditor::updateSectorTextures()
     }
 }
 
+void MapEditor::updateScreenSizedItems()
+{
+    // ItemIgnoresTransformations bypasses Qt's BSP index. A child with that
+    // flag also pulls its parent into every viewport query, even when hidden.
+    // Compensate for our uniform view zoom instead so markers stay pixel-sized
+    // while their scene bounds remain indexed. Only zoom/rebuild needs updates.
+    // A zoom changes thousands of indexed bounds. Rebuild the index once
+    // instead of removing/reinserting each item in the existing tree.
+    const auto indexMethod = m_scene->itemIndexMethod();
+    m_scene->setItemIndexMethod(QGraphicsScene::NoIndex);
+    const qreal inverseZoom = 1.0 / std::abs(transform().m11());
+    for (auto *item : m_screenSizedItems) { item->setScale(inverseZoom); }
+    m_scene->setItemIndexMethod(indexMethod);
+}
+
 void MapEditor::rebuildScene()
 {
     m_resolvedPick = nullptr;
@@ -4114,6 +4198,7 @@ void MapEditor::rebuildScene()
     m_splitPreviewItem = nullptr;
     m_splitWall.reset();
     m_floatingPasteItem = nullptr;
+    m_screenSizedItems.clear();
     m_scene->clear();
     m_previewItem = nullptr;
     m_previewLengthItem = nullptr;
@@ -4142,6 +4227,7 @@ void MapEditor::rebuildScene()
         const QPointF start = m_document.vertices()[wall.start].position;
         const QPointF end = m_document.vertices()[wall.end].position;
         auto *item = new WallItem(QLineF(start, end), wall.isTwoSided());
+        m_screenSizedItems.push_back(item->sideMarker());
         item->setInteractive(m_mode == Mode::Lines);
         item->setData(wallIdRole, static_cast<qulonglong>(wallId));
         m_scene->addItem(item);
@@ -4151,7 +4237,8 @@ void MapEditor::rebuildScene()
     for (MapDocument::VertexId vertexId = 0;
          vertexId < m_document.vertices().size(); ++vertexId) {
         const MapDocument::Vertex &vertex = m_document.vertices()[vertexId];
-        auto *item = new VertexItem();
+        auto *item = new VertexItem(m_markerPaintCache);
+        m_screenSizedItems.push_back(item);
         item->setInteractive(m_mode == Mode::Vertices);
         item->setData(vertexIdRole, static_cast<qulonglong>(vertexId));
         m_scene->addItem(item);
@@ -4163,7 +4250,8 @@ void MapEditor::rebuildScene()
          spriteId < m_document.sprites().size(); ++spriteId) {
         const MapDocument::Sprite &sprite = m_document.sprites()[spriteId];
         const int key = sprite.texture * 256 + sprite.palette;
-        auto *item = new SpriteItem(m_spriteTextures.value(key), sprite.angle);
+        auto *item = new SpriteItem(m_spriteTextures.value(key), sprite.angle, m_markerPaintCache);
+        m_screenSizedItems.push_back(item);
         item->setInteractive(m_mode == Mode::Sprites);
         item->setVisible(m_spritesVisible || m_mode == Mode::Sprites);
         item->setData(spriteIdRole, static_cast<qulonglong>(spriteId));
@@ -4173,6 +4261,7 @@ void MapEditor::rebuildScene()
     }
 
     auto *playerStart = new PlayerStartItem();
+    m_screenSizedItems.push_back(playerStart);
     playerStart->setInteractive(m_mode == Mode::Sprites);
     m_scene->addItem(playerStart);
     playerStart->setPos(m_document.playerStart().position);
@@ -4180,6 +4269,7 @@ void MapEditor::rebuildScene()
     // The artwork points up, so rotate it 90 degrees to face right at angle zero.
     playerStart->setRotation(m_document.playerStart().angle + 90.0);
     playerStart->setZValue(13.0);
+    updateScreenSizedItems();
     updateSectorTextures();
     applyEditingScope();
     updateFloatingPaste();

@@ -7,6 +7,8 @@
 #include <QGraphicsScene>
 #include <QGraphicsView>
 #include <QImage>
+#include <QCache>
+#include <QPixmap>
 #include <QMap>
 #include <QPoint>
 #include <QUndoStack>
@@ -346,6 +348,7 @@ private:
     void updateSplitPreview(const QPoint &position, bool disableSnapping);
     void clearSplitPreview();
     void rebuildScene();
+    void updateScreenSizedItems();
     void updateSectorTextures();
     void updateProperties() const;
     void reportStatus(const QString &message) const;
@@ -368,6 +371,9 @@ private:
     bool m_recoveredDirty = false;
     MapDocument m_vertexDragDocument;
     MapScene *m_scene = nullptr;
+    std::vector<QGraphicsItem *> m_screenSizedItems;
+    // Shared vertex glyphs and sprite cards/arrows, bounded to 32 MiB of pixel storage.
+    QCache<QString, QPixmap> m_markerPaintCache{32 * 1024};
     std::vector<MapDocument::SectorId> m_sectorSelectionOrder;
     QGraphicsPathItem *m_previewItem = nullptr;
     QGraphicsEllipseItem *m_splitPreviewItem = nullptr;

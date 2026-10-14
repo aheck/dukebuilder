@@ -7,10 +7,14 @@
 #include <QFocusEvent>
 #include <QScrollBar>
 #include <QMouseEvent>
+#include <QWheelEvent>
 #include <QTemporaryDir>
 #include <QInputDialog>
 #include <QTimer>
 #include <QGraphicsItem>
+#include <QGraphicsSceneHoverEvent>
+#include <QPainter>
+#include <QStyleOptionGraphicsItem>
 #include <QSpinBox>
 #include <QDoubleSpinBox>
 #include <QCheckBox>
@@ -125,6 +129,157 @@ int main(int argc, char **argv)
     source.setPlayerStartPosition({512,512});
     source.setSectorFloorZ(0, -2048);
     source.setSectorCeilingZ(0, -16384);
+    {
+        MapEditor indexed;
+        indexed.resize(1000, 800);
+        indexed.show();
+        auto fixture = source;
+        fixture.addSprite({256,256});
+        indexed.recoverDocument(fixture, {});
+        QApplication::processEvents();
+        std::vector<std::pair<QGraphicsItem *, QSizeF>> fixedSizes;
+        for (auto *item : indexed.scene()->items()) {
+            require(!item->flags().testFlag(QGraphicsItem::ItemIgnoresTransformations),
+                    "Map items participate in the scene spatial index");
+            if (item->scale() != 1.0) {
+                fixedSizes.push_back({item, item->deviceTransform(indexed.viewportTransform())
+                                              .mapRect(item->boundingRect()).size()});
+            }
+        }
+        require(fixedSizes.size() == fixture.walls().size() + fixture.vertices().size() + 2,
+                "Wall markers, vertices, sprite and player start compensate for zoom");
+        const auto checkSizesAndPicking = [&] {
+            QApplication::processEvents();
+            for (const auto &[item, size] : fixedSizes) {
+                const auto actual = item->deviceTransform(indexed.viewportTransform())
+                                        .mapRect(item->boundingRect()).size();
+                require(std::abs(actual.width() - size.width()) < 0.001
+                        && std::abs(actual.height() - size.height()) < 0.001,
+                        "Screen-sized item bounds stay constant across zoom changes");
+                if (item->isVisible()) {
+                    const auto hits = indexed.scene()->items(item->sceneBoundingRect(),
+                        Qt::IntersectsItemBoundingRect, Qt::DescendingOrder, indexed.viewportTransform());
+                    require(hits.contains(item), "Spatial index finds resized screen-sized items");
+                }
+            }
+        };
+        for (qreal zoom : {25.0, 100.0, 400.0}) {
+            indexed.setZoomPercent(zoom);
+            checkSizesAndPicking();
+        }
+        const auto center = indexed.viewport()->rect().center();
+        QWheelEvent wheel(QPointF(center), QPointF(indexed.viewport()->mapToGlobal(center)),
+                          {}, {0,120}, Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QApplication::sendEvent(indexed.viewport(), &wheel);
+        checkSizesAndPicking();
+        // Rebuilding after an edit replaces the cached item list at the current zoom.
+        indexed.recoverDocument(fixture, {});
+        for (auto *item : indexed.scene()->items()) {
+            if (item->scale() != 1.0) {
+                require(std::abs(item->scale() * indexed.transform().m11() - 1.0) < 0.00001,
+                        "Rebuilt items inherit the current inverse zoom");
+            }
+        }
+    }
+    {
+        MapEditor thumbnails;
+        thumbnails.setTextureResolver([](int tile, int) {
+            QImage image(32, 32, QImage::Format_RGB32);
+            image.fill(tile == 1 ? Qt::green : Qt::red);
+            return image;
+        });
+        auto fixture = source;
+        const auto spriteId = fixture.addSprite({256,256});
+        fixture.setSpriteTexture(spriteId, 0);
+        thumbnails.recoverDocument(fixture, {});
+        const auto spriteItem = [&]() -> QGraphicsItem * {
+            for (auto *item : thumbnails.scene()->items()) {
+                if (item->data(Qt::UserRole + 3).isValid()) { return item; }
+            }
+            return nullptr;
+        };
+        const auto render = [&](int dpr) {
+            QImage image(100*dpr, 100*dpr, QImage::Format_ARGB32_Premultiplied);
+            image.setDevicePixelRatio(dpr);
+            image.fill(Qt::transparent);
+            QPainter painter(&image);
+            painter.translate(50,50);
+            QStyleOptionGraphicsItem option;
+            require(spriteItem(), "Sprite preview item exists");
+            spriteItem()->paint(&painter, &option, nullptr);
+            painter.end();
+            return image;
+        };
+        for (int dpr : {1,2}) {
+            thumbnails.setMode(MapEditor::Mode::Draw);
+            const auto inactive = render(dpr);
+            const auto gray = inactive.pixelColor(50*dpr,50*dpr);
+            require(gray.red() == gray.green() && gray.green() == gray.blue(),
+                    "Inactive cached sprite preview is grayscale");
+            thumbnails.setMode(MapEditor::Mode::Sprites);
+            const auto normal = render(dpr);
+            require(normal.pixelColor(50*dpr,50*dpr) == QColor(Qt::red),
+                    "Active cached sprite preview is colored at each display density");
+            require(render(dpr) == normal, "Repeated cached sprite painting is stable");
+            QGraphicsSceneHoverEvent enter(QEvent::GraphicsSceneHoverEnter);
+            thumbnails.scene()->sendEvent(spriteItem(), &enter);
+            require(render(dpr) != normal, "Cached sprite hover appearance updates");
+            QGraphicsSceneHoverEvent leave(QEvent::GraphicsSceneHoverLeave);
+            thumbnails.scene()->sendEvent(spriteItem(), &leave);
+            spriteItem()->setSelected(true);
+            require(render(dpr) != normal, "Cached sprite selection appearance updates");
+            spriteItem()->setSelected(false);
+            require(render(dpr) == normal, "Leaving hover and selection restores cached appearance");
+        }
+        spriteItem()->setSelected(true);
+        thumbnails.setSelectedProperty(MapEditor::Property::Texture, 1);
+        require(render(1).pixelColor(50,50) == QColor(Qt::green),
+                "Texture changes use fresh cached artwork");
+        const auto facingRight = render(1);
+        thumbnails.setSelectedProperty(MapEditor::Property::Angle, 90);
+        require(render(1) != facingRight, "Angle changes use the correct cached direction arrow");
+    }
+    {
+        MapEditor vertices;
+        vertices.recoverDocument(source, {});
+        vertices.setMode(MapEditor::Mode::Vertices);
+        QGraphicsItem *vertex = nullptr;
+        for (auto *item : vertices.scene()->items()) {
+            if (item->data(Qt::UserRole).isValid()) { vertex = item; break; }
+        }
+        require(vertex, "Vertex preview item exists");
+        const auto render = [&](int dpr) {
+            QImage image(20*dpr, 20*dpr, QImage::Format_ARGB32_Premultiplied);
+            image.setDevicePixelRatio(dpr);
+            image.fill(Qt::transparent);
+            QPainter painter(&image);
+            painter.translate(10,10);
+            QStyleOptionGraphicsItem option;
+            vertex->paint(&painter, &option, nullptr);
+            painter.end();
+            return image;
+        };
+        for (int dpr : {1,2}) {
+            const auto normal = render(dpr);
+            require(normal.pixelColor(10*dpr,10*dpr) == QColor(255,190,72),
+                    "Cached vertex retains its normal color at each display density");
+            QGraphicsSceneHoverEvent enter(QEvent::GraphicsSceneHoverEnter);
+            vertices.scene()->sendEvent(vertex, &enter);
+            const auto hovered = render(dpr);
+            require(hovered.pixelColor(10*dpr,10*dpr) == QColor(80,210,255),
+                    "Cached vertex hover color updates");
+            require(hovered.pixelColor(14*dpr,10*dpr).alpha()
+                    > normal.pixelColor(14*dpr,10*dpr).alpha(),
+                    "Hovered vertex has a larger visible radius");
+            vertex->setSelected(true);
+            require(render(dpr).pixelColor(10*dpr,10*dpr) == QColor(255,110,92),
+                    "Cached vertex selection overrides hover");
+            vertex->setSelected(false);
+            QGraphicsSceneHoverEvent leave(QEvent::GraphicsSceneHoverLeave);
+            vertices.scene()->sendEvent(vertex, &leave);
+            require(render(dpr) == normal, "Vertex returns to its normal cached appearance");
+        }
+    }
     editor.recoverDocument(source, {});
     editor.setMode(MapEditor::Mode::Draw);
     editor.setZoomPercent(200);
