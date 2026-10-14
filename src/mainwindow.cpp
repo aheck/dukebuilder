@@ -1827,9 +1827,11 @@ MainWindow::MainWindow(QWidget *parent)
         QMessageBox::about(
             this,
             "About " PROGRAM_NAME,
-            "<h3>" PROGRAM_NAME "</h3>"
+            QString("<h3>" PROGRAM_NAME "</h3>"
             "<p>" PROGRAM_DESCRIPTION "<br>" "Version: " PROGRAM_VERSION "</p>"
-            "<p>" PROGRAM_COPYRIGHT "<br/>" PROGRAM_TERMS "</p>");
+            "<p>Qt version: %1</p>"
+            "<p>" PROGRAM_COPYRIGHT "<br/>" PROGRAM_TERMS "</p>")
+                .arg(QString::fromLatin1(qVersion())));
     });
 
     auto *autosaveTimer = m_autosaveTimer = new QTimer(this);
