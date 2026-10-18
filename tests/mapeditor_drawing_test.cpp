@@ -10,6 +10,7 @@
 #include <QWheelEvent>
 #include <QTemporaryDir>
 #include <QInputDialog>
+#include <QComboBox>
 #include <QTimer>
 #include <QGraphicsItem>
 #include <QGraphicsSceneHoverEvent>
@@ -129,6 +130,112 @@ int main(int argc, char **argv)
     source.setPlayerStartPosition({512,512});
     source.setSectorFloorZ(0, -2048);
     source.setSectorCeilingZ(0, -16384);
+    {
+        MapEditor modes;
+        modes.resize(1000,800); modes.show();
+        require(modes.geometryMode() == MapEditor::GeometryMode::Connect, "Connect is the default");
+        const auto clickMode = [&](QPointF point) {
+            const auto local = modes.mapFromScene(point);
+            const auto global = modes.viewport()->mapToGlobal(local);
+            QMouseEvent press(QEvent::MouseButtonPress, local, global, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+            QMouseEvent release(QEvent::MouseButtonRelease, local, global, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+            QApplication::sendEvent(modes.viewport(), &press);
+            QApplication::sendEvent(modes.viewport(), &release);
+        };
+        for (auto tool : {MapEditor::DrawTool::Freeform, MapEditor::DrawTool::Rectangle,
+                          MapEditor::DrawTool::Circle, MapEditor::DrawTool::Polygon}) {
+            modes.recoverDocument(source, {});
+            modes.setMode(MapEditor::Mode::Draw);
+            modes.setGeometryMode(MapEditor::GeometryMode::Independent);
+            modes.setDrawTool(tool);
+            modes.setZoomPercent(400); modes.centerOn(512,512);
+            QApplication::processEvents();
+            if (tool == MapEditor::DrawTool::Freeform) {
+                clickMode({0,0}); clickMode({1024,0}); clickMode({1024,1024}); clickMode({0,1024}); clickMode({0,0});
+            } else {
+                clickMode({512,512}); clickMode({768,768});
+            }
+            require(modes.document().sectors().size() == 2 && modes.document().sectors()[0] == source.sectors()[0],
+                    "Every drawing tool leaves existing sectors intact in Independent mode");
+            require(modes.document().vertices().size() > source.vertices().size(), "Independent drawing creates fresh vertices");
+            modes.undo(); require(modes.document() == source, "Independent drawing is one undo step");
+        }
+        modes.setDrawTool(MapEditor::DrawTool::Rectangle);
+        modes.setGeometryMode(MapEditor::GeometryMode::Connect);
+        clickMode({1024,0}); clickMode({2048,1024});
+        require(std::count_if(modes.document().walls().begin(), modes.document().walls().end(),
+                [](const auto &w) { return w.isTwoSided(); }) == 1, "Connect drawing joins the existing room");
+
+        auto stacked = source;
+        QString error;
+        require(stacked.pasteSectors(source, {}, error), "Height overlap fixture");
+        stacked.setSectorCeilingZ(1,-32768); stacked.setSectorFloorZ(1,-24576);
+        require(stacked.pasteSectors(source, {}, error), "Same-height overlap fixture");
+        modes.recoverDocument(stacked, {}); modes.setMode(MapEditor::Mode::Sectors);
+        const auto sectorItem = [&](int id) -> QGraphicsItem * {
+            for (auto *item : modes.scene()->items()) {
+                if (item->data(Qt::UserRole+2).isValid() && item->data(Qt::UserRole+2).toInt() == id) return item;
+            }
+            return nullptr;
+        };
+        sectorItem(0)->setSelected(true);
+        modes.focusSelectedHeightRange();
+        require(sectorItem(1)->isVisible() && !sectorItem(1)->isEnabled() && sectorItem(1)->opacity() < 1,
+                "Height focus dims and disables other heights");
+        require(sectorItem(0)->isEnabled() && sectorItem(2)->isEnabled(), "Height focus keeps same-height overlaps editable");
+        sectorItem(2)->setSelected(true); modes.hideSelectedSectors();
+        require(!sectorItem(2)->isVisible() && !modes.editingScope()->count(2), "Explicitly hidden sectors disappear and leave editing scope");
+        modes.showHiddenSectors();
+        require(sectorItem(2)->isVisible() && sectorItem(2)->isEnabled() && !sectorItem(1)->isEnabled(),
+                "Show hidden restores sectors without clearing height focus");
+        modes.toggleSectorIsolation();
+        require(!modes.editingScope(), "Isolation toggle restores the previous view");
+        require(modes.document() == stacked && modes.undoStack()->count() == 0, "Visibility controls never edit map data");
+
+        // The overlap dialog previews a candidate without changing selection,
+        // and can hide precisely that sector even at identical heights.
+        bool previewed = false;
+        QTimer chooserTimer;
+        QObject::connect(&chooserTimer, &QTimer::timeout, [&] {
+            auto *dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
+            if (!dialog || dialog->windowTitle() != "Choose edit target") return;
+            const auto choices = dialog->comboBoxItems();
+            for (const auto &choice : choices) {
+                if (choice.startsWith("Sector 2 ")) dialog->setTextValue(choice);
+            }
+            for (auto *item : modes.scene()->items()) {
+                if (item->zValue() == 25 && !item->boundingRect().isEmpty()) previewed = true;
+            }
+            auto *action = dialog->findChild<QComboBox *>("OverlapAction");
+            require(action, "Overlap chooser offers sector actions");
+            action->setCurrentIndex(1);
+            dialog->accept();
+        });
+        modes.centerOn(512,512); QApplication::processEvents();
+        chooserTimer.start(1); clickMode({512,512}); chooserTimer.stop();
+        require(previewed && !sectorItem(2)->isVisible() && sectorItem(0)->isVisible(),
+                "Overlap chooser previews and hides only the chosen sector");
+        require(modes.document() == stacked, "Overlap preview and hide leave geometry unchanged");
+        modes.showHiddenSectors();
+
+        for (bool independent : {true,false}) {
+            modes.recoverDocument(source, {}); modes.setMode(MapEditor::Mode::Sectors);
+            modes.setGeometryMode(MapEditor::GeometryMode::Connect);
+            sectorItem(0)->setSelected(true); modes.copySelectedSectors();
+            modes.centerOn(1024,512); QApplication::processEvents();
+            QCursor::setPos(modes.viewport()->mapToGlobal(modes.mapFromScene({1024,0})));
+            modes.pasteCopiedSectors();
+            require(modes.hasFloatingPaste(), "Paste preview is pending");
+            modes.setGeometryMode(independent ? MapEditor::GeometryMode::Independent : MapEditor::GeometryMode::Connect);
+            require(modes.hasFloatingPaste(), "Connection choice can change during paste preview");
+            modes.setMode(MapEditor::Mode::Draw);
+            require(!modes.hasFloatingPaste() && std::count_if(modes.document().walls().begin(), modes.document().walls().end(),
+                    [](const auto &w) { return w.isTwoSided(); }) == (independent ? 0 : 1),
+                    "Paste honors the connection choice at placement");
+            modes.undo(); require(modes.document() == source, "Connected and independent paste both undo atomically");
+        }
+    }
+
     {
         MapEditor indexed;
         indexed.resize(1000, 800);

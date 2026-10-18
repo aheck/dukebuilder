@@ -2226,10 +2226,14 @@ bool MapDocument::copySectors(const std::vector<SectorId> &ids, MapDocument &fra
     return true;
 }
 
-bool MapDocument::pasteSectors(const MapDocument &fragment, const QPointF &offset, QString &error)
+bool MapDocument::pasteSectors(const MapDocument &fragment, const QPointF &offset, QString &error,
+                               bool connect, const std::optional<std::set<SectorId>> &editable)
 {
     error.clear();
     if (fragment.m_sectors.empty()) { error = "No copied sectors to paste."; return false; }
+    if (!std::isfinite(offset.x()) || !std::isfinite(offset.y())) {
+        error = "Paste offset must be finite."; return false;
+    }
     MapDocument candidate = *this;
     // Preserve unambiguous original membership if the copy overlaps its source.
     const auto resolveMembership = [this](auto &object) {
@@ -2282,6 +2286,143 @@ bool MapDocument::pasteSectors(const MapDocument &fragment, const QPointF &offse
         if (sprite.owner >= 0) sprite.owner += static_cast<int>(spriteBase);
         candidate.m_sprites.push_back(sprite);
     }
+    if (connect) {
+        // Match only exposed, oppositely directed boundaries. Never rebuild
+        // planar faces here: that would lose copied materials, holes and TROR.
+        const auto owner = [](const Wall &w) { return w.forwardSector ? *w.forwardSector : *w.reverseSector; };
+        const auto eligible = [&](const Wall &w) {
+            if (bool(w.forwardSector) == bool(w.reverseSector)) return false;
+            const auto s = owner(w);
+            return s >= sectorBase || !editable || editable->count(s);
+        };
+        const auto linked = [](const Wall &w) {
+            return w.forwardSide.upLink || w.forwardSide.downLink
+                || w.reverseSide.upLink || w.reverseSide.downLink;
+        };
+        std::map<WallId, std::vector<QPointF>> splits;
+        const auto initialWalls = candidate.m_walls.size();
+        for (WallId a = 0; a < wallBase; ++a) {
+            const auto &wa = candidate.m_walls[a];
+            if (!eligible(wa)) continue;
+            const auto p = candidate.m_vertices[wa.start].position;
+            const auto q = candidate.m_vertices[wa.end].position;
+            const auto d = q - p;
+            const auto length2 = QPointF::dotProduct(d,d);
+            if (length2 < 1) continue;
+            for (WallId b = wallBase; b < initialWalls; ++b) {
+                const auto &wb = candidate.m_walls[b];
+                if (!eligible(wb)) continue;
+                const auto x = candidate.m_vertices[wb.start].position;
+                const auto y = candidate.m_vertices[wb.end].position;
+                const auto cross = [&](QPointF v) { return d.x()*v.y()-d.y()*v.x(); };
+                if (std::abs(cross(x-p)) > coordinateEpsilon || std::abs(cross(y-p)) > coordinateEpsilon) continue;
+                const auto directionA = wa.forwardSector ? d : -d;
+                const auto directionB = wb.forwardSector ? y-x : x-y;
+                if (QPointF::dotProduct(directionA,directionB) >= 0) continue;
+                const auto t0 = QPointF::dotProduct(x-p,d)/length2;
+                const auto t1 = QPointF::dotProduct(y-p,d)/length2;
+                const auto overlap = std::min(1.0, std::max(t0,t1)) - std::max(0.0, std::min(t0,t1));
+                if (overlap * std::sqrt(length2) <= coordinateEpsilon) continue;
+                if (linked(wa) || linked(wb)) {
+                    error = "Cannot connect a TROR-linked wall. Use Independent or disconnect its vertical links first.";
+                    return false;
+                }
+                splits[a].push_back(x); splits[a].push_back(y);
+                splits[b].push_back(p); splits[b].push_back(q);
+            }
+        }
+        for (auto &[id, points] : splits) {
+            const auto p = candidate.m_vertices[candidate.m_walls[id].start].position;
+            const auto d = candidate.m_vertices[candidate.m_walls[id].end].position - p;
+            std::sort(points.begin(), points.end(), [&](auto a, auto b) {
+                return QPointF::dotProduct(a-p,d) < QPointF::dotProduct(b-p,d);
+            });
+            WallId tail = id;
+            for (auto point : points) {
+                const auto next = candidate.m_walls.size();
+                if (candidate.splitWallSingle(tail, point)) tail = next;
+            }
+        }
+        std::vector<WallId> walls(candidate.m_walls.size());
+        std::vector<VertexId> vertices(candidate.m_vertices.size());
+        for (WallId i = 0; i < walls.size(); ++i) walls[i] = i;
+        for (VertexId i = 0; i < vertices.size(); ++i) vertices[i] = i;
+        const auto root = [&](VertexId v) { while (vertices[v] != v) v = vertices[v]; return v; };
+        std::set<WallId> claimed;
+        for (WallId b = 0; b < walls.size(); ++b) {
+            auto &wb = candidate.m_walls[b];
+            if (!eligible(wb) || owner(wb) < sectorBase) continue;
+            std::vector<WallId> matches;
+            const auto bs = wb.forwardSector ? wb.start : wb.end;
+            const auto be = wb.forwardSector ? wb.end : wb.start;
+            for (WallId a = 0; a < walls.size(); ++a) {
+                const auto &wa = candidate.m_walls[a];
+                if (!eligible(wa) || owner(wa) >= sectorBase) continue;
+                const auto as = wa.forwardSector ? wa.start : wa.end;
+                const auto ae = wa.forwardSector ? wa.end : wa.start;
+                if (candidate.m_vertices[as].position == candidate.m_vertices[be].position
+                    && candidate.m_vertices[ae].position == candidate.m_vertices[bs].position) matches.push_back(a);
+            }
+            if (matches.empty()) continue;
+            if (matches.size() != 1 || claimed.count(matches.front())) {
+                error = "Several overlapping boundaries could connect. Isolate the destination sectors or use Independent.";
+                return false;
+            }
+            const auto a = matches.front(); claimed.insert(a);
+            const auto &wa = candidate.m_walls[a];
+            vertices[root(bs)] = root(wa.forwardSector ? wa.end : wa.start);
+            vertices[root(be)] = root(wa.forwardSector ? wa.start : wa.end);
+            walls[b] = a;
+        }
+        if (!claimed.empty()) {
+            // Apply matches together, so an already claimed destination remains
+            // visible to ambiguity detection for subsequent copied boundaries.
+            for (WallId b = 0; b < walls.size(); ++b) {
+                if (walls[b] == b) continue;
+                auto &a = candidate.m_walls[walls[b]];
+                const auto &source = candidate.m_walls[b];
+                (a.forwardSector ? a.reverseSector : a.forwardSector) = owner(source);
+                // Determine the free side using the original physical direction.
+                const bool sameDirection = candidate.m_vertices[source.start].position
+                    == candidate.m_vertices[a.start].position;
+                const auto &side = source.forwardSector ? source.forwardSide : source.reverseSide;
+                const bool forward = bool(source.forwardSector) == sameDirection;
+                (forward ? a.forwardSide : a.reverseSide) = side;
+            }
+            std::vector<WallId> compact(walls.size());
+            std::vector<Wall> kept;
+            for (WallId w = 0; w < walls.size(); ++w) {
+                if (walls[w] != w) continue;
+                compact[w] = kept.size(); kept.push_back(candidate.m_walls[w]);
+            }
+            for (WallId w = 0; w < walls.size(); ++w) compact[w] = compact[walls[w]];
+            for (auto &w : kept) {
+                w.start = root(w.start); w.end = root(w.end);
+                for (auto *side : {&w.forwardSide, &w.reverseSide})
+                    for (auto *link : {&side->upLink, &side->downLink})
+                        if (*link) (*link)->wall = compact[(*link)->wall];
+            }
+            for (auto &s : candidate.m_sectors) {
+                for (auto &w : s.walls) w = compact[w];
+                for (auto &v : s.vertices) v = root(v);
+            }
+            candidate.m_walls = std::move(kept);
+            // Keep surviving vertex IDs in their original order. Reordering every
+            // vertex would unnecessarily change unrelated sector identities.
+            std::set<VertexId> used;
+            for (const auto &w : candidate.m_walls) { used.insert(w.start); used.insert(w.end); }
+            std::vector<VertexId> vertexMap(candidate.m_vertices.size());
+            std::vector<Vertex> keptVertices;
+            for (auto v : used) {
+                vertexMap[v] = keptVertices.size();
+                keptVertices.push_back(candidate.m_vertices[v]);
+            }
+            for (auto &w : candidate.m_walls) { w.start = vertexMap[w.start]; w.end = vertexMap[w.end]; }
+            for (auto &s : candidate.m_sectors) for (auto &v : s.vertices) v = vertexMap[v];
+            candidate.m_vertices = std::move(keptVertices);
+        }
+    }
+
     // Independent geometry must never be welded by a later planar rebuild.
     candidate.m_complexTopology = true;
     if (!candidate.validateTopologyChange(*this, error)) return false;

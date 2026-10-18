@@ -73,18 +73,21 @@ QString content(bool threeD)
             {"Save", "Placement is saved in a .map.dukebuilder.json file beside the map. Keep this file and the source image with the map; the Build map itself contains no image data."}
         });
         html += section("Drawing", {
+            {"Connect / Independent dropdown", "Applies to all drawing tools and sector paste. Connect (default) attaches to editable geometry; Independent keeps new geometry separate. The last choice is remembered, and it can be changed during paste preview."},
             {"Drawing tool dropdown", "Freeform places individual vertices. Rectangle uses two opposite corners; Circle and Regular polygon use center then radius. Sides controls the number of walls."},
             {"Shift (Rectangle)", "Constrain the rectangle to a square along the active grid axes."},
             {"Enter / Right click (shapes)", "Commit the preview as one undo operation. Invalid shapes remain adjustable."},
             {"Left click", "Place a connected wall vertex."},
             {"Click the first vertex", "Close the shape and create a sector (at least three vertices)."},
-            {"Click an existing wall", "Connect to the wall; finish automatically when the chain forms a sector with existing walls."},
+            {"Click an existing wall (Connect)", "Connect to the wall; finish automatically when the chain forms a sector with existing walls."},
             {"Right click / Enter", "Finish the line chain. It is retained when it forms a sector with existing walls."},
             {"Backspace", "Remove the last point from the unfinished drawing."},
             {"Escape", "Cancel the unfinished drawing."},
             {"Alt", "Temporarily disable grid and wall snapping while placing or moving points."}
         });
         html += section("Selection and geometry", {
+            {"Ctrl+H / Ctrl+Shift+H", "Hide selected sectors / show hidden sectors. Hidden sectors cannot be picked, snapped to, or connected automatically."},
+            {"Sectors → Focus selected height range", "Keep sectors intersecting the selected height range editable; dim and disable other heights. Hide individual sectors to exclude same-height overlaps."},
             {"X / Y during movement", "Move only along map X / Y. Press again to unlock, or the other key to switch. Applies to right-drag and M moves, including sprites, player start, selections, and floating sector pastes. Alt disables snapping but keeps the constraint. A dashed guide shows the axis; each move starts unconstrained."},
             {"X / Y while drawing or picking a pivot", "Constrain the next freeform segment from its last vertex, or pivot placement from its previous position. Drawing resets the constraint after each placed point. Rotated grids snap at intersections with the map-axis guide."},
             {"Left click / left-drag rectangle", "Select objects in the active selection mode."},
@@ -109,12 +112,12 @@ QString content(bool threeD)
         });
         html += section("Overlapping geometry", {
             {"TROR Layers (above Properties)", "Select a sector in a TROR stack to reveal connected layers. Click a row to edit it with surrounding geometry dimmed; Show all layers clears the filter. The list stays available while editing objects in that stack."},
-            {"Ambiguous click", "Choose the intended object instead of selecting an arbitrary overlapping object. Cancel leaves the map unchanged."},
-            {"Tools → Toggle sector isolation", "Limit picking, snapping, and drawing to selected sectors; press again or use I to show all sectors."},
-            {"I", "Toggle sector isolation: isolate selected sectors, then show all sectors on the next press."},
-            {"Tools → Edit height range", "Filter editable sectors by Build Z, including slopes. An ambiguous range still cannot merge independent rooms."},
-            {"Tools → Show all sectors", "Reset the editing filter. The status bar shows the current scope."},
-            {"Tools → Draw independent sector", "Draw a separate room without attaching to existing walls, even at identical coordinates."}
+            {"Ambiguous click", "Preview each candidate before choosing it. For sectors, the chooser also offers Hide this sector and Isolate this layer. Cancel leaves the map unchanged."},
+            {"Sectors → Toggle sector isolation", "Limit picking, snapping, and drawing to selected sectors; press again or use I to restore the previous scope."},
+            {"I", "Toggle sector isolation: isolate selected sectors, then restore the previous editing scope."},
+            {"Sectors → Edit height range", "Filter editable sectors by Build Z, including slopes. An ambiguous range still cannot merge independent rooms."},
+            {"Sectors → Show all sectors", "Reset the editing filter and show hidden sectors. The status bar shows the current scope."},
+            {"Sectors → Draw independent sector", "Draw a separate room without attaching to existing walls, even at identical coordinates."}
         });
     }
     html += section("Files, history, and help", {

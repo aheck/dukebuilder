@@ -185,8 +185,10 @@ as saved. New edits after undo discard the redo branch. History retains at most
   to position it; grid snapping applies, with Alt/Option for free movement.
   Releasing the drag or confirming M leaves the group floating. Click outside
   or select something else to settle it; Escape or Delete cancels it. Saving or
-  changing editing mode also settles it. Placement is one undo step and creates
-  independent geometry without welding touching walls. Internal portals and
+  changing editing mode also settles it. Placement is one undo step. The toolbar
+  **Connect / Independent** choice also applies during paste preview: Connect
+  joins matching exposed destination boundaries (splitting partial edges);
+  Independent keeps touching and overlapping geometry separate. Internal portals and
   complete TROR bunches are preserved; connections outside the copy are removed.
   Tags are preserved, so copied effects may still share tag-based behavior.
 - **M / Edit → Move selection / Move toolbar button:** move selected vertices,
@@ -347,17 +349,28 @@ below; some original effect geometry may be opened but cannot yet be saved.
 
 ### Editing overlapping rooms
 
-Overlapping object clicks offer a target chooser. Starting a drawing at an
+The toolbar **Connect / Independent** choice applies to every drawing tool and
+sector paste. **Connect is the default**, and the last choice is remembered.
+Independent creates fresh geometry without splitting or welding existing sectors.
+Paste connections join opposing exposed edges, not arbitrary overlapping interiors;
+ambiguous destinations require isolation or Independent mode.
+
+Overlapping object clicks offer a target chooser with a live outline preview and
+sector actions to edit, hide, or isolate the chosen layer. Starting a drawing at an
 ambiguous location asks which sector to attach to and grays out the others.
-Alternatively, select sectors and use **Tools → Toggle sector isolation** (or
+Alternatively, select sectors and use **Sectors → Toggle sector isolation** (or
 press **I**) or use **Edit height range…** to set an optional editing scope.
-Press **I** again to show all sectors. Grayed-out geometry is excluded from picking,
+Press **I** again to restore the previous scope. Grayed-out geometry is excluded from picking,
 snapping, and drawing. The status bar shows the scope; **Show all sectors** resets
-it. Height filtering uses Build Z (smaller values are higher), including slope
+it and unhides everything. **Focus selected height range** derives the range from
+selected sectors. **Hide selected sectors** (Ctrl+H) excludes even same-height
+rooms completely; **Show hidden sectors** (Ctrl+Shift+H) restores them while
+retaining the height filter. Hidden and dimmed sectors cannot be picked, snapped
+to, or used as automatic connection targets. Height filtering uses Build Z (smaller values are higher), including slope
 bounds. A filter containing ambiguous overlapping rooms still does not authorize
 merging them: the drawing is rejected until its target is resolved.
 
-**Draw independent sector** starts a separate room without attaching to existing
+**Draw independent sector** switches the toolbar choice to Independent and starts a separate room without attaching to existing
 geometry, even at coincident coordinates. Scoped drawing supports splitting rooms,
 inserting inner loops, and attaching rooms. Intersections with editable boundaries
 are split transactionally; real portal counterparts are updated even when the
@@ -389,7 +402,7 @@ available when selecting walls, vertices, or sprites in the stack, or when
 clearing selection; selecting an unrelated area hides it. Layer navigation
 creates no undo entries, and the list refreshes after edits and undo/redo.
 
-**Tools → TROR / Layers** provides layer isolation, navigation above/below,
+**TROR** provides layer isolation, navigation above/below,
 and commands to extend a selected sector's ceiling upward or floor downward.
 Extension creates a matching room and isolates it for editing. To connect two
 existing rooms, select both sectors and choose **Connect selected sectors**;
@@ -598,7 +611,7 @@ repeat without changing textures or offsets.
 
 In **2D sprite mode**, select a sprite and press **O**. In **3D**, point the
 crosshair at a visible sprite and press **O**. The sprite is highlighted when
-selected. **Tools → Stick Sprite to Wall** is also available.
+selected. **Sprites → Stick Sprite to Wall** is also available.
 
 The sprite snaps to the nearest wall of its own sector (including two-sided
 walls), regardless of its angle. It becomes wall-aligned, faces into the room,

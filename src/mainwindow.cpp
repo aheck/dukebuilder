@@ -1242,7 +1242,7 @@ MainWindow::MainWindow(QWidget *parent)
     statusBar()->addPermanentWidget(cursorStatusLabel);
     auto *editingScopeLabel = new QLabel("All sectors", this);
     editingScopeLabel->setObjectName("editingScopeStatusLabel");
-    editingScopeLabel->setToolTip("2D editing scope. Tools → Show all sectors resets the filter.");
+    editingScopeLabel->setToolTip("2D editing scope. Sectors → Show all sectors resets the filter.");
     statusBar()->addPermanentWidget(editingScopeLabel);
     editor->editingScopeChanged = [editingScopeLabel](const QString &text) { editingScopeLabel->setText(text); };
     connect(views, &QStackedWidget::currentChanged, editingScopeLabel, [=](int) {
@@ -1253,6 +1253,26 @@ MainWindow::MainWindow(QWidget *parent)
     });
 
     editorToolBar->addSeparator();
+    auto *geometryMode = new QComboBox(editorToolBar);
+    geometryMode->setObjectName("GeometryMode");
+    geometryMode->setAccessibleName("Drawing and paste connections");
+    geometryMode->addItems({"Connect", "Independent"});
+    geometryMode->setToolTip("Connect joins drawing and matching paste boundaries to editable geometry. Independent keeps new geometry separate.");
+    editorToolBar->addWidget(geometryMode);
+    const bool independent = QSettings().value("editor/independentGeometry", false).toBool();
+    geometryMode->setCurrentIndex(independent ? 1 : 0);
+    editor->setGeometryMode(independent ? MapEditor::GeometryMode::Independent : MapEditor::GeometryMode::Connect);
+    editor->geometryModeChanged = [geometryMode](MapEditor::GeometryMode mode) {
+        const bool independent = mode == MapEditor::GeometryMode::Independent;
+        geometryMode->setCurrentIndex(independent ? 1 : 0);
+        QSettings().setValue("editor/independentGeometry", independent);
+    };
+    connect(geometryMode, &QComboBox::activated, editor, [editor](int index) {
+        editor->setGeometryMode(index == 0 ? MapEditor::GeometryMode::Connect : MapEditor::GeometryMode::Independent);
+    });
+    connect(views, &QStackedWidget::currentChanged, geometryMode, [=](int) {
+        geometryMode->setEnabled(views->currentWidget() == editor);
+    });
     auto *drawToolCombo = new QComboBox(editorToolBar);
     drawToolCombo->setAccessibleName("Drawing tool");
     drawToolCombo->addItems({"Freeform", "Rectangle", "Circle", "Regular polygon"});
@@ -1430,19 +1450,32 @@ MainWindow::MainWindow(QWidget *parent)
     connect(views, &QStackedWidget::currentChanged, editor, updatePlacementActions);
     updatePlacementActions();
 
-    auto *toolsMenu = menuBar()->addMenu("&Tools");
-    auto *isolateAction = toolsMenu->addAction("Toggle sector isolation");
+    auto *sectorsMenu = menuBar()->addMenu("&Sectors");
+    auto *isolateAction = sectorsMenu->addAction("Toggle sector isolation");
     isolateAction->setShortcut(QKeySequence(Qt::Key_I));
     isolateAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
     editor->addAction(isolateAction);
     connect(isolateAction, &QAction::triggered, editor, &MapEditor::toggleSectorIsolation);
-    auto *heightScopeAction = toolsMenu->addAction("Edit height range…");
+    auto *heightScopeAction = sectorsMenu->addAction("Edit height range…");
     connect(heightScopeAction, &QAction::triggered, editor, &MapEditor::filterEditingHeight);
-    auto *clearScopeAction = toolsMenu->addAction("Show all sectors");
+    auto *focusHeightAction = sectorsMenu->addAction("Focus selected height range");
+    connect(focusHeightAction, &QAction::triggered, editor, &MapEditor::focusSelectedHeightRange);
+    auto *hideSectorsAction = sectorsMenu->addAction("Hide selected sectors");
+    hideSectorsAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_H));
+    hideSectorsAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    editor->addAction(hideSectorsAction);
+    connect(hideSectorsAction, &QAction::triggered, editor, &MapEditor::hideSelectedSectors);
+    auto *showHiddenAction = sectorsMenu->addAction("Show hidden sectors");
+    showHiddenAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_H));
+    showHiddenAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    editor->addAction(showHiddenAction);
+    connect(showHiddenAction, &QAction::triggered, editor, &MapEditor::showHiddenSectors);
+    auto *clearScopeAction = sectorsMenu->addAction("Show all sectors");
     connect(clearScopeAction, &QAction::triggered, editor, &MapEditor::clearEditingScope);
-    auto *independentAction = toolsMenu->addAction("Draw independent sector");
+    auto *independentAction = sectorsMenu->addAction("Draw independent sector");
     connect(independentAction, &QAction::triggered, editor, &MapEditor::drawIndependentSector);
-    auto *trorMenu = toolsMenu->addMenu("TROR / Layers");
+    auto *spritesMenu = menuBar()->addMenu("S&prites");
+    auto *trorMenu = menuBar()->addMenu("T&ROR");
     const auto trorAction = [&](const QString &title, const std::function<void()> &operation) {
         auto *action = trorMenu->addAction(title);
         connect(action, &QAction::triggered, editor, operation);
@@ -1461,11 +1494,11 @@ MainWindow::MainWindow(QWidget *parent)
         trorMenu->setEnabled(views->currentWidget() == editor);
     });
     connect(views, &QStackedWidget::currentChanged, editor, [=](int) {
-        for (auto *action : {isolateAction, heightScopeAction, clearScopeAction, independentAction}) {
+        for (auto *action : {isolateAction, heightScopeAction, focusHeightAction, hideSectorsAction, showHiddenAction, clearScopeAction, independentAction}) {
             action->setEnabled(views->currentWidget() == editor);
         }
     });
-    toolsMenu->addSeparator();
+    auto *toolsMenu = menuBar()->addMenu("&Tools");
     auto *grpFileManagerAction = toolsMenu->addAction("GRP File Manager");
     connect(grpFileManagerAction, &QAction::triggered, this, [this, editor, confirmMapReplacement] {
         if (!m_grpFileManager) {
@@ -1515,7 +1548,7 @@ MainWindow::MainWindow(QWidget *parent)
     };
     connect(joinSectorsAction, &QAction::triggered, editor, &MapEditor::joinSelectedSectors);
 
-    auto *stickSpriteAction = toolsMenu->addAction("Stick Sprite to Wall");
+    auto *stickSpriteAction = spritesMenu->addAction("Stick Sprite to Wall");
     stickSpriteAction->setShortcut(QKeySequence(Qt::Key_O));
     stickSpriteAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
     stickSpriteAction->setAutoRepeat(false);
@@ -1525,7 +1558,7 @@ MainWindow::MainWindow(QWidget *parent)
         else { editor->stickSelectedSpriteToWall(); }
     });
     for (bool floor : {true, false}) {
-        auto *action = toolsMenu->addAction(floor ? "Align Sprites to Floor" : "Align Sprites to Ceiling");
+        auto *action = spritesMenu->addAction(floor ? "Align Sprites to Floor" : "Align Sprites to Ceiling");
         action->setShortcut(QKeySequence(Qt::CTRL | (floor ? Qt::Key_PageDown : Qt::Key_PageUp)));
         action->setShortcutContext(Qt::WidgetWithChildrenShortcut);
         action->setAutoRepeat(false);

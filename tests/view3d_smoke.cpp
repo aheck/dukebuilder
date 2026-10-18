@@ -109,6 +109,36 @@ int main(int argc, char **argv)
         if (auto *v = dynamic_cast<MapView3D *>(widget)) { view = v; }
     }
     require(editor && view, "view widgets");
+    if (argc == 3 && QString::fromLocal8Bit(argv[2]) == "--geometry-tools") {
+        auto *connections = window.findChild<QComboBox *>("GeometryMode");
+        require(connections && connections->currentText() == "Connect"
+                && editor->geometryMode() == MapEditor::GeometryMode::Connect,
+                "Connection toolbar defaults to Connect");
+        connections->setCurrentIndex(1);
+        QMetaObject::invokeMethod(connections, "activated", Q_ARG(int, 1));
+        require(editor->geometryMode() == MapEditor::GeometryMode::Independent
+                && QSettings().value("editor/independentGeometry").toBool(),
+                "Connection toolbar updates editor and preferences");
+        {
+            MainWindow reopened;
+            auto *restored = reopened.findChild<QComboBox *>("GeometryMode");
+            require(restored && restored->currentText() == "Independent",
+                    "Connection preference survives reopening");
+        }
+        editor->setGeometryMode(MapEditor::GeometryMode::Connect);
+        require(connections->currentText() == "Connect"
+                && !QSettings().value("editor/independentGeometry").toBool(),
+                "Editor changes synchronize toolbar and preference");
+        for (const auto &label : {"Focus selected height range", "Hide selected sectors", "Show hidden sectors"}) {
+            bool found = false;
+            for (auto *action : window.findChildren<QAction *>()) {
+                if (action->text() == label && action->isEnabled()) found = true;
+            }
+            require(found, "Sector filtering action is available");
+        }
+        std::cout << "Geometry toolbar, persistence, and filtering actions passed\n";
+        return 0;
+    }
     if (argc == 3 && QString::fromLocal8Bit(argv[2]) == "--reference-image") {
         QImage image(400,200,QImage::Format_RGB32);
         image.fill(QColor(240,40,20));

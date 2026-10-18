@@ -164,7 +164,11 @@ public:
     bool disconnectTror(SectorId sector, bool floor, QString &error);
     // Copy topology with local IDs; paste allocates independent geometry transactionally.
     bool copySectors(const std::vector<SectorId> &ids, MapDocument &fragment, QString &error) const;
-    bool pasteSectors(const MapDocument &fragment, const QPointF &offset, QString &error);
+    // Independent copies retain all internal connections. Connect additionally
+    // joins matching exposed boundaries to editable destination sectors.
+    bool pasteSectors(const MapDocument &fragment, const QPointF &offset, QString &error,
+                      bool connect = false,
+                      const std::optional<std::set<SectorId>> &editable = std::nullopt);
     // Join a connected selection transactionally; the first ID supplies properties.
     std::optional<SectorId> joinSectors(const std::vector<SectorId> &ids, QString &error);
     // Remove sector interiors, retaining shared boundaries as solid walls.

@@ -65,6 +65,14 @@ public:
         Sprites,
     };
 
+    enum class GeometryMode { Connect, Independent };
+    void setGeometryMode(GeometryMode mode);
+    GeometryMode geometryMode() const { return m_geometryMode; }
+    std::function<void(GeometryMode)> geometryModeChanged;
+    void hideSelectedSectors();
+    void showHiddenSectors();
+    void focusSelectedHeightRange();
+
     enum class DrawTool { Freeform, Rectangle, Circle, Polygon };
     void setDrawTool(DrawTool tool);
     DrawTool drawTool() const { return m_drawTool; }
@@ -225,7 +233,7 @@ public:
     void extendSelectedTror(bool floor);
     void connectSelectedTror();
     void disconnectSelectedTror(bool floor);
-    const std::optional<std::set<MapDocument::SectorId>> &editingScope() const { return m_editingScope; }
+    std::optional<std::set<MapDocument::SectorId>> editingScope() const;
     void filterEditingHeight();
     void clearEditingScope();
     void drawIndependentSector();
@@ -289,6 +297,7 @@ private:
     struct Selection {
         std::vector<std::pair<int, qulonglong>> items;
         std::vector<MapDocument::SectorId> sectorOrder;
+        std::set<MapDocument::SectorId> hiddenSectors;
         Mode mode;
         bool reversed;
         std::optional<std::set<MapDocument::SectorId>> editingScope = std::nullopt;
@@ -361,6 +370,10 @@ private:
     bool resolveDrawingScope(const QPointF &position);
     bool resolveAmbiguousPick(const QPoint &position);
     QList<QGraphicsItem *> pickItems(const QPoint &position) const;
+    GeometryMode m_geometryMode = GeometryMode::Connect;
+    std::set<MapDocument::SectorId> m_hiddenSectors;
+    std::optional<std::set<MapDocument::SectorId>> m_previousScope;
+    bool m_hasPreviousScope = false;
     std::optional<std::set<MapDocument::SectorId>> m_editingScope;
     std::vector<std::vector<MapDocument::WallId>> m_scopeTopology;
     std::vector<bool> m_editableWalls, m_editableVertices;

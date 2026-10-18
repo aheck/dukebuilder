@@ -69,6 +69,12 @@ int main(int argc, char **argv)
         MapDocument fragment;
         require(original.copySectors({0,1}, fragment, error), error);
         require(fragment.validateTror(error), error);
+        auto connectedMode = original;
+        require(connectedMode.pasteSectors(fragment, {4096,0}, error, true), error);
+        require(connectedMode.sectors()[0] == original.sectors()[0]
+                && connectedMode.sectors()[1] == original.sectors()[1],
+                "Connect paste away from boundaries preserves existing TROR sector identities");
+        roundTrip(connectedMode, path, 9);
         require(original.pasteSectors(fragment, {4096,0}, error), error);
         require(original.sectors()[2].floorBunch == original.sectors()[3].ceilingBunch
             && original.sectors()[2].floorBunch != original.sectors()[0].floorBunch,

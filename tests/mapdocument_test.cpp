@@ -53,6 +53,60 @@ void checkSideReferences(const MapDocument &document)
 int main()
 {
     {
+        MapDocument room, fragment;
+        QString error;
+        require(room.addPolyline({{0,0},{1024,0},{1024,1024},{0,1024}}, true), "Connection room");
+        require(room.copySectors({0}, fragment, error), "Connection fragment");
+        for (MapDocument::WallId w = 0; w < room.walls().size(); ++w) {
+            auto side = room.walls()[w].forwardSide; side.texture = 7; room.setWallSide(w, false, side);
+            side.texture = 23; fragment.setWallSide(w, false, side);
+        }
+        fragment.setSectorFloorTexture(0, 42);
+        auto connected = room;
+        require(connected.pasteSectors(fragment, {1024,0}, error, true), "Connect adjoining paste");
+        require(connected.walls().size() == 7 && connected.vertices().size() == 6,
+                "Connect welds only the common boundary");
+        require(connected.sectors()[1].floorTexture == 42, "Connect retains pasted material");
+        checkSideReferences(connected);
+        require(connected.sectors()[0] == room.sectors()[0], "Connection retains existing boundary IDs");
+        for (const auto &wall : connected.walls()) {
+            if (wall.isTwoSided()) require(wall.forwardSide.texture == 7 && wall.reverseSide.texture == 23,
+                    "Connection keeps destination and copied wall-side materials");
+        }
+        auto independent = room;
+        require(independent.pasteSectors(fragment, {1024,0}, error, false), "Independent adjoining paste");
+        require(independent.walls().size() == 8 && independent.vertices().size() == 8,
+                "Independent keeps touching boundaries separate");
+        auto scoped = room;
+        require(scoped.pasteSectors(fragment, {1024,0}, error, true, std::set<MapDocument::SectorId>{}),
+                "Paste with no editable destination");
+        require(scoped.walls().size() == 8, "Connect ignores excluded destination geometry");
+        MapDocument small;
+        require(small.addPolyline({{0,0},{512,0},{512,512},{0,512}}, true), "Partial-edge fragment");
+        auto partial = room;
+        require(partial.pasteSectors(small, {1024,256}, error, true), "Connect partial boundary");
+        require(std::count_if(partial.walls().begin(), partial.walls().end(),
+                [](const auto &w) { return w.isTwoSided(); }) == 1, "Partial boundary becomes a portal");
+        require(partial.sectors()[0].walls.size() == 6, "Destination edge is split at both paste corners");
+        checkSideReferences(partial);
+        MapDocument longEdge, narrow;
+        require(longEdge.addPolyline({{0,0},{1024,0},{1024,16384},{0,16384}}, true), "Long destination edge");
+        require(narrow.addPolyline({{0,0},{512,0},{512,4},{0,4}}, true), "Short pasted edge");
+        require(longEdge.pasteSectors(narrow, {1024,256}, error, true), "Connect a short span on a long edge");
+        require(std::count_if(longEdge.walls().begin(), longEdge.walls().end(),
+                [](const auto &w) { return w.isTwoSided(); }) == 1, "Connection tolerance uses map units, not edge fraction");
+        checkSideReferences(longEdge);
+        auto ambiguous = room;
+        require(ambiguous.pasteSectors(room, {}, error), "Coincident destination fixture");
+        const auto before = ambiguous;
+        require(!ambiguous.pasteSectors(fragment, {1024,0}, error, true) && ambiguous == before,
+                "Ambiguous connection fails atomically");
+        require(ambiguous.pasteSectors(fragment, {1024,0}, error, true, std::set<MapDocument::SectorId>{0}),
+                "Isolating a destination resolves connection ambiguity");
+        checkSideReferences(ambiguous);
+    }
+
+    {
         MapDocument::Sprite sprite;
         sprite.cstat = 32 | 64 | 4;
         for (int slope : {-32768, -4096, -1, 0, 255, 4096, 32767}) {
