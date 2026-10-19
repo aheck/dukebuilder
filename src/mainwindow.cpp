@@ -15,6 +15,7 @@
 #include <QTemporaryFile>
 
 #include "info.h"
+#include "libduke_version.h"
 #include "tags.h"
 #include "spritelotags.h"
 
@@ -1862,7 +1863,7 @@ MainWindow::MainWindow(QWidget *parent)
             "About " PROGRAM_NAME,
             QString("<h3>" PROGRAM_NAME "</h3>"
             "<p>" PROGRAM_DESCRIPTION "<br>" "Version: " PROGRAM_VERSION "</p>"
-            "<p>Qt version: %1</p>"
+            "<p>Qt version: %1<br>libduke version: " LIBDUKE_GIT_COMMIT "</p>"
             "<p>" PROGRAM_COPYRIGHT "<br/>" PROGRAM_TERMS "</p>")
                 .arg(QString::fromLatin1(qVersion())));
     });

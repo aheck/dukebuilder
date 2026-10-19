@@ -28,6 +28,12 @@ endif
 cpp = meson.get_compiler('cpp')
 
 libduke_root = meson.current_source_dir() / '..' / 'libduke'
+libduke_version_header = vcs_tag(
+  input: 'src/libduke_version.h.in',
+  output: 'libduke_version.h',
+  command: ['git', '-C', libduke_root, 'rev-parse', '--short', 'HEAD'],
+  fallback: 'unknown',
+)
 fs = import('fs')
 libduke_build = libduke_root / get_option('libduke_build_dir')
 libduke_libraries = []
@@ -200,6 +206,7 @@ if host_machine.system() == 'linux'
 endif
 
 app_sources = [
+    libduke_version_header,
     'src/walltexturealignment.cpp',
     'src/shortcuthelp.cpp',
     'src/recovery.cpp',
