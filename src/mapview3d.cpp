@@ -1183,16 +1183,17 @@ QSize MapView3D::alignmentTextureSize(int tile) const
             continue;
         }
         void *bytes = nullptr;
-        const auto size = duke_grp_get_file_data_by_index(grp.get(), index - 1, &bytes);
+        size_t size;
+        const bool sizeRead = duke_grp_get_file_data_by_index(grp.get(), index - 1, &bytes, &size);
         std::unique_ptr<DukeArtFile, decltype(&duke_art_free)> art(duke_art_new(), duke_art_free);
-        if (!bytes || size == size_t(-1) || !art || !duke_art_open_memory(art.get(), bytes, size)
+        if (!bytes || !sizeRead || !art || !duke_art_open_memory(art.get(), bytes, size)
             || !duke_art_read_tiles_sparse(art.get())) {
             continue;
         }
         const auto *texture = duke_art_get_tile_by_number(art.get(), tile);
         if (texture && texture->width > 0 && texture->height > 0) {
             void *pixels = nullptr;
-            if (duke_art_get_tile_data_by_number(art.get(), tile, &pixels) == size_t(-1)) {
+            if (!duke_art_get_tile_data_by_number(art.get(), tile, &pixels, nullptr)) {
                 return {};
             }
             return {texture->width, texture->height};

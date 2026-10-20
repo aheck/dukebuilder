@@ -98,8 +98,9 @@ static std::vector<std::pair<QString, QByteArray>> members(const QString &path)
     for (uint32_t i = 0; i < grp->header.entry_count; ++i) {
         auto *entry = duke_grp_get_entry_by_index(grp, i);
         void *data = nullptr;
-        const auto size = duke_grp_get_file_data_by_index(grp, i, &data);
-        require(entry && size != static_cast<size_t>(-1), "Read member data");
+        size_t size;
+        const bool sizeRead = duke_grp_get_file_data_by_index(grp, i, &data, &size);
+        require(entry && sizeRead, "Read member data");
         result.emplace_back(QString::fromLocal8Bit(entry->filename),
                             QByteArray(static_cast<const char *>(data), qsizetype(size)));
     }

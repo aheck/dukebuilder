@@ -188,17 +188,19 @@ void TextureBrowserWidget::reload()
             if (!entry || !isEntryNamed(*entry, "PALETTE.DAT")) {
                 if (!entry || !isEntryNamed(*entry, "LOOKUP.DAT")) continue;
                 void *data = nullptr;
-                const size_t size = duke_grp_get_file_data_by_index(archive.get(), index, &data);
-                if (size != static_cast<size_t>(-1) && m_lookup
+                size_t size;
+                const bool sizeRead = duke_grp_get_file_data_by_index(archive.get(), index, &data, &size);
+                if (sizeRead && m_lookup
                         && duke_palette_lookup_read_from_memory(m_lookup, data, size)) {
                     lookupLoaded = true;
                 }
                 continue;
             }
             void *data = nullptr;
-            const size_t size = duke_grp_get_file_data_by_index(
-                archive.get(), index, &data);
-            if (size != static_cast<size_t>(-1) && m_palette
+            size_t size;
+            const bool sizeRead = duke_grp_get_file_data_by_index(
+                archive.get(), index, &data, &size);
+            if (sizeRead && m_palette
                     && duke_palette_read_from_memory(m_palette, data, size)) {
                 paletteLoaded = true;
             }
@@ -229,10 +231,11 @@ void TextureBrowserWidget::reload()
             }
 
             void *data = nullptr;
-            const size_t size = duke_grp_get_file_data_by_index(
-                archive.get(), entryIndex, &data);
+            size_t size;
+            const bool sizeRead = duke_grp_get_file_data_by_index(
+                archive.get(), entryIndex, &data, &size);
             ArtPointer art(duke_art_new());
-            if (size == static_cast<size_t>(-1) || !art
+            if (!sizeRead || !art
                     || !duke_art_open_memory(art.get(), data, size)
                     || !duke_art_read_tiles_sparse(art.get())) {
                 ++failedArtFiles;
@@ -248,9 +251,10 @@ void TextureBrowserWidget::reload()
                     continue;
                 }
                 void *pixels = nullptr;
-                const size_t pixelsSize = duke_art_get_tile_data_by_index(
-                    art.get(), static_cast<uint32_t>(tileIndex), &pixels);
-                if (pixelsSize == static_cast<size_t>(-1) || !pixels) {
+                size_t pixelsSize;
+                const bool pixelsSizeRead = duke_art_get_tile_data_by_index(
+                    art.get(), static_cast<uint32_t>(tileIndex), &pixels, &pixelsSize);
+                if (!pixelsSizeRead || !pixels) {
                     continue;
                 }
                 const QByteArray raw(static_cast<const char *>(pixels),

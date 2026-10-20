@@ -403,8 +403,9 @@ bool GrpFileManagerWindow::loadArchive(const QString &path)
     for (uint32_t index = 0; index < archive->header.entry_count; ++index) {
         auto *entry = duke_grp_get_entry_by_index(archive.get(), index);
         void *data = nullptr;
-        const size_t size = duke_grp_get_file_data_by_index(archive.get(), index, &data);
-        if (!entry || size == static_cast<size_t>(-1)) {
+        size_t size;
+        const bool sizeRead = duke_grp_get_file_data_by_index(archive.get(), index, &data, &size);
+        if (!entry || !sizeRead) {
             showError(errorText("Unable to read entries from GRP file", path));
             return false;
         }
