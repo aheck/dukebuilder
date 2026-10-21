@@ -1,5 +1,5 @@
 [requires]
-qt/6.8.3
+qt/6.11.1
 
 [options]
 qt/*:with_libjpeg=libjpeg

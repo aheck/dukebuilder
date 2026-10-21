@@ -18,7 +18,9 @@ if host_machine.system() == 'darwin'
 endif
 
 # Framework discovery on macOS needs explicit modules for directly used headers.
-qt6 = dependency('qt6', modules: ['Core', 'Gui', 'Widgets', 'OpenGL', 'OpenGLWidgets'])
+# Treat Qt headers as external so their compiler extensions do not emit project warnings.
+qt6 = dependency('qt6', modules: ['Core', 'Gui', 'Widgets', 'OpenGL', 'OpenGLWidgets'],
+  include_type: 'system')
 qt6_module = import('qt6')
 tutorial_resources = qt6_module.compile_resources(sources: 'tutorials/tutorials.qrc')
 icon_resources = []
@@ -243,7 +245,7 @@ endif
 gui_entrypoint = []
 windows_resources = []
 if host_machine.system() == 'windows'
-  gui_entrypoint += dependency('qt6', modules: ['Core'], main: true)
+  gui_entrypoint += dependency('qt6', modules: ['Core'], main: true, include_type: 'system')
   windows_resources = import('windows').compile_resources(
     'packaging/windows/dukebuilder.rc',
     include_directories: include_directories('icons'),
@@ -287,7 +289,7 @@ walltexturealignment_test = executable('walltexturealignment-test',
 test('walltexturealignment', walltexturealignment_test)
 
 # Optional manual GPU smoke test: pass a DUKE3D.GRP path on a desktop display.
-qt_test = dependency('qt6', modules: ['Test'])
+qt_test = dependency('qt6', modules: ['Test'], include_type: 'system')
 executable('view3d-smoke',
   ['tests/view3d_smoke.cpp'] + app_sources + tutorial_resources,
   cpp_args: app_cpp_args,
