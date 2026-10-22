@@ -3,6 +3,13 @@ qt/6.11.1
 
 [options]
 qt/*:with_libjpeg=libjpeg
+qt/*:openssl=False
+qt/*:with_brotli=False
+qt/*:with_md4c=False
+qt/*:with_pq=False
+qt/*:with_sqlite3=False
+qt/*:with_odbc=False
+qt/*:with_mysql=False
 
 [generators]
 PkgConfigDeps
