@@ -10,134 +10,6 @@ An experimental level editor for Duke 3D built with Qt.
 
 ![Duke Builder in 3D mode](./pics/DukeBuilder3D.jpg)
 
-## Requirements
-
-- Conan 2
-- Meson
-- Ninja
-- A C++17 compiler
-- A configured and built `../libduke` checkout with its renderer enabled
-- Desktop OpenGL 4.1
-
-Create a Conan profile once if you do not already have one:
-
-```sh
-conan profile detect
-```
-
-Install the dependencies and generate the Meson native file:
-
-```sh
-conan install . --output-folder=conan --build=missing -s build_type=Debug
-```
-
-Build the libduke renderer (after its Conan dependency setup):
-
-```sh
-meson setup ../libduke/build ../libduke \
-  --native-file ../libduke/build/conan_meson_native.ini \
-  -Drenderer=enabled
-meson compile -C ../libduke/build
-```
-
-Duke Builder statically links libduke and libduke-render from `../libduke/build`.
-Both archives are required; no libduke shared libraries are needed at runtime.
-On Windows, the build explicitly selects `libduke.a` and `libduke-render.a` when
-present, instead of assuming MSVC-style `.lib` filenames. Otherwise it uses the
-compiler's normal static-library lookup. Build both projects for the same target
-architecture with compatible toolchains; renaming an archive does not make
-incompatible object files compatible.
-Qt's OpenGLWidgets module hosts the renderer; no Sokol window or event loop is used.
-
-For static Qt on Linux, configuration checks whether Qt's declared dependencies
-can link its hashing implementation. Only if that fails and adding `libb2` fixes
-it does the build add the workaround for incomplete Qt package metadata. Windows
-and shared Qt builds do not acquire an explicit `b2` dependency from this workaround.
-
-Configure and build the application:
-
-```sh
-meson setup build --native-file conan/conan_meson_native.ini --buildtype debug -Db_sanitize=address
-meson compile -C build
-```
-
-Run it:
-
-```sh
-./build/dukebuilder
-```
-
-## Shortcut help
-
-**Help → 2D Mode Shortcuts** and **Help → 3D Mode Shortcuts** open resizable,
-scrollable rich-text references. **F1** opens the reference for the current mode.
-The windows can stay open while you edit; reopening one brings the same window
-forward. Opening help releases the mouse in 3D. Click the viewport to resume
-mouse navigation afterward.
-
-## Checking a map
-
-Use **Tools → Check Map** (**F4**) to run the same validation used by Save,
-without writing a file. It checks exported geometry, references, field ranges,
-format limits, sprite placement, and the player start. Finish or cancel any
-unfinished drawing before checking.
-
-Checking stops at the first blocking error. Choose **Show in Map** to select
-and center the affected sector, line side, sprite, or player start in 2D with
-its properties visible. Fix the problem and press F4 again. Map-wide errors
-have no object to select. A successful check confirms that save validation
-passes; it does not simulate gameplay or validate the behavior of tagged effects.
-Checking does not change map data or undo history.
-
-3D mode uses less restrictive preview validation: it retains field-range and
-reference checks but permits intersecting walls and imported effect geometry.
-Existing sprite sector membership is preserved for rendering. This lets maps
-such as the original E1L1 enter 3D mode even when strict geometry checks fail.
-Save and Check Map still apply the full validation rules.
-
-## Autosave and recovery
-
-Duke Builder writes a recovery snapshot every minute while there are unsaved
-changes. These snapshots are separate from your `.map` files and do not change
-the saved/unsaved state. They preserve unfinished drawings, untextured sprites,
-and other work that cannot yet be exported as a valid Build map. Active drags and unfinished rectangle, circle, or regular-polygon previews
-are skipped until the next interval. Both 2D and 3D edits are included; the 3D
-preview's temporary player position is never stored.
-
-After an interrupted session, startup offers **Recover**, **Discard**, or
-**Later**. Recovery opens the work as an unsaved map and requires **Save As**;
-it never overwrites the original automatically. Later leaves the snapshot for
-a future launch. If multiple interrupted sessions exist, the newest is offered
-first; recovering one leaves the others available on a subsequent launch.
-Undo history and camera/selection state are not recovered.
-
-Successful saves, successful New/Open operations, and an accepted normal close
-remove the current session's recovery snapshot. Cancelling a close or failing
-a save keeps it. Each running instance has its own locked snapshot, replaced
-atomically. Invalid or unsupported snapshots are reported and left on disk.
-Autosave write errors appear in the status bar.
-
-Snapshots are stored in the `recovery` subdirectory of Qt's application-local
-data directory (normally `$XDG_DATA_HOME/Duke Builder/Duke Builder` on Linux,
-falling back to `~/.local/share/Duke Builder/Duke Builder`, and beneath
-`%LOCALAPPDATA%` on Windows). No game artwork is copied into recovery files.
-
-## Undo and redo
-
-Use **Ctrl+Z** to undo and **Ctrl+Y** or **Ctrl+Shift+Z** to redo in either
-2D or 3D. The Edit menu shows the operation that will be undone or redone.
-Drawing a completed shape, dragging a selection, deleting geometry, joining
-sectors, and changing properties or textures are undoable. Repeated 3D wheel
-or arrow edits are grouped while the target, operation and modifiers stay the
-same and successive edits are less than half a second apart.
-
-Undo restores map data and selection in the current editing mode without moving
-the camera or changing zoom. An active unfinished drawing is cancelled first.
-Opening or creating a map clears history; saving retains it and marks that state
-as saved. New edits after undo discard the redo branch. History retains at most
-100 operations, dropping older snapshots above an estimated 128 MiB budget
-(always keeping the latest operation). History is kept only for this session.
-
 ## 2D editor controls
 
 - **Drawing tool dropdown:** choose Freeform, Rectangle, Circle, or Regular polygon.
@@ -326,26 +198,142 @@ existing directory for a release, set `meson configure build-release
 --buildtype=release -Db_sanitize=none` and rebuild. Switching only `--buildtype`
 does not clear an explicitly enabled sanitizer.
 
-## Opening and saving maps
+## 3D preview
 
-Use **File → Open Map** (Ctrl+O) to open a version-7, version-8, or version-9 Build `.map`
-file. The view centers on the player start, and Save uses the opened filename.
-An unsuccessful open leaves the current map intact. New, Open, and closing the application prompt to
-save unsaved changes first; choose Discard to proceed without saving or Cancel
-to keep editing. A canceled or failed save stops the operation, including quitting.
+Configure a game archive containing ART tiles and PALETTE.DAT (normally
+DUKE3D.GRP) in **Settings → Game Data**. While mouse look is active, left-click a
+highlighted surface or sprite to select it in orange; click it again to deselect.
+After mouse look is released, the first left click resumes it without changing the selection.
+**Shift+click** adds or removes a surface or sprite. A plain click replaces a
+multi-selection. **Ctrl+wheel** shades the entire selection relative to each
+surface's current value, as one undoable edit. Wheel height, Alt+wheel slope,
+texture choice/paste, panning, scaling, and wall-scale reset also support
+multi-selection. Each action validates and commits the whole batch together.
+Height edits skip walls; slope edits affect only floors and ceilings. Texture
+choice and paste include sprites, while surface panning/scaling skip them.
+Right-click opens one texture picker for the selection; Ctrl+C still samples
+the highlighted texture. Relative heights and texture offsets are preserved.
+Selection survives property edits and undo/redo, but clears when returning to 2D
+or when restored geometry changes invalidate its identities.
+Mouse-wheel edits keep targeting the selection when you look away. Escape clears
+the selection while keeping mouse look active. Press Escape with no selection to
+release the mouse. Press **Q** over the map to enter 3D,
+and **Q** again to return to the same 2D view. **View → 3D Mode** also switches
+views; when the pointer is outside the viewport it uses the 2D view's center.
 
-**File → Recent Files** lists the ten most recently opened or saved maps,
-newest first, and remembers them between sessions. Select a path to reopen it,
-or use **Clear Recent Files** to clear the list. Reopening a recent map uses
-the same unsaved-changes prompt as Open.
+The slim 3D status bar keeps control help on one line beside operation messages.
+A separate field shows shade once: for the selected surface when present,
+otherwise for the highlighted surface.
+With multiple selections it shows the count and their shared shade, or “mixed”.
 
-Imported maps retain sector loops, independent portal-side properties, sprites,
-and player start information. Connected inner sectors remain editable after
-reopening. Overlapping sectors can be edited using an explicit drawing scope;
-independent rooms are not connected merely because their coordinates coincide.
-Empty inner loops remain editable without filling their interiors. Ambiguous
-and unsupported effect-geometry operations are rejected. Saving applies the validation rules
-below; some original effect geometry may be opened but cannot yet be saved.
+The camera starts at the map point under the cursor, or just inside the nearest
+sector when the cursor is outside. Its height is placed between the local floor
+and ceiling, accounting for slopes; its initial angle follows the player start.
+Each entry renders a fresh snapshot of the current edits, without saving the map
+or modifying the player start. Invalid/incomplete maps produce an explanatory
+message and remain in 2D. The renderer currently uses the first configured GRP
+it can render with; it does not combine multiple archives.
+
+- **W/S:** fly forward/backward along the viewing direction, including pitch.
+- **A/D:** strafe horizontally. With a multi-selection containing walls, **A**
+  instead aligns connected selected wall textures to the pointed-at selected
+  wall. The reference and texture scales stay unchanged; the operation is one
+  undoable edit. Different textures, incompatible vertical scales/flips,
+  disconnected walls, and ambiguous portal sides are skipped with a status
+  message. Integer panning can leave small errors, and closed loops may retain
+  a seam. **Shift:** move faster.
+- **Mouse:** look around (captured on entry).
+- **Escape:** clear the selection; with no selection, release the mouse.
+  **Left click:** capture it again.
+- **H:** toggle surface highlighting (enabled on entry). A crosshair marks the
+  aim point while captured; a cross cursor follows the released mouse.
+- **Mouse wheel:** raise/lower the highlighted sprite, floor or ceiling by 1024 Build Z
+  units per notch, or 128 with **Shift** held. Wheel-up raises it; wheel-down lowers it. Walls are unaffected.
+  Height edits update the map, persist on return to 2D, and are saved normally.
+  Changes that would invalidate the map are rejected with a status message.
+- **Ctrl+wheel:** change the selected surface's shade, or the highlighted surface
+  when nothing is selected. Works on floors, ceilings, wall sides, and sprites.
+  Wheel-up darkens and wheel-down brightens by 1 per notch, limited to -128–127.
+- **Alt+wheel:** change the highlighted floor/ceiling slope by 256 per notch.
+  **Shift+Alt+wheel:** use fine steps of 16. Wheel-up
+  increases the signed slope; wheel-down decreases it. Nonzero slopes enable
+  the sloping flag; returning to zero clears it. Set the first wall in 2D to
+  choose the slope axis. Changes that invalidate the sector are rejected.
+- **Ctrl+C / Ctrl+V:** copy/paste the highlighted surface's texture tile between
+  walls, floors and ceilings. Offsets, scale and other properties are preserved.
+  The copied tile remains available when switching between 2D and 3D.
+- **Right click:** choose a texture for the highlighted sprite, wall, floor or ceiling.
+  Cancel leaves the map unchanged; mouse look resumes if it was captured.
+- **Arrow keys:** pan the highlighted wall, floor or ceiling in texture X/Y
+  coordinates, one offset unit per press (wrapping from 0 to 255).
+- **Shift+arrows:** resize the highlighted texture. Right/Up enlarges; Left/Down
+  shrinks. Walls have independent horizontal/vertical scaling. Build floors and
+  ceilings support only two uniform sizes, selected with these same keys.
+  Texture edits persist in the map and save normally.
+- **Q:** return to 2D.
+
+This is a free-flight preview with no collision or game simulation. The
+libduke renderer's current rendering limitations also apply here.
+
+`meson test -C build` includes camera-placement and snapshot tests. For a desktop
+OpenGL integration check, run `./build/view3d-smoke /path/to/DUKE3D.GRP`; it checks
+repeated Q toggles, textured frames, resizing, surface-height editing, validation
+and save persistence.
+
+## Shortcut help
+
+**Help → 2D Mode Shortcuts** and **Help → 3D Mode Shortcuts** open resizable,
+scrollable rich-text references. **F1** opens the reference for the current mode.
+The windows can stay open while you edit; reopening one brings the same window
+forward. Opening help releases the mouse in 3D. Click the viewport to resume
+mouse navigation afterward.
+
+## Checking a map
+
+Use **Tools → Check Map** (**F4**) to run the same validation used by Save,
+without writing a file. It checks exported geometry, references, field ranges,
+format limits, sprite placement, and the player start. Finish or cancel any
+unfinished drawing before checking.
+
+Checking stops at the first blocking error. Choose **Show in Map** to select
+and center the affected sector, line side, sprite, or player start in 2D with
+its properties visible. Fix the problem and press F4 again. Map-wide errors
+have no object to select. A successful check confirms that save validation
+passes; it does not simulate gameplay or validate the behavior of tagged effects.
+Checking does not change map data or undo history.
+
+3D mode uses less restrictive preview validation: it retains field-range and
+reference checks but permits intersecting walls and imported effect geometry.
+Existing sprite sector membership is preserved for rendering. This lets maps
+such as the original E1L1 enter 3D mode even when strict geometry checks fail.
+Save and Check Map still apply the full validation rules.
+
+## Autosave and recovery
+
+Duke Builder writes a recovery snapshot every minute while there are unsaved
+changes. These snapshots are separate from your `.map` files and do not change
+the saved/unsaved state. They preserve unfinished drawings, untextured sprites,
+and other work that cannot yet be exported as a valid Build map. Active drags and unfinished rectangle, circle, or regular-polygon previews
+are skipped until the next interval. Both 2D and 3D edits are included; the 3D
+preview's temporary player position is never stored.
+
+After an interrupted session, startup offers **Recover**, **Discard**, or
+**Later**. Recovery opens the work as an unsaved map and requires **Save As**;
+it never overwrites the original automatically. Later leaves the snapshot for
+a future launch. If multiple interrupted sessions exist, the newest is offered
+first; recovering one leaves the others available on a subsequent launch.
+Undo history and camera/selection state are not recovered.
+
+Successful saves, successful New/Open operations, and an accepted normal close
+remove the current session's recovery snapshot. Cancelling a close or failing
+a save keeps it. Each running instance has its own locked snapshot, replaced
+atomically. Invalid or unsupported snapshots are reported and left on disk.
+Autosave write errors appear in the status bar.
+
+Snapshots are stored in the `recovery` subdirectory of Qt's application-local
+data directory (normally `$XDG_DATA_HOME/Duke Builder/Duke Builder` on Linux,
+falling back to `~/.local/share/Duke Builder/Duke Builder`, and beneath
+`%LOCALAPPDATA%` on Windows). No game artwork is copied into recovery files.
 
 ### Editing overlapping rooms
 
@@ -474,6 +462,81 @@ spaces in both the executable and map paths without a command shell.
 
 Run geometry and map open/save regression tests with `meson test -C build`.
 
+## Wall texture scale
+
+New walls use 16 horizontal map units per texture pixel (`xrepeat` is wall
+length / 128, rounded and limited to Build's 1–255 range). Vertical repeat starts
+at 8. Imported maps retain their stored repeats. Resizing walls preserves their
+current density, including custom scales; splitting also continues texture
+panning along both wall sides. Build's integer repeat/panning limits can cause
+rounding differences, particularly on very short or very long walls.
+
+Use **View → Reset Texture Scale** on the selected wall side in 2D or highlighted
+wall in 3D; **R** does the same in 3D. This resets horizontal density and vertical
+repeat without changing textures or offsets.
+
+## Stick sprites to walls
+
+In **2D sprite mode**, select a sprite and press **O**. In **3D**, point the
+crosshair at a visible sprite and press **O**. The sprite is highlighted when
+selected. **Sprites → Stick Sprite to Wall** is also available.
+
+The sprite snaps to the nearest wall of its own sector (including two-sided
+walls), regardless of its angle. It becomes wall-aligned, faces into the room,
+and sits slightly off the wall to avoid flicker. Height, texture, tags and
+unrelated flags are preserved. This is a one-time placement; it does not follow
+later wall movement. This intentionally differs from Build's directional
+ornament command.
+
+## Joining sectors
+
+In **Sectors mode**, select the sector whose properties you want to keep, then
+Shift-click additional adjacent sectors. Choose **Tools → Join Sectors** or press
+**J**. The selection must be connected through shared two-sided walls.
+
+Shared boundaries are removed; the resulting sector takes all sector properties
+from the first selected sector. Surviving boundary walls retain their own side
+properties, including links to unselected neighbors. Inner sectors can be joined
+into their surroundings; unselected holes remain. Sprite and player-start sector
+references are remapped without changing their positions. The resulting sector
+remains selected. Sector numbers after removed records may change.
+
+When several sectors are added in one selection-change event, sector number is
+the tie-breaker. Click the desired source first to make the property choice
+explicit. Disconnected or branching boundaries are rejected without changing the
+map. If the source first wall would disappear and is needed for a slope or
+relative texture alignment, choose a surviving outer first wall before joining.
+The source heights replace those of the other selected sectors; check player and
+sprite placement afterward. A source slope that crosses the opposite surface in
+the enlarged sector is rejected.
+
+## Deleting sectors
+
+In **Sectors mode**, select a sector (Shift-click to select more) and press
+**Delete**. This removes the selected sector interiors and their sprites.
+Boundaries still used by neighboring sectors remain, with those neighbors' wall
+properties intact, and become one-sided solid walls. Deleting an inner sector
+therefore leaves a void hole in its surrounding sector; it does not fill the hole
+or merge the two sectors. The result saves and reloads as a sector with inner loops.
+
+The player-start marker is retained. If its sector was deleted, move it into a
+remaining sector before saving. Maps containing void holes remain editable: continue drawing rooms and platforms,
+splitting surrounding sectors, or editing and deleting boundary edges. Empty
+interiors remain empty through these edits and through saving and reopening.
+You can also draw a separate room inside a void without filling the space around
+it. Restrictions on overlapping or effect geometry still apply.
+
+In **Vertices mode**, **Delete** removes selected vertices and reconnects their
+neighboring walls, including both sides of a shared wall midpoint. Each surviving
+sector side uses its incoming wall's properties. Sector properties and loops are
+preserved. Junctions with more than two incident walls, loops reduced below three
+vertices, intersecting/inverted boundaries, and changes to a first wall needed by
+slopes or relative texture alignment are rejected without changing the map.
+
+Sprites display a facing arrow in every 2D mode. It follows the sprite's Angle
+property (0° right, 90° down, 180° left, 270° up), while the texture thumbnail
+stays upright. The arrow stays visible at a fixed screen size when zooming.
+
 ## GRP File Manager
 
 Select a file to preview CON/text contents, MAP information, or paged ART
@@ -512,113 +575,62 @@ at a prompt writes no files. Individual files are written through temporary file
 to avoid truncating an existing destination if its write fails. An I/O failure
 after extraction begins can still leave earlier files successfully extracted.
 
-## 3D preview
+## Requirements
 
-Configure a game archive containing ART tiles and PALETTE.DAT (normally
-DUKE3D.GRP) in **Settings → Game Data**. While mouse look is active, left-click a
-highlighted surface or sprite to select it in orange; click it again to deselect.
-After mouse look is released, the first left click resumes it without changing the selection.
-**Shift+click** adds or removes a surface or sprite. A plain click replaces a
-multi-selection. **Ctrl+wheel** shades the entire selection relative to each
-surface's current value, as one undoable edit. Wheel height, Alt+wheel slope,
-texture choice/paste, panning, scaling, and wall-scale reset also support
-multi-selection. Each action validates and commits the whole batch together.
-Height edits skip walls; slope edits affect only floors and ceilings. Texture
-choice and paste include sprites, while surface panning/scaling skip them.
-Right-click opens one texture picker for the selection; Ctrl+C still samples
-the highlighted texture. Relative heights and texture offsets are preserved.
-Selection survives property edits and undo/redo, but clears when returning to 2D
-or when restored geometry changes invalidate its identities.
-Mouse-wheel edits keep targeting the selection when you look away. Escape clears
-the selection while keeping mouse look active. Press Escape with no selection to
-release the mouse. Press **Q** over the map to enter 3D,
-and **Q** again to return to the same 2D view. **View → 3D Mode** also switches
-views; when the pointer is outside the viewport it uses the 2D view's center.
+- Conan 2
+- Meson
+- Ninja
+- A C++17 compiler
+- A configured and built `../libduke` checkout with its renderer enabled
+- Desktop OpenGL 4.1
 
-The slim 3D status bar keeps control help on one line beside operation messages.
-A separate field shows shade once: for the selected surface when present,
-otherwise for the highlighted surface.
-With multiple selections it shows the count and their shared shade, or “mixed”.
+Create a Conan profile once if you do not already have one:
 
-The camera starts at the map point under the cursor, or just inside the nearest
-sector when the cursor is outside. Its height is placed between the local floor
-and ceiling, accounting for slopes; its initial angle follows the player start.
-Each entry renders a fresh snapshot of the current edits, without saving the map
-or modifying the player start. Invalid/incomplete maps produce an explanatory
-message and remain in 2D. The renderer currently uses the first configured GRP
-it can render with; it does not combine multiple archives.
+```sh
+conan profile detect
+```
 
-- **W/S:** fly forward/backward along the viewing direction, including pitch.
-- **A/D:** strafe horizontally. With a multi-selection containing walls, **A**
-  instead aligns connected selected wall textures to the pointed-at selected
-  wall. The reference and texture scales stay unchanged; the operation is one
-  undoable edit. Different textures, incompatible vertical scales/flips,
-  disconnected walls, and ambiguous portal sides are skipped with a status
-  message. Integer panning can leave small errors, and closed loops may retain
-  a seam. **Shift:** move faster.
-- **Mouse:** look around (captured on entry).
-- **Escape:** clear the selection; with no selection, release the mouse.
-  **Left click:** capture it again.
-- **H:** toggle surface highlighting (enabled on entry). A crosshair marks the
-  aim point while captured; a cross cursor follows the released mouse.
-- **Mouse wheel:** raise/lower the highlighted sprite, floor or ceiling by 1024 Build Z
-  units per notch, or 128 with **Shift** held. Wheel-up raises it; wheel-down lowers it. Walls are unaffected.
-  Height edits update the map, persist on return to 2D, and are saved normally.
-  Changes that would invalidate the map are rejected with a status message.
-- **Ctrl+wheel:** change the selected surface's shade, or the highlighted surface
-  when nothing is selected. Works on floors, ceilings, wall sides, and sprites.
-  Wheel-up darkens and wheel-down brightens by 1 per notch, limited to -128–127.
-- **Alt+wheel:** change the highlighted floor/ceiling slope by 256 per notch.
-  **Shift+Alt+wheel:** use fine steps of 16. Wheel-up
-  increases the signed slope; wheel-down decreases it. Nonzero slopes enable
-  the sloping flag; returning to zero clears it. Set the first wall in 2D to
-  choose the slope axis. Changes that invalidate the sector are rejected.
-- **Ctrl+C / Ctrl+V:** copy/paste the highlighted surface's texture tile between
-  walls, floors and ceilings. Offsets, scale and other properties are preserved.
-  The copied tile remains available when switching between 2D and 3D.
-- **Right click:** choose a texture for the highlighted sprite, wall, floor or ceiling.
-  Cancel leaves the map unchanged; mouse look resumes if it was captured.
-- **Arrow keys:** pan the highlighted wall, floor or ceiling in texture X/Y
-  coordinates, one offset unit per press (wrapping from 0 to 255).
-- **Shift+arrows:** resize the highlighted texture. Right/Up enlarges; Left/Down
-  shrinks. Walls have independent horizontal/vertical scaling. Build floors and
-  ceilings support only two uniform sizes, selected with these same keys.
-  Texture edits persist in the map and save normally.
-- **Q:** return to 2D.
+Install the dependencies and generate the Meson native file:
 
-This is a free-flight preview with no collision or game simulation. The
-libduke renderer's current rendering limitations also apply here.
+```sh
+conan install . --output-folder=conan --build=missing -s build_type=Debug
+```
 
-`meson test -C build` includes camera-placement and snapshot tests. For a desktop
-OpenGL integration check, run `./build/view3d-smoke /path/to/DUKE3D.GRP`; it checks
-repeated Q toggles, textured frames, resizing, surface-height editing, validation
-and save persistence.
+Build the libduke renderer (after its Conan dependency setup):
 
-## Wall texture scale
+```sh
+meson setup ../libduke/build ../libduke \
+  --native-file ../libduke/build/conan_meson_native.ini \
+  -Drenderer=enabled
+meson compile -C ../libduke/build
+```
 
-New walls use 16 horizontal map units per texture pixel (`xrepeat` is wall
-length / 128, rounded and limited to Build's 1–255 range). Vertical repeat starts
-at 8. Imported maps retain their stored repeats. Resizing walls preserves their
-current density, including custom scales; splitting also continues texture
-panning along both wall sides. Build's integer repeat/panning limits can cause
-rounding differences, particularly on very short or very long walls.
+Duke Builder statically links libduke and libduke-render from `../libduke/build`.
+Both archives are required; no libduke shared libraries are needed at runtime.
+On Windows, the build explicitly selects `libduke.a` and `libduke-render.a` when
+present, instead of assuming MSVC-style `.lib` filenames. Otherwise it uses the
+compiler's normal static-library lookup. Build both projects for the same target
+architecture with compatible toolchains; renaming an archive does not make
+incompatible object files compatible.
+Qt's OpenGLWidgets module hosts the renderer; no Sokol window or event loop is used.
 
-Use **View → Reset Texture Scale** on the selected wall side in 2D or highlighted
-wall in 3D; **R** does the same in 3D. This resets horizontal density and vertical
-repeat without changing textures or offsets.
+For static Qt on Linux, configuration checks whether Qt's declared dependencies
+can link its hashing implementation. Only if that fails and adding `libb2` fixes
+it does the build add the workaround for incomplete Qt package metadata. Windows
+and shared Qt builds do not acquire an explicit `b2` dependency from this workaround.
 
-## Stick sprites to walls
+Configure and build the application:
 
-In **2D sprite mode**, select a sprite and press **O**. In **3D**, point the
-crosshair at a visible sprite and press **O**. The sprite is highlighted when
-selected. **Sprites → Stick Sprite to Wall** is also available.
+```sh
+meson setup build --native-file conan/conan_meson_native.ini --buildtype debug -Db_sanitize=address
+meson compile -C build
+```
 
-The sprite snaps to the nearest wall of its own sector (including two-sided
-walls), regardless of its angle. It becomes wall-aligned, faces into the room,
-and sits slightly off the wall to avoid flicker. Height, texture, tags and
-unrelated flags are preserved. This is a one-time placement; it does not follow
-later wall movement. This intentionally differs from Build's directional
-ornament command.
+Run it:
+
+```sh
+./build/dukebuilder
+```
 
 ## Linux AppImage
 
@@ -849,52 +861,3 @@ releases**. Before distributing a real installer, test installation, 3D renderin
 upgrades, silent mode, and uninstall preservation of user files on Windows with
 no development tools installed. Release signing is a separate step and is not
 configured here.
-
-## Joining sectors
-
-In **Sectors mode**, select the sector whose properties you want to keep, then
-Shift-click additional adjacent sectors. Choose **Tools → Join Sectors** or press
-**J**. The selection must be connected through shared two-sided walls.
-
-Shared boundaries are removed; the resulting sector takes all sector properties
-from the first selected sector. Surviving boundary walls retain their own side
-properties, including links to unselected neighbors. Inner sectors can be joined
-into their surroundings; unselected holes remain. Sprite and player-start sector
-references are remapped without changing their positions. The resulting sector
-remains selected. Sector numbers after removed records may change.
-
-When several sectors are added in one selection-change event, sector number is
-the tie-breaker. Click the desired source first to make the property choice
-explicit. Disconnected or branching boundaries are rejected without changing the
-map. If the source first wall would disappear and is needed for a slope or
-relative texture alignment, choose a surviving outer first wall before joining.
-The source heights replace those of the other selected sectors; check player and
-sprite placement afterward. A source slope that crosses the opposite surface in
-the enlarged sector is rejected.
-
-## Deleting sectors
-
-In **Sectors mode**, select a sector (Shift-click to select more) and press
-**Delete**. This removes the selected sector interiors and their sprites.
-Boundaries still used by neighboring sectors remain, with those neighbors' wall
-properties intact, and become one-sided solid walls. Deleting an inner sector
-therefore leaves a void hole in its surrounding sector; it does not fill the hole
-or merge the two sectors. The result saves and reloads as a sector with inner loops.
-
-The player-start marker is retained. If its sector was deleted, move it into a
-remaining sector before saving. Maps containing void holes remain editable: continue drawing rooms and platforms,
-splitting surrounding sectors, or editing and deleting boundary edges. Empty
-interiors remain empty through these edits and through saving and reopening.
-You can also draw a separate room inside a void without filling the space around
-it. Restrictions on overlapping or effect geometry still apply.
-
-In **Vertices mode**, **Delete** removes selected vertices and reconnects their
-neighboring walls, including both sides of a shared wall midpoint. Each surviving
-sector side uses its incoming wall's properties. Sector properties and loops are
-preserved. Junctions with more than two incident walls, loops reduced below three
-vertices, intersecting/inverted boundaries, and changes to a first wall needed by
-slopes or relative texture alignment are rejected without changing the map.
-
-Sprites display a facing arrow in every 2D mode. It follows the sprite's Angle
-property (0° right, 90° down, 180° left, 270° up), while the texture thumbnail
-stays upright. The arrow stays visible at a fixed screen size when zooming.
