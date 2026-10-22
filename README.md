@@ -1,16 +1,18 @@
 # Duke Builder
 
-An experimental level editor for Duke 3D built with Qt.
+![Duke Builder Icon](./icons/icon-256x256.png)
 
-2D mode:
+A level editor for Duke 3D built with Qt.
+
+## 2D Mode
 
 ![Duke Builder in 2D mode](./pics/DukeBuilder2D.png)
 
-3D mode:
+## 3D Mode
 
 ![Duke Builder in 3D mode](./pics/DukeBuilder3D.jpg)
 
-## 2D editor controls
+## 2D Mode Editor Controls
 
 - **Drawing tool dropdown:** choose Freeform, Rectangle, Circle, or Regular polygon.
   Rectangle uses two opposite corners along the active grid axes; hold Shift on
@@ -198,7 +200,7 @@ existing directory for a release, set `meson configure build-release
 --buildtype=release -Db_sanitize=none` and rebuild. Switching only `--buildtype`
 does not clear an explicitly enabled sanitizer.
 
-## 3D preview
+## 3D Mode Editor Controls
 
 Configure a game archive containing ART tiles and PALETTE.DAT (normally
 DUKE3D.GRP) in **Settings → Game Data**. While mouse look is active, left-click a
