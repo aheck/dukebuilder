@@ -1658,6 +1658,8 @@ MainWindow::MainWindow(QWidget *parent)
     });
 
     auto *viewMenu = menuBar()->addMenu("&View");
+    menuBar()->removeAction(toolsMenu->menuAction());
+    menuBar()->insertMenu(viewMenu->menuAction(), toolsMenu);
     auto *spritesAction = viewMenu->addAction("&Sprites");
     spritesAction->setCheckable(true);
     spritesAction->setChecked(true);
