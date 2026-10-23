@@ -281,7 +281,7 @@ void TextureBrowserWidget::reload()
         auto *item = new QListWidgetItem(QIcon(thumbnail),
                                         QString::number(iterator.key()) + "\n" + metadata.name);
         item->setData(Qt::UserRole, iterator.key());
-        item->setToolTip(QString("Tile %1\n%4\n%2 × %3\n%5")
+        item->setToolTip(QString("Tile %1\nFull name: %4\n%2 × %3\n%5")
                              .arg(iterator.key())
                              .arg(texture.width)
                              .arg(texture.height)

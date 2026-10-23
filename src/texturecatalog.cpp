@@ -51,22 +51,23 @@ TextureMetadata textureMetadata(int tile)
         struct Family { int first; int last; const char *name; TextureCategory category; };
         const Family families[] = {
             {1400, 1517, "Duke player", TextureCategory::Characters}, {1550, 1599, "Shark", TextureCategory::Enemies},
-            {1680, 1767, "Assault trooper liztroop", TextureCategory::Enemies},
+            {1680, 1767, "Assault Trooper", TextureCategory::Enemies},
             {1820, 1859, "Octabrain", TextureCategory::Enemies}, {1880, 1889, "Sentry drone", TextureCategory::Enemies},
-            {1920, 1959, "Assault commander", TextureCategory::Enemies}, {1960, 1974, "Recon patrol vehicle", TextureCategory::Enemies},
-            {1975, 1999, "Tank", TextureCategory::Enemies}, {2000, 2089, "Pig cop", TextureCategory::Enemies},
-            {2120, 2199, "Assault enforcer lizman", TextureCategory::Enemies}, {2370, 2377, "Green slime", TextureCategory::Enemies},
-            {2630, 2709, "Battlelord boss", TextureCategory::Enemies}, {2710, 2759, "Overlord boss", TextureCategory::Enemies},
-            {2760, 2812, "Cycloid emperor boss", TextureCategory::Enemies},
-            {4610, 4739, "Assault beast newbeast", TextureCategory::Enemies},
-            {4740, 4859, "Alien queen boss", TextureCategory::Enemies},
+            {1915, 1959, "Assault Commander", TextureCategory::Enemies}, {1960, 1974, "Recon Patrol Vehicle", TextureCategory::Enemies},
+            {1975, 1999, "Pig Cop Tank", TextureCategory::Enemies}, {2000, 2089, "Pig Cop", TextureCategory::Enemies},
+            {2120, 2199, "Enforcer", TextureCategory::Enemies}, {2350, 2364, "Turret", TextureCategory::Enemies},
+            {2370, 2377, "Slimer", TextureCategory::Enemies},
+            {2630, 2709, "Battlelord Sentry", TextureCategory::Enemies}, {2710, 2759, "Overlord", TextureCategory::Enemies},
+            {2760, 2812, "Cycloid Emperor", TextureCategory::Enemies},
+            {4610, 4739, "Alien Beast", TextureCategory::Enemies},
+            {4740, 4859, "Alien Queen", TextureCategory::Enemies},
             {2822, 2915, "Small font alphabet numbers", TextureCategory::HudAndFonts},
             {2940, 3023, "Large font alphabet numbers punctuation", TextureCategory::HudAndFonts},
             {3072, 3135, "Mini font alphabet numbers", TextureCategory::HudAndFonts},
-            {2510, 2520, "Devastator weapon", TextureCategory::WeaponsAndAmmo}, {2524, 2532, "Pistol weapon reload", TextureCategory::WeaponsAndAmmo},
-            {2536, 2543, "Chaingun weapon", TextureCategory::WeaponsAndAmmo}, {2544, 2547, "RPG rocket launcher weapon", TextureCategory::WeaponsAndAmmo},
-            {2548, 2551, "Freezer weapon", TextureCategory::WeaponsAndAmmo}, {2556, 2562, "Shrinker weapon", TextureCategory::WeaponsAndAmmo},
-            {2613, 2629, "Shotgun weapon", TextureCategory::WeaponsAndAmmo},
+            {2510, 2520, "Devastator", TextureCategory::WeaponsAndAmmo}, {2524, 2532, "Pistol", TextureCategory::WeaponsAndAmmo},
+            {2536, 2543, "Chaingun", TextureCategory::WeaponsAndAmmo}, {2544, 2547, "RPG", TextureCategory::WeaponsAndAmmo},
+            {2548, 2551, "Freezer", TextureCategory::WeaponsAndAmmo}, {2556, 2562, "Shrinker", TextureCategory::WeaponsAndAmmo},
+            {2613, 2629, "Shotgun", TextureCategory::WeaponsAndAmmo},
         };
         for (const auto &family : families) {
             for (int id = family.first; id <= family.last; ++id)
@@ -88,13 +89,6 @@ TextureMetadata textureMetadata(int tile)
             if (!metadata.categories.contains(category)) metadata.categories.append(category);
             if (entry.category == TextureCategory::WeaponsAndAmmo && entry.tile >= 2510 && entry.tile <= 2629)
                 metadata.categories.append(textureCategoryName(TextureCategory::HudAndFonts));
-            if (metadata.name.contains("FIRSTGUN")) metadata.keywords += " pistol";
-            if (metadata.name.contains("DEVISTATOR")) metadata.keywords += " devastator";
-            if (metadata.name.contains("PANNEL")) metadata.keywords += " panel metal";
-            if (metadata.name.contains("LIZTROOP")) metadata.keywords += " assault trooper";
-            if (metadata.name.contains("LIZMAN")) metadata.keywords += " assault enforcer";
-            if (metadata.name.contains("PIGCOP")) metadata.keywords += " pig cop";
-            if (metadata.name.contains("RPG")) metadata.keywords += " rocket launcher";
         }
 
         return result;
