@@ -22,6 +22,7 @@ QString textureCategoryName(TextureCategory category)
         case TextureCategory::HudAndFonts: return "HUD & Fonts";
         case TextureCategory::EditorAndSpecialTiles: return "Editor & Special Tiles";
         case TextureCategory::Others: return "Others";
+        case TextureCategory::Vehicles: return "Vehicles";
     }
 
     return {};
