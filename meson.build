@@ -1,7 +1,7 @@
 project(
   'duke-builder',
   'cpp',
-  version: '0.5.0',
+  version: '0.6.0',
   default_options: [
     # Sanitizers are opt-in; release artifacts must not require their runtimes.
     'b_sanitize=none',
