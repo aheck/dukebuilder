@@ -1538,7 +1538,7 @@ MainWindow::MainWindow(QWidget *parent)
         m_grpFileManager->raise();
         m_grpFileManager->activateWindow();
     });
-    auto *joinSectorsAction = toolsMenu->addAction("Join Sectors");
+    auto *joinSectorsAction = sectorsMenu->addAction("Join Sectors");
     joinSectorsAction->setShortcut(QKeySequence(Qt::Key_J));
     joinSectorsAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
     joinSectorsAction->setAutoRepeat(false);
