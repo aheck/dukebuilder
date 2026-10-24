@@ -1,7 +1,9 @@
 #include "mainwindow.h"
+#include "angledial.h"
+#include "propertyvaluedelegate.h"
+#include "toolbariconengine.h"
 #include "shortcuthelp.h"
 #include <QDialog>
-#include <QDial>
 #include "recovery.h"
 #include "mapsave.h"
 #include <QTimer>
@@ -17,15 +19,12 @@
 
 #include "info.h"
 #include "libduke_version.h"
-#include "tags.h"
 #include "spritelotags.h"
 
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
 #include <QComboBox>
-#include <QDragEnterEvent>
-#include <QDropEvent>
 #include <QCloseEvent>
 #include <QDockWidget>
 #include <QDir>
@@ -36,12 +35,9 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QIcon>
-#include <QIconEngine>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
-#include <QMimeData>
-#include <QMouseEvent>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -53,7 +49,6 @@
 #include <QSettings>
 #include <QStatusBar>
 #include <QSignalBlocker>
-#include <QStyledItemDelegate>
 #include <QToolBar>
 #include <QSpinBox>
 #include <QTreeWidget>
@@ -94,379 +89,6 @@ QString macBundleExecutable(const QString &path)
 }
 #endif
 
-enum class ToolbarSymbol { DrawMode, LinesMode, VerticesMode, SectorsMode, SpritesMode, New, Open, Save, Grid, Plain, Floor, Ceiling, Move, AddSprite, Rotate, MirrorHorizontal, MirrorVertical };
-
-// Draw at the requested size so toolbar icons remain crisp on high-DPI screens.
-class ToolbarIconEngine final : public QIconEngine
-{
-public:
-    explicit ToolbarIconEngine(ToolbarSymbol symbol) : m_symbol(symbol) {}
-    QIconEngine *clone() const override { return new ToolbarIconEngine(m_symbol); }
-
-    void paint(QPainter *painter, const QRect &rect, QIcon::Mode mode, QIcon::State) override
-    {
-        painter->save();
-        painter->translate(rect.center().x() - rect.width() / 2.0,
-                           rect.center().y() - rect.height() / 2.0);
-        painter->scale(rect.width() / 24.0, rect.height() / 24.0);
-        painter->setRenderHint(QPainter::Antialiasing);
-        const auto palette = QApplication::palette();
-        const auto group = mode == QIcon::Disabled ? QPalette::Disabled : QPalette::Active;
-        const QColor ink = palette.color(group, QPalette::ButtonText);
-        const QColor accent = palette.color(group, QPalette::Highlight);
-        painter->setPen(QPen(ink, 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        if (m_symbol == ToolbarSymbol::DrawMode) {
-            painter->setBrush(accent);
-            painter->drawPolygon(QPolygonF{QPointF(4, 20), QPointF(6, 14),
-                QPointF(17, 3), QPointF(21, 7), QPointF(10, 18)});
-            painter->drawLine(QPointF(14, 6), QPointF(18, 10));
-        } else if (m_symbol == ToolbarSymbol::LinesMode) {
-            painter->setPen(QPen(accent, 2.5));
-            painter->drawLine(QPointF(5, 19), QPointF(19, 5));
-            painter->setBrush(ink);
-            painter->drawRect(QRectF(3, 17, 4, 4));
-            painter->drawRect(QRectF(17, 3, 4, 4));
-        } else if (m_symbol == ToolbarSymbol::VerticesMode) {
-            painter->drawPolygon(QPolygonF{QPointF(5, 19), QPointF(8, 4), QPointF(20, 15)});
-            painter->setBrush(accent);
-            for (const auto point : {QPointF(5, 19), QPointF(8, 4), QPointF(20, 15)}) {
-                painter->drawEllipse(point, 2.5, 2.5);
-            }
-        } else if (m_symbol == ToolbarSymbol::SectorsMode) {
-            painter->setBrush(accent);
-            painter->drawPolygon(QPolygonF{QPointF(4, 5), QPointF(17, 3),
-                QPointF(21, 14), QPointF(14, 21), QPointF(3, 17)});
-        } else if (m_symbol == ToolbarSymbol::SpritesMode) {
-            painter->drawEllipse(QRectF(4, 4, 16, 16));
-            painter->setBrush(accent);
-            painter->drawPolygon(QPolygonF{QPointF(9, 15), QPointF(11, 10),
-                QPointF(20, 4), QPointF(14, 13)});
-        } else if (m_symbol == ToolbarSymbol::New) {
-            // Folded document with a plus sign.
-            painter->drawPolygon(QPolygonF{QPointF(5, 3), QPointF(14, 3), QPointF(19, 8),
-                                          QPointF(19, 21), QPointF(5, 21)});
-            painter->drawPolyline(QPolygonF{QPointF(14, 3), QPointF(14, 8), QPointF(19, 8)});
-            painter->setPen(QPen(accent, 2, Qt::SolidLine, Qt::RoundCap));
-            painter->drawLine(QPointF(8, 14), QPointF(16, 14));
-            painter->drawLine(QPointF(12, 10), QPointF(12, 18));
-        } else if (m_symbol == ToolbarSymbol::Open) {
-            // Open folder with a raised front flap.
-            painter->drawPolygon(QPolygonF{QPointF(3, 19), QPointF(3, 5), QPointF(9, 5),
-                                          QPointF(11, 8), QPointF(20, 8), QPointF(20, 19)});
-            painter->setBrush(accent);
-            painter->drawPolygon(QPolygonF{QPointF(3, 19), QPointF(6, 11),
-                                          QPointF(22, 11), QPointF(19, 19)});
-        } else if (m_symbol == ToolbarSymbol::Save) {
-            // Floppy disk with a shutter and label.
-            painter->setBrush(accent);
-            painter->drawPolygon(QPolygonF{QPointF(4, 3), QPointF(17, 3), QPointF(21, 7),
-                                          QPointF(21, 21), QPointF(3, 21), QPointF(3, 4)});
-            painter->setBrush(palette.color(group, QPalette::Button));
-            painter->drawRect(QRectF(7, 3, 9, 6));
-            painter->drawRect(QRectF(7, 13, 10, 8));
-            painter->drawLine(QPointF(10, 17), QPointF(14, 17));
-        } else if (m_symbol == ToolbarSymbol::Move) {
-            painter->drawLine(QPointF(3, 12), QPointF(21, 12));
-            painter->drawLine(QPointF(12, 3), QPointF(12, 21));
-            for (int angle : {0, 90, 180, 270}) {
-                painter->save();
-                painter->translate(12, 12);
-                painter->rotate(angle);
-                painter->drawPolyline(QPolygonF{QPointF(-3, -6), QPointF(0, -9), QPointF(3, -6)});
-                painter->restore();
-            }
-        } else if (m_symbol == ToolbarSymbol::Rotate) {
-            painter->drawArc(QRectF(4, 4, 16, 16), 30 * 16, 285 * 16);
-            painter->drawPolyline(QPolygonF{QPointF(16, 3), QPointF(21, 5), QPointF(19, 10)});
-        } else if (m_symbol == ToolbarSymbol::MirrorHorizontal || m_symbol == ToolbarSymbol::MirrorVertical) {
-            if (m_symbol == ToolbarSymbol::MirrorVertical) {
-                painter->translate(24, 0); painter->rotate(90);
-            }
-            painter->drawLine(QPointF(12, 2), QPointF(12, 22));
-            painter->drawPolygon(QPolygonF{QPointF(3, 18), QPointF(9, 6), QPointF(9, 18)});
-            painter->drawPolygon(QPolygonF{QPointF(21, 18), QPointF(15, 6), QPointF(15, 18)});
-        } else if (m_symbol == ToolbarSymbol::AddSprite) {
-            painter->drawEllipse(QRectF(3, 3, 12, 12));
-            painter->drawLine(QPointF(9, 9), QPointF(13, 5));
-            painter->setPen(QPen(accent, 2, Qt::SolidLine, Qt::RoundCap));
-            painter->drawLine(QPointF(13, 17), QPointF(23, 17));
-            painter->drawLine(QPointF(18, 12), QPointF(18, 22));
-        } else if (m_symbol == ToolbarSymbol::Grid) {
-            for (int coordinate : {4, 12, 20}) {
-                painter->drawLine(QPointF(coordinate, 4), QPointF(coordinate, 20));
-                painter->drawLine(QPointF(4, coordinate), QPointF(20, coordinate));
-            }
-        } else if (m_symbol == ToolbarSymbol::Plain) {
-            painter->setBrush(accent);
-            painter->drawRoundedRect(QRectF(4, 4, 16, 16), 2, 2);
-        } else {
-            // Mirror the textured plane to distinguish the ceiling from the floor.
-            if (m_symbol == ToolbarSymbol::Ceiling) {
-                painter->translate(0, 24);
-                painter->scale(1, -1);
-            }
-            painter->drawLine(QPointF(4, 5), QPointF(4, 20));
-            painter->drawLine(QPointF(20, 5), QPointF(20, 20));
-            painter->setBrush(accent);
-            painter->drawPolygon(QPolygonF{QPointF(4, 20), QPointF(20, 20),
-                                          QPointF(17, 12), QPointF(7, 12)});
-            painter->drawLine(QPointF(12, 12), QPointF(12, 20));
-            painter->drawLine(QPointF(5.5, 16), QPointF(18.5, 16));
-        }
-        painter->restore();
-    }
-
-    QPixmap pixmap(const QSize &size, QIcon::Mode mode, QIcon::State state) override
-    {
-        QPixmap result(size);
-        result.fill(Qt::transparent);
-        QPainter painter(&result);
-        paint(&painter, QRect(QPoint(), size), mode, state);
-        return result;
-    }
-
-private:
-    ToolbarSymbol m_symbol;
-};
-
-QIcon toolbarIcon(ToolbarSymbol symbol)
-{
-    return QIcon(new ToolbarIconEngine(symbol));
-}
-
-class AngleDial final : public QDial
-{
-public:
-    using QDial::QDial;
-
-    // Qt's wrapping dial starts at the bottom; map angles start at the
-    // right. Both increase clockwise in screen coordinates.
-    static int positionForAngle(int angle) { return (angle + 270) % 360; }
-    static int angleForPosition(int position) { return (position + 90) % 360; }
-
-protected:
-    void mouseReleaseEvent(QMouseEvent *event) override
-    {
-        if (event->button() == Qt::LeftButton && event->buttons() == Qt::NoButton
-            && event->modifiers().testFlag(Qt::ShiftModifier)) {
-            // QDial's default release replaces the position with the raw mouse
-            // angle. Commit the snapped position instead.
-            setSliderPosition((qRound(sliderPosition() / 15.0) * 15) % 360);
-            setSliderDown(false);
-            event->accept();
-            return;
-        }
-        QDial::mouseReleaseEvent(event);
-    }
-};
-
-class TextureValueEdit final : public QLineEdit
-{
-public:
-    using QLineEdit::QLineEdit;
-    std::function<void(int)> tileDropped;
-
-protected:
-    void dragEnterEvent(QDragEnterEvent *event) override
-    {
-        if (event->mimeData()->hasFormat("application/x-dukebuilder-tile")) {
-            event->acceptProposedAction();
-            return;
-        }
-        QLineEdit::dragEnterEvent(event);
-    }
-
-    void dropEvent(QDropEvent *event) override
-    {
-        bool valid = false;
-        const int tile = QString::fromUtf8(
-            event->mimeData()->data("application/x-dukebuilder-tile")).toInt(&valid);
-        if (valid) {
-            setText(QString::number(tile));
-            if (tileDropped) tileDropped(tile);
-            event->acceptProposedAction();
-            return;
-        }
-        QLineEdit::dropEvent(event);
-    }
-};
-
-class TexturePropertyEditor final : public QWidget
-{
-public:
-    explicit TexturePropertyEditor(QWidget *parent)
-        : QWidget(parent)
-        , value(new TextureValueEdit(this))
-        , browse(new QPushButton("...", this))
-    {
-        auto *layout = new QHBoxLayout(this);
-        layout->setContentsMargins(0, 0, 0, 0);
-        layout->setSpacing(2);
-        browse->setFixedWidth(28);
-        browse->setToolTip("Choose texture");
-        layout->addWidget(value, 1);
-        layout->addWidget(browse);
-    }
-
-    QLineEdit *value;
-    QPushButton *browse;
-};
-
-class PropertyValueDelegate final : public QStyledItemDelegate
-{
-public:
-    using QStyledItemDelegate::QStyledItemDelegate;
-
-    void setTextureChooser(
-        std::function<std::optional<int>(std::optional<int>)> chooser)
-    {
-        m_textureChooser = std::move(chooser);
-    }
-
-    QWidget *createEditor(QWidget *parent, const QStyleOptionViewItem &option,
-                          const QModelIndex &index) const override
-    {
-        if (index.column() != 1) {
-            return nullptr;
-        }
-        const auto property = static_cast<MapEditor::Property>(
-            index.siblingAtColumn(0).data(Qt::UserRole).toInt());
-        if (property == MapEditor::Property::Lotag
-            || property == MapEditor::Property::SectorLotag
-            || property == MapEditor::Property::WallLotag) {
-            auto *editor = new QComboBox(parent);
-            editor->setEditable(true);
-            editor->setInsertPolicy(QComboBox::NoInsert);
-            // Descriptive preset labels must not autocomplete over numeric input.
-            editor->setCompleter(nullptr);
-            editor->setMinimumContentsLength(12);
-            editor->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-            if (property == MapEditor::Property::WallLotag) {
-                // Wall tags are texture-dependent channels or sound IDs, not sector effects.
-                // https://github.com/jonof/jfduke3d/blob/master/src/sector.c
-                editor->setToolTip("Wall lotags depend on the texture: switches, doors and "
-                                   "forcefields use matching channel numbers; mirrors use sound IDs. "
-                                   "Enter -32768 to 32767, or 65535 for an exit switch.");
-                editor->addItem("0 - No tag", 0);
-                editor->addItem("1 - Channel 1 (switch / door / forcefield example)", 1);
-                editor->addItem("252 - Mirror: play sound 252 on use", 252);
-                editor->addItem("-1 (65535) - Switch / door: end level", -1);
-            } else if (property == MapEditor::Property::SectorLotag) {
-                editor->setToolTip("Duke 3D sector lotags. Enter an integer from 0 to 65535. "
-                                   "For a one-time sound, enter 10000 + sound ID (10xxx).");
-                for (const auto &entry : sectorLotags) {
-                    editor->addItem(QString::number(entry.tag) + " - " + entry.meaning,
-                                    entry.tag);
-                }
-            } else {
-                const auto tile = index.siblingAtColumn(0).data(Qt::UserRole + 2);
-                const auto tags = spriteLotags(tile.isValid() ? tile.toInt() : -1);
-                editor->setToolTip(QString::fromUtf8(tags.description)
-                    + " Standard Duke 3D / Atomic meanings; mods may redefine them. "
-                      "Enter -32768 to 32767, or 65535 as an alias for -1.");
-                editor->lineEdit()->setPlaceholderText("Enter lotag");
-                for (const auto &entry : tags.presets) {
-                    editor->addItem(QString::number(entry.tag) + " - " + entry.meaning, entry.tag);
-                }
-            }
-            const auto commit = [this, editor, index = QPersistentModelIndex(index)] {
-                if (index.isValid()) {
-                    emit const_cast<PropertyValueDelegate *>(this)->commitData(editor);
-                }
-            };
-            connect(editor, &QComboBox::activated, editor, commit, Qt::QueuedConnection);
-            connect(editor->lineEdit(), &QLineEdit::editingFinished, editor, commit);
-            return editor;
-        }
-        if (property != MapEditor::Property::Texture
-            && property != MapEditor::Property::FloorTexture
-            && property != MapEditor::Property::CeilingTexture
-            && property != MapEditor::Property::OverlayTexture) {
-            return QStyledItemDelegate::createEditor(parent, option, index);
-        }
-
-        auto *editor = new TexturePropertyEditor(parent);
-        static_cast<TextureValueEdit *>(editor->value)->tileDropped =
-            [this, editor, index = QPersistentModelIndex(index)](int) {
-                if (index.isValid()) {
-                    emit const_cast<PropertyValueDelegate *>(this)->commitData(editor);
-                }
-            };
-        connect(editor->value, &QLineEdit::editingFinished, editor,
-                [this, editor, index = QPersistentModelIndex(index)] {
-                    if (index.isValid()) {
-                        emit const_cast<PropertyValueDelegate *>(this)->commitData(editor);
-                    }
-                });
-        connect(editor->browse, &QPushButton::clicked, editor,
-                [this, editor, index = QPersistentModelIndex(index)] {
-                    bool valid = false;
-                    const int currentTexture = editor->value->text().toInt(&valid);
-                    if (!m_textureChooser) {
-                        return;
-                    }
-                    const std::optional<int> texture = m_textureChooser(
-                        valid ? std::optional<int>(currentTexture) : std::nullopt);
-                    if (texture && index.isValid()) {
-                        editor->value->setText(QString::number(*texture));
-                        emit const_cast<PropertyValueDelegate *>(this)->commitData(editor);
-                    }
-                });
-        return editor;
-    }
-
-    void setEditorData(QWidget *editor, const QModelIndex &index) const override
-    {
-        if (auto *lotagEditor = dynamic_cast<QComboBox *>(editor)) {
-            const QSignalBlocker blocker(lotagEditor);
-            const int tag = index.data(Qt::EditRole).toInt();
-            const int entry = lotagEditor->findData(tag);
-            lotagEditor->setCurrentIndex(entry);
-            if (entry < 0) {
-                lotagEditor->setEditText(QString::number(tag));
-            }
-            return;
-        }
-        if (auto *textureEditor = dynamic_cast<TexturePropertyEditor *>(editor)) {
-            textureEditor->value->setText(index.data(Qt::EditRole).toString());
-            return;
-        }
-        QStyledItemDelegate::setEditorData(editor, index);
-    }
-
-    void setModelData(QWidget *editor, QAbstractItemModel *model,
-                      const QModelIndex &index) const override
-    {
-        if (auto *lotagEditor = dynamic_cast<QComboBox *>(editor)) {
-            const QString text = lotagEditor->currentText().trimmed();
-            const int entry = lotagEditor->findText(text, Qt::MatchExactly);
-            bool valid = false;
-            int tag = entry >= 0 ? lotagEditor->itemData(entry).toInt(&valid)
-                                       : text.toInt(&valid);
-            const auto property = static_cast<MapEditor::Property>(
-                index.siblingAtColumn(0).data(Qt::UserRole).toInt());
-            if ((property == MapEditor::Property::WallLotag
-                 || property == MapEditor::Property::Lotag) && tag == 65535) {
-                tag = -1;
-            }
-            const int maximum = property == MapEditor::Property::SectorLotag ? 65535 : 32767;
-            if (valid && tag >= -32768 && tag <= maximum) {
-                model->setData(index, QString::number(tag), Qt::EditRole);
-            } else {
-                setEditorData(editor, index);
-            }
-            return;
-        }
-        if (auto *textureEditor = dynamic_cast<TexturePropertyEditor *>(editor)) {
-            model->setData(index, textureEditor->value->text(), Qt::EditRole);
-            return;
-        }
-        QStyledItemDelegate::setModelData(editor, model, index);
-    }
-
-private:
-    std::function<std::optional<int>(std::optional<int>)> m_textureChooser;
-};
 }
 
 MainWindow::MainWindow(QWidget *parent)
