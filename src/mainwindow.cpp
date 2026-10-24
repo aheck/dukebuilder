@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "shortcuthelp.h"
 #include <QDialog>
+#include <QDial>
 #include "recovery.h"
 #include "mapsave.h"
 #include <QTimer>
@@ -40,6 +41,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMimeData>
+#include <QMouseEvent>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -231,6 +233,32 @@ QIcon toolbarIcon(ToolbarSymbol symbol)
 {
     return QIcon(new ToolbarIconEngine(symbol));
 }
+
+class AngleDial final : public QDial
+{
+public:
+    using QDial::QDial;
+
+    // Qt's wrapping dial starts at the bottom; map angles start at the
+    // right. Both increase clockwise in screen coordinates.
+    static int positionForAngle(int angle) { return (angle + 270) % 360; }
+    static int angleForPosition(int position) { return (position + 90) % 360; }
+
+protected:
+    void mouseReleaseEvent(QMouseEvent *event) override
+    {
+        if (event->button() == Qt::LeftButton && event->buttons() == Qt::NoButton
+            && event->modifiers().testFlag(Qt::ShiftModifier)) {
+            // QDial's default release replaces the position with the raw mouse
+            // angle. Commit the snapped position instead.
+            setSliderPosition((qRound(sliderPosition() / 15.0) * 15) % 360);
+            setSliderDown(false);
+            event->accept();
+            return;
+        }
+        QDial::mouseReleaseEvent(event);
+    }
+};
 
 class TextureValueEdit final : public QLineEdit
 {
@@ -885,8 +913,65 @@ MainWindow::MainWindow(QWidget *parent)
             addProperty("X", number(properties->x), MapEditor::Property::X);
             addProperty("Y", number(properties->y), MapEditor::Property::Y);
             addProperty("Z", number(properties->z), MapEditor::Property::Z);
-            addProperty("Angle", number(std::clamp(properties->angle, 0.0, 360.0)),
-                        MapEditor::Property::Angle);
+            auto *angleRow = addProperty("Angle", number(std::clamp(properties->angle, 0.0, 360.0)),
+                                         MapEditor::Property::Angle);
+            angleRow->setFlags(angleRow->flags() & ~Qt::ItemIsEditable);
+            auto *angleControl = new QWidget(propertiesControl);
+            auto *angleLayout = new QHBoxLayout(angleControl);
+            angleLayout->setContentsMargins(0, 0, 0, 0);
+            auto *angleText = new QLineEdit(angleRow->text(1), angleControl);
+            angleText->setAccessibleName("Angle in degrees");
+            auto *angleDial = new AngleDial(angleControl);
+            angleDial->setAccessibleName("Angle");
+            // QDial maps the entire min/max interval to a full circle.
+            angleDial->setRange(0, 360);
+            angleDial->setWrapping(true);
+            angleDial->setTracking(false);
+            // Single-step controls keyboard increments and notch spacing, but
+            // leaves mouse dragging free to select individual degrees.
+            angleDial->setSingleStep(15);
+            angleDial->setPageStep(15);
+            angleDial->setNotchTarget(1);
+            angleDial->setNotchesVisible(true);
+            angleDial->setFixedSize(48, 48);
+            angleDial->setToolTip("Angle in degrees. Hold Shift to snap to 15°");
+            const auto syncDial = [angleDial](const QString &text) {
+                bool valid = false;
+                const double angle = text.toDouble(&valid);
+                if (valid && std::isfinite(angle) && angle >= 0 && angle <= 360) {
+                    const QSignalBlocker blocker(angleDial);
+                    angleDial->setValue(AngleDial::positionForAngle(qRound(angle)));
+                }
+            };
+            syncDial(angleText->text());
+            angleLayout->addWidget(angleText, 1);
+            angleLayout->addWidget(angleDial);
+            angleRow->setSizeHint(1, angleControl->sizeHint());
+            propertiesControl->setItemWidget(angleRow, 1, angleControl);
+            const QPersistentModelIndex angleIndex = propertiesControl->model()->index(
+                propertiesControl->topLevelItemCount() - 1, 1);
+            const auto commitAngle = [editor, angleText, angleIndex] {
+                if (!angleIndex.isValid() || angleText->text() == angleIndex.data().toString()) return;
+                bool valid = false;
+                const double angle = angleText->text().toDouble(&valid);
+                editor->setSelectedProperty(MapEditor::Property::Angle,
+                    valid ? angle : std::numeric_limits<qreal>::quiet_NaN());
+            };
+            connect(angleText, &QLineEdit::textEdited, angleControl, syncDial);
+            connect(angleText, &QLineEdit::editingFinished, angleControl, commitAngle, Qt::QueuedConnection);
+            connect(angleDial, &QDial::sliderMoved, angleControl, [angleText, angleDial](int angle) {
+                if (QApplication::keyboardModifiers().testFlag(Qt::ShiftModifier)) {
+                    angle = (qRound(angle / 15.0) * 15) % 360;
+                    const QSignalBlocker blocker(angleDial);
+                    angleDial->setSliderPosition(angle);
+                }
+                angleText->setText(QString::number(AngleDial::angleForPosition(angle)));
+            });
+            connect(angleDial, &QDial::valueChanged, angleControl, [angleText](int angle) {
+                angleText->setText(QString::number(AngleDial::angleForPosition(angle)));
+            });
+            // Queue commits because applying a property rebuilds this entire tree.
+            connect(angleDial, &QDial::valueChanged, angleControl, commitAngle, Qt::QueuedConnection);
             if (properties->texture) {
                 updateTexturePreview(spriteTexturePreview, *properties->texture, "Sprite");
                 spriteTexturePreviews->show();
