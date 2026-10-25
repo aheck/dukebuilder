@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "mapinfowindow.h"
 #include "angledial.h"
 #include "propertyvaluedelegate.h"
 #include "toolbariconengine.h"
@@ -1404,6 +1405,13 @@ MainWindow::MainWindow(QWidget *parent)
         statusBar()->showMessage("2D mode");
     };
     view3D->leave3D = leave3D;
+    auto *mapInfoAction = toolsMenu->addAction("Map Info");
+    mapInfoAction->setObjectName("mapInfoAction");
+    connect(mapInfoAction, &QAction::triggered, this, [=] {
+        if (editor->isVisible()) editor->setFocus(); // Commit property cell edits.
+        MapInfoWindow dialog(editor->document(), m_mapFilename, editor->hasUnsavedChanges(), this);
+        view3D->runModal([&] { dialog.exec(); });
+    });
     auto *checkMapAction = toolsMenu->addAction("Check Map");
     checkMapAction->setObjectName("checkMapAction");
     checkMapAction->setShortcut(QKeySequence(Qt::Key_F4));

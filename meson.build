@@ -224,6 +224,8 @@ app_sources = [
     'src/texturevalueedit.h',
     'src/toolbariconengine.cpp',
     'src/toolbariconengine.h',
+    'src/mapinfowindow.cpp',
+    'src/mapinfowindow.h',
     'src/mainwindow.cpp',
     'src/mainwindow.h',
     'src/mapdocument.cpp',
