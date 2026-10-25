@@ -164,6 +164,17 @@ texturebrowser_test = executable('texturebrowser-test',
   dependencies: grp_test_dependencies)
 test('texturebrowser', texturebrowser_test, env: ['QT_QPA_PLATFORM=minimal'])
 
+propertiespanel_test = executable('propertiespanel-test',
+  ['tests/propertiespanel_test.cpp', 'src/propertiespanel.cpp',
+   'src/angledial.cpp', 'src/propertyvaluedelegate.cpp', 'src/texturepropertyeditor.cpp',
+   'src/texturevalueedit.cpp', 'src/texturebrowserwindow.cpp', 'src/texturebrowserwidget.cpp',
+   'src/texturecatalog.cpp', 'src/mapeditor.cpp', 'src/mapdocument.cpp',
+   'src/mapsave.cpp', 'src/mapload.cpp'],
+  include_directories: [include_directories('src'), libduke_inc],
+  cpp_args: grp_test_args,
+  dependencies: grp_test_dependencies)
+test('propertiespanel', propertiespanel_test, env: ['QT_QPA_PLATFORM=minimal'])
+
 mapeditor_drawing_test = executable('mapeditor-drawing-test',
   ['tests/mapeditor_drawing_test.cpp', 'src/mapeditor.cpp', 'src/mapdocument.cpp',
    'src/mapsave.cpp', 'src/mapload.cpp'],
@@ -226,6 +237,8 @@ app_sources = [
     'src/toolbariconengine.h',
     'src/mapinfowindow.cpp',
     'src/mapinfowindow.h',
+    'src/propertiespanel.cpp',
+    'src/propertiespanel.h',
     'src/mainwindow.cpp',
     'src/mainwindow.h',
     'src/mapdocument.cpp',
