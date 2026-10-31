@@ -2,7 +2,12 @@ include(default)
 
 [settings]
 build_type=Release
+{% if platform.system() == "Linux" %}
+# Qt's source build requires libstdc++'s __int128 support, disabled in strict C++ mode.
+compiler.cppstd=gnu17
+{% else %}
 compiler.cppstd=17
+{% endif %}
 {% if platform.system() == "Windows" %}
 compiler.runtime=dynamic
 compiler.runtime_type=Release

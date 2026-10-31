@@ -649,7 +649,8 @@ publishing are separate from these jobs.
 
 CI uses **Conan 2.28.1** to install the dependencies in `conanfile.txt`, with
 [profiles/ci](profiles/ci) selecting shared Qt on every platform. It detects
-the runner's compiler, builds in Release mode with C++17, and uses the shared
+the runner's compiler, builds in Release mode with C++17 (GNU extensions enabled
+on Linux for Qt's required `__int128` support), and uses the shared
 release runtime (`/MD`) on MSVC. Meson 1.12.1 and Ninja 1.13.0 are pinned too.
 Both projects consume the generated Conan native file. The sibling libduke
 checkout is pinned in the workflow; update its `ref` when adopting new APIs.
@@ -671,7 +672,22 @@ and PowerShell 7 on Windows. These environments supply the Qt plugin and shared-
 paths; no separate Qt installation is needed.
 
 ```sh
-python -m pip install conan==2.28.1 meson==1.12.1 ninja==1.13.0 pkgconf
+python -m pip install conan==2.28.1 meson==1.12.1 ninja==1.13.0
+```
+
+On Linux, use your distribution's `pkg-config` so system OpenGL libraries are
+discoverable. On Ubuntu, install the prerequisites with:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y pkg-config libgl1-mesa-dev libxkbcommon-dev libegl1-mesa-dev
+pkg-config --print-provides gl --print-errors
+```
+
+On macOS and Windows, install `pkgconf` with `python -m pip install pkgconf`.
+Then install the Conan dependencies:
+
+```sh
 conan profile detect
 conan install . --output-folder=conan-ci --build=missing -pr:a=profiles/ci -g VirtualBuildEnv -g VirtualRunEnv
 ```

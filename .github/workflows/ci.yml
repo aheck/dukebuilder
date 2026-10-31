@@ -55,7 +55,13 @@ jobs:
           arch: x64
 
       - name: Install build tools
-        run: python -m pip install conan==${{ env.CONAN_VERSION }} meson==1.12.1 ninja==1.13.0 pkgconf
+        run: python -m pip install conan==${{ env.CONAN_VERSION }} meson==1.12.1 ninja==1.13.0
+
+      # PyPI's pkgconf has no default system search paths and would shadow
+      # Ubuntu's pkg-config, hiding system libraries such as gl.pc from Conan.
+      - name: Install pkgconf on macOS and Windows
+        if: runner.os != 'Linux'
+        run: python -m pip install pkgconf
 
       - name: Detect compiler and record Conan profiles
         run: |
@@ -80,6 +86,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libgl1-mesa-dev libxkbcommon-dev libegl1-mesa-dev
+          command -v pkg-config
+          pkg-config --print-provides gl --print-errors
 
       - name: Install Conan dependencies
         run: >-
