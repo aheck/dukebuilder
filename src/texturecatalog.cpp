@@ -91,6 +91,9 @@ TextureMetadata textureMetadata(int tile)
                 metadata.categories.append(textureCategoryName(TextureCategory::HudAndFonts));
         }
 
+        // Preserve the symbolic tile name while allowing the familiar weapon
+        // name to find the pistol pickup, whose symbol is FIRSTGUNSPRITE.
+        result[21].keywords += " Pistol";
         return result;
     }();
     return catalog.value(tile, {QString("Tile %1").arg(tile), {"Others"}, {}});

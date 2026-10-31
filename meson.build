@@ -126,7 +126,9 @@ mapsave_test = executable(
   include_directories: [include_directories('src'), libduke_inc],
   dependencies: app_dependencies,
 )
-test('mapsave', mapsave_test)
+# Exercises complete round trips at the v8 limits (4096 sectors/16384 walls).
+# Allow slower debug/sanitizer builds on hosted runners to finish these fixtures.
+test('mapsave', mapsave_test, timeout: 120)
 
 tror_test = executable('tror-test',
   ['tests/tror_test.cpp', 'src/mapdocument.cpp', 'src/mapload.cpp', 'src/mapsave.cpp',
@@ -137,6 +139,11 @@ test('tror', tror_test)
 
 grp_test_dependencies = app_dependencies
 grp_test_args = []
+# Keep tests independent of the host's desktop and third-party style plugins.
+gui_test_environment = environment({
+  'QT_QPA_PLATFORM': 'minimal',
+  'QT_STYLE_OVERRIDE': 'Fusion',
+})
 if cpp.compiles('''
     #include <QtCore/qglobal.h>
     #ifndef QT_STATIC
@@ -154,7 +161,7 @@ grpfilemanager_test = executable('grpfilemanager-test',
   include_directories: [include_directories('src'), libduke_inc],
   cpp_args: grp_test_args,
   dependencies: grp_test_dependencies)
-test('grpfilemanager', grpfilemanager_test, env: ['QT_QPA_PLATFORM=minimal'])
+test('grpfilemanager', grpfilemanager_test, env: gui_test_environment)
 
 texturebrowser_test = executable('texturebrowser-test',
   ['tests/texturebrowser_test.cpp', 'src/texturebrowserwindow.cpp',
@@ -162,7 +169,7 @@ texturebrowser_test = executable('texturebrowser-test',
   include_directories: [include_directories('src'), libduke_inc],
   cpp_args: grp_test_args,
   dependencies: grp_test_dependencies)
-test('texturebrowser', texturebrowser_test, env: ['QT_QPA_PLATFORM=minimal'])
+test('texturebrowser', texturebrowser_test, env: gui_test_environment)
 
 propertiespanel_test = executable('propertiespanel-test',
   ['tests/propertiespanel_test.cpp', 'src/propertiespanel.cpp',
@@ -173,7 +180,7 @@ propertiespanel_test = executable('propertiespanel-test',
   include_directories: [include_directories('src'), libduke_inc],
   cpp_args: grp_test_args,
   dependencies: grp_test_dependencies)
-test('propertiespanel', propertiespanel_test, env: ['QT_QPA_PLATFORM=minimal'])
+test('propertiespanel', propertiespanel_test, env: gui_test_environment)
 
 mapeditor_drawing_test = executable('mapeditor-drawing-test',
   ['tests/mapeditor_drawing_test.cpp', 'src/mapeditor.cpp', 'src/mapdocument.cpp',
@@ -181,7 +188,7 @@ mapeditor_drawing_test = executable('mapeditor-drawing-test',
   include_directories: [include_directories('src'), libduke_inc],
   cpp_args: grp_test_args,
   dependencies: grp_test_dependencies)
-test('mapeditor-drawing', mapeditor_drawing_test, env: ['QT_QPA_PLATFORM=minimal'])
+test('mapeditor-drawing', mapeditor_drawing_test, env: gui_test_environment)
 
 mapeditor_trorlayers_test = executable('mapeditor-trorlayers-test',
   ['tests/mapeditor_trorlayers_test.cpp', 'src/mapeditor.cpp', 'src/mapdocument.cpp',
@@ -189,7 +196,7 @@ mapeditor_trorlayers_test = executable('mapeditor-trorlayers-test',
   include_directories: [include_directories('src'), libduke_inc],
   cpp_args: grp_test_args,
   dependencies: grp_test_dependencies)
-test('mapeditor-trorlayers', mapeditor_trorlayers_test, env: ['QT_QPA_PLATFORM=minimal'])
+test('mapeditor-trorlayers', mapeditor_trorlayers_test, env: gui_test_environment)
 
 
 texturecatalog_test = executable(
@@ -208,7 +215,7 @@ eduke32launch_test = executable(
 )
 test('eduke32launch', eduke32launch_test)
 
-if host_machine.system() == 'linux'
+if host_machine.system() == 'linux' and qt_is_static
   xcb_plugin = dependency('qt6-qtQXcbIntegrationPlugin')
   # Conan omits the static GLX integration plugin from its pkg-config metadata.
   qt_prefix = xcb_plugin.get_variable(pkgconfig: 'prefix')
@@ -336,3 +343,6 @@ tutorial_resource_test = executable('tutorial-resource-test',
   cpp_args: image_format_cpp_args,
   dependencies: image_format_dependencies)
 test('tutorial-resource', tutorial_resource_test)
+
+python = import('python').find_installation('python3')
+test('windows-installer', python, args: files('tests/windows_installer_test.py'))

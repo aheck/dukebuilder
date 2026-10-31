@@ -154,7 +154,7 @@ bool MapDocument::openMap(const QString &filename, QString &error)
             }
         }
         if (!loaded.m_complexTopology) {
-            std::vector<QPainterPath> shapes;
+            std::vector<std::pair<QRectF, QPainterPath>> shapes;
             for (const auto &sector : loaded.m_sectors) {
                 QPainterPath shape;
                 shape.setFillRule(Qt::OddEvenFill);
@@ -165,7 +165,11 @@ bool MapDocument::openMap(const QString &filename, QString &error)
                     else shape.lineTo(position);
                     if (sector.nextWallIndex(i) <= i) shape.closeSubpath();
                 }
-                for (const auto &other : shapes) {
+                const auto bounds = shape.boundingRect();
+                for (const auto &[otherBounds, other] : shapes) {
+                    // Large maps often have thousands of disjoint rooms. Avoid
+                    // allocating path intersections for pairs that cannot overlap.
+                    if (!bounds.intersects(otherBounds)) continue;
                     // Intersections can contain zero-area shared portal edges.
                     for (const auto &polygon : shape.intersected(other).toFillPolygons()) {
                         qreal twiceArea = 0;
@@ -177,7 +181,7 @@ bool MapDocument::openMap(const QString &filename, QString &error)
                         if (std::abs(twiceArea) > 0.001) loaded.m_complexTopology = true;
                     }
                 }
-                shapes.push_back(shape);
+                shapes.emplace_back(bounds, shape);
             }
         }
         if (!loaded.m_complexTopology) {

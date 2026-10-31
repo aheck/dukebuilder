@@ -1,6 +1,5 @@
 """Packaging checks; synthetic PE headers are fixtures, never release binaries."""
 import importlib.util
-import os
 from pathlib import Path
 import re
 import struct
@@ -69,11 +68,11 @@ class InstallerTests(unittest.TestCase):
                 installer.payload_files(stage)
 
     def test_case_collision(self):
-        if os.name == 'nt':
-            self.skipTest('Case-sensitive staging fixture requires POSIX')
         with tempfile.TemporaryDirectory() as temp:
             stage = Path(temp)
             write_pe(stage / 'dukebuilder.exe')
+            if (stage / 'DUKEBUILDER.EXE').exists():
+                self.skipTest('Case-sensitive staging fixture requires a case-sensitive filesystem')
             write_pe(stage / 'DUKEBUILDER.EXE')
             with self.assertRaises(ValueError):
                 installer.payload_files(stage)

@@ -1,6 +1,7 @@
 /build/
 /build-*/
 /conan/
+/conan-ci/
 /dist/
 __pycache__/
 *.py[cod]

@@ -157,26 +157,25 @@ PropertiesPanel::PropertiesPanel(MapEditor *editor,
                     return;
                 }
                 const int mask = item->data(0, Qt::UserRole + 1).toInt();
+                qreal value;
                 if (mask && item->parent()) {
                     int flags = item->parent()->text(1).toInt();
-                    flags = item->checkState(1) == Qt::Checked ? flags | mask : flags & ~mask;
-                    m_editor->setSelectedProperty(static_cast<MapEditor::Property>(
-                        item->data(0, Qt::UserRole).toInt()), flags);
-                    return;
+                    value = item->checkState(1) == Qt::Checked ? flags | mask : flags & ~mask;
+                } else {
+                    bool valid = false;
+                    value = item->text(1).toDouble(&valid);
+                    if (!valid) value = std::numeric_limits<qreal>::quiet_NaN();
                 }
-                bool valid = false;
-                const qreal value = item->text(1).toDouble(&valid);
-                if (!valid) {
-                    m_editor->setSelectedProperty(
-                        static_cast<MapEditor::Property>(
-                            item->data(0, Qt::UserRole).toInt()),
-                        std::numeric_limits<qreal>::quiet_NaN());
-                    return;
-                }
-                m_editor->setSelectedProperty(
-                    static_cast<MapEditor::Property>(
-                        item->data(0, Qt::UserRole).toInt()),
-                    value);
+                const auto property = static_cast<MapEditor::Property>(
+                    item->data(0, Qt::UserRole).toInt());
+                const QPersistentModelIndex index = m_propertiesControl->indexFromItem(item, column);
+                // Committing rebuilds the tree. Qt still accesses the item after
+                // emitting itemChanged (notably for check states), so let that
+                // call finish before retiring the row. Ignore edits whose row
+                // or panel was removed before the queued commit runs.
+                QTimer::singleShot(0, this, [this, index, property, value] {
+                    if (index.isValid()) m_editor->setSelectedProperty(property, value);
+                });
             });
 
     // Keep expansion state outside the items: property edits rebuild the tree,

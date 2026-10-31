@@ -579,7 +579,9 @@ after extraction begins can still leave earlier files successfully extracted.
 
 ## Requirements
 
-- Conan 2
+- Qt 6 (Core, Gui, Widgets, OpenGL, OpenGLWidgets, and Test)
+- Python 3 (including the packaging helper tests)
+- Conan 2 when using the Conan dependency setup below
 - Meson
 - Ninja
 - A C++17 compiler
@@ -633,6 +635,77 @@ Run it:
 ```sh
 ./build/dukebuilder
 ```
+
+## Continuous integration
+
+[The build-and-test workflow](.github/workflows/ci.yml) runs on pushes, pull
+requests, and manual dispatches. It builds the application, manual GPU smoke
+test executable, and regression tests on Ubuntu 24.04, macOS 15, and Windows
+Server 2022 with MSVC x64. It runs the automated Meson tests, including the
+Windows installer helper tests, and uploads Meson build/test logs on every run.
+The GPU smoke test still requires a desktop OpenGL context and local game data;
+it is compiled but not run in this workflow. Release packaging, signing, and
+publishing are separate from these jobs.
+
+CI uses **Conan 2.28.1** to install the dependencies in `conanfile.txt`, with
+[profiles/ci](profiles/ci) selecting shared Qt on every platform. It detects
+the runner's compiler, builds in Release mode with C++17, and uses the shared
+release runtime (`/MD`) on MSVC. Meson 1.12.1 and Ninja 1.13.0 are pinned too.
+Both projects consume the generated Conan native file. The sibling libduke
+checkout is pinned in the workflow; update its `ref` when adopting new APIs.
+Its renderer is enabled, while its viewer and Check-based tests are disabled.
+
+Conan downloads matching binary packages when available and builds missing
+ones. CI caches a Conan package archive keyed by OS, architecture, resolved
+compiler profiles, dependency recipe, and CI configuration. Compatible older
+caches can supply unchanged dependencies. The archive excludes source/build
+trees and is saved immediately after dependency installation, before application
+builds or tests can fail. A cold Qt build can take considerably longer; jobs
+allow up to three hours. Conan's system-package integration installs required
+OS libraries on the runner, including after restoring cached packages.
+
+To reproduce the build, use the libduke revision listed in the workflow in
+`../libduke`. On Windows, start from an x64 Visual Studio 2022 developer shell.
+CI activates Conan's build and runtime environments using Bash on Linux/macOS
+and PowerShell 7 on Windows. These environments supply the Qt plugin and shared-library
+paths; no separate Qt installation is needed.
+
+```sh
+python -m pip install conan==2.28.1 meson==1.12.1 ninja==1.13.0 pkgconf
+conan profile detect
+conan install . --output-folder=conan-ci --build=missing -pr:a=profiles/ci -g VirtualBuildEnv -g VirtualRunEnv
+```
+
+On Linux/macOS, activate the generated environments in Bash:
+
+```sh
+source conan-ci/conanbuild.sh
+source conan-ci/conanrun.sh
+```
+
+On Windows, activate them in PowerShell 7:
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $true
+. ./conan-ci/conanbuild.ps1
+. ./conan-ci/conanrun.ps1
+```
+
+Then configure, compile, and test in the same shell:
+
+```sh
+meson setup ../libduke/build-ci ../libduke --native-file=conan-ci/conan_meson_native.ini --buildtype=release -Db_sanitize=none -Drenderer=enabled -Dviewer=disabled -Dcheck_tests=false
+meson compile -C ../libduke/build-ci
+meson setup build-ci --native-file=conan-ci/conan_meson_native.ini --buildtype=release -Db_sanitize=none -Dlibduke_build_dir=build-ci
+meson compile -C build-ci
+meson test -C build-ci --no-rebuild --print-errorlogs
+```
+
+The GUI regression tests select Qt's `minimal` platform plugin and built-in
+`Fusion` style, and need no display server.
+The AppImage script continues to use the separate static-Qt configuration
+described below.
 
 ## Linux AppImage
 
@@ -754,8 +827,9 @@ NSIS installer and uninstaller use the same icon, assembled from the supplied
 16–256 pixel PNGs in `icons/`. The ICO is checked in, so building on Windows does
 not require an image conversion tool.
 
-The installer packaging is ready for a **future Windows x64 build**. It does not
-cross-compile Duke Builder or resolve the remaining Windows build dependencies.
+The CI workflow builds and tests Duke Builder natively for Windows x64.
+The installer script packages an existing build; it does not cross-compile
+Duke Builder or install its build dependencies.
 It uses NSIS 3 (`makensis`) and Python 3 and can run on either Linux or Windows.
 
 Prepare a clean deployment directory, for example:

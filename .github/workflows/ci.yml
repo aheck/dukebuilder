@@ -1,0 +1,149 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    # A cold cache may need to compile Qt and its dependencies from source.
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2022]
+    defaults:
+      run:
+        working-directory: dukebuilder
+    env:
+      CONAN_VERSION: '2.28.1'
+      CONAN_HOME: ${{ github.workspace }}/.conan2-ci
+      QT_QPA_PLATFORM: minimal
+      QT_STYLE_OVERRIDE: Fusion
+
+    steps:
+      - name: Check out Duke Builder
+        uses: actions/checkout@v6
+        with:
+          path: dukebuilder
+
+      - name: Check out compatible libduke
+        uses: actions/checkout@v6
+        with:
+          repository: aheck/libduke
+          ref: aedc6ece4053ee5ac4c3b342fbfa8791641c75bd
+          path: libduke
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Set up MSVC x64
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install build tools
+        run: python -m pip install conan==${{ env.CONAN_VERSION }} meson==1.12.1 ninja==1.13.0 pkgconf
+
+      - name: Detect compiler and record Conan profiles
+        run: |
+          conan profile detect --force
+          conan profile show -pr:a=profiles/ci --format=json --out-file=conan-ci/profile.json
+
+      - name: Restore cached Conan package archive
+        id: conan-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/conan-packages.tgz
+          key: conan-${{ env.CONAN_VERSION }}-${{ matrix.os }}-${{ runner.arch }}-${{ hashFiles('dukebuilder/conan-ci/profile.json') }}-${{ hashFiles('dukebuilder/conanfile.txt', 'dukebuilder/profiles/ci', 'dukebuilder/.github/workflows/ci.yml') }}
+          restore-keys: |
+            conan-${{ env.CONAN_VERSION }}-${{ matrix.os }}-${{ runner.arch }}-${{ hashFiles('dukebuilder/conan-ci/profile.json') }}-
+
+      - name: Import cached Conan packages
+        if: steps.conan-cache.outputs.cache-matched-key != ''
+        run: conan cache restore "${{ runner.temp }}/conan-packages.tgz"
+
+      - name: Install Linux development libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libgl1-mesa-dev libxkbcommon-dev libegl1-mesa-dev
+
+      - name: Install Conan dependencies
+        run: >-
+          conan install . --output-folder=conan-ci --build=missing
+          -pr:a=profiles/ci -g VirtualBuildEnv -g VirtualRunEnv
+
+      # Save packages before compiling the application, even if its tests fail.
+      # Conan's archive format excludes build trees and can restore into a new home.
+      - name: Export Conan packages
+        if: steps.conan-cache.outputs.cache-hit != 'true'
+        run: conan cache save "*:*" --no-source --file="${{ runner.temp }}/conan-packages.tgz"
+
+      - name: Save Conan package archive
+        if: steps.conan-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/conan-packages.tgz
+          key: ${{ steps.conan-cache.outputs.cache-primary-key }}
+
+      - name: Configure and build libraries, application, and tests
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          source conan-ci/conanbuild.sh
+          source conan-ci/conanrun.sh
+          meson setup ../libduke/build-ci ../libduke --native-file=conan-ci/conan_meson_native.ini --buildtype=release -Db_sanitize=none -Drenderer=enabled -Dviewer=disabled -Dcheck_tests=false
+          meson compile -C ../libduke/build-ci
+          meson setup build-ci --native-file=conan-ci/conan_meson_native.ini --buildtype=release -Db_sanitize=none -Dlibduke_build_dir=build-ci
+          meson compile -C build-ci
+
+      - name: Configure and build libraries, application, and tests (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          . ./conan-ci/conanbuild.ps1
+          . ./conan-ci/conanrun.ps1
+          meson setup ../libduke/build-ci ../libduke --native-file=conan-ci/conan_meson_native.ini --buildtype=release -Db_sanitize=none -Drenderer=enabled -Dviewer=disabled -Dcheck_tests=false
+          meson compile -C ../libduke/build-ci
+          meson setup build-ci --native-file=conan-ci/conan_meson_native.ini --buildtype=release -Db_sanitize=none -Dlibduke_build_dir=build-ci
+          meson compile -C build-ci
+
+      - name: Run regression and packaging helper tests
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          source conan-ci/conanrun.sh
+          meson test -C build-ci --no-rebuild --print-errorlogs
+
+      - name: Run regression and packaging helper tests (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          . ./conan-ci/conanrun.ps1
+          meson test -C build-ci --no-rebuild --print-errorlogs
+
+      - name: Upload build and test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.os }}
+          path: |
+            dukebuilder/build-ci/meson-logs/
+            dukebuilder/conan-ci/profile.json
+            libduke/build-ci/meson-logs/
+          if-no-files-found: ignore

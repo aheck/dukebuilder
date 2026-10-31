@@ -1,0 +1,23 @@
+include(default)
+
+[settings]
+build_type=Release
+compiler.cppstd=17
+{% if platform.system() == "Windows" %}
+compiler.runtime=dynamic
+compiler.runtime_type=Release
+{% endif %}
+
+[options]
+# macOS currently requires shared Qt (no static Cocoa plugin integration).
+qt/*:shared=True
+
+[conf]
+tools.build:jobs=4
+{% if platform.system() == "Windows" %}
+tools.env.virtualenv:powershell=pwsh
+{% endif %}
+tools.system.package_manager:mode=install
+{% if platform.system() == "Linux" %}
+tools.system.package_manager:sudo=True
+{% endif %}

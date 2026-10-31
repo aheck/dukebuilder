@@ -12,6 +12,7 @@ int main()
 {
     require(textureMetadata(21).categories.contains("Weapons & Ammo"), "Pistol pickup category");
     require(textureMatchesSearch(21, textureMetadata(21), "PISTOL"), "Friendly case-insensitive alias");
+    require(textureMatchesSearch(21, textureMetadata(21), "FIRSTGUNSPRITE"), "Alias preserves symbolic name search");
     require(textureMatchesSearch(2000, textureMetadata(2000), "pig cop"), "Multiword name search");
     require(textureMatchesSearch(2000, textureMetadata(2000), "2000 pig"), "Combined number/name search");
     require(!textureMatchesSearch(2000, textureMetadata(2000), "pig door"), "Every search word must match");

@@ -74,14 +74,26 @@ int main(int argc, char **argv)
             "Missing texture keeps its tile and fallback preview");
     row("Advanced")->setExpanded(true);
     row("Floor shade")->setText(1, "12");
+    QApplication::processEvents();
     require(editor.document().sectors()[0].floorshade == 12 && editor.undoStack()->count() == 1,
             "Property edit updates document through undo history");
     require(row("Advanced")->isExpanded(), "Expansion survives property rebuild");
+    row("Floor shade")->setText(1, "13");
+    panel->setProperties(std::nullopt);
+    QApplication::processEvents();
+    require(editor.document().sectors()[0].floorshade == 12,
+            "Queued text edit from a retired row cannot commit");
     editor.undo();
     require(editor.document().sectors()[0].floorshade == 0, "Property edit can be undone");
     click({512,512});
     row("Floor flags")->child(0)->setCheckState(1, Qt::Checked);
+    QApplication::processEvents();
     require(editor.document().sectors()[0].floorstat & 1, "Flag checkbox updates selected sector");
+    row("Floor flags")->child(0)->setCheckState(1, Qt::Unchecked);
+    panel->setProperties(std::nullopt);
+    QApplication::processEvents();
+    require(editor.document().sectors()[0].floorstat & 1,
+            "Queued checkbox edit from a retired row cannot commit");
 
     editor.setMode(MapEditor::Mode::Lines);
     click({512,0});
@@ -89,6 +101,7 @@ int main(int argc, char **argv)
     auto *side = qobject_cast<QComboBox *>(tree->itemWidget(row("Side"), 1));
     require(side && side->count() == 1 && !side->isEnabled(), "One-sided wall has a fixed side");
     row("Shade")->setText(1, "9");
+    QApplication::processEvents();
     require(row("Shade")->text(1) == "9", "Wall edit survives document refresh");
 
     editor.setMode(MapEditor::Mode::Sprites);
