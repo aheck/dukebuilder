@@ -756,8 +756,16 @@ int main(int argc, char **argv)
             require(editor.scene()->selectedItems().size() == 2, "Select multiple objects for focused right drag");
             QDoubleSpinBox property(editor.viewport());
             property.move(0,0); property.show();
-            editor.activateWindow();
             QApplication::processEvents();
+            // This test sends input directly under the minimal platform plugin.
+            // Set Qt's active widget window explicitly: native activateWindow()
+            // is unreliable on headless Windows runners. The deprecated API is
+            // intentional here; its replacement requests native activation.
+            // The focus transfer under test still happens through the right drag.
+            QT_WARNING_PUSH
+            QT_WARNING_DISABLE_DEPRECATED
+            QApplication::setActiveWindow(&editor);
+            QT_WARNING_POP
             property.setFocus();
             QApplication::processEvents();
             require(property.hasFocus() || property.isAncestorOf(QApplication::focusWidget()), "Property control initially owns focus");
