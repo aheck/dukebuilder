@@ -287,7 +287,7 @@ endif
 
 executable(
   'dukebuilder',
-  ['src/main.cpp'] + app_sources + tutorial_resources + icon_resources + windows_resources,
+  ['src/main.cpp', 'src/desktopintegration.cpp'] + app_sources + tutorial_resources + icon_resources + windows_resources,
   cpp_args: app_cpp_args,
   dependencies: app_dependencies + renderer_dependencies + gui_entrypoint,
   win_subsystem: 'windows',
@@ -346,3 +346,10 @@ test('tutorial-resource', tutorial_resource_test)
 
 python = import('python').find_installation('python3')
 test('windows-installer', python, args: files('tests/windows_installer_test.py'))
+
+if host_machine.system() == 'linux'
+  desktopintegration_test = executable('desktopintegration-test',
+    ['tests/desktopintegration_test.cpp', 'src/desktopintegration.cpp'],
+    include_directories: include_directories('src'), dependencies: qt_dependencies)
+  test('desktopintegration', desktopintegration_test)
+endif
