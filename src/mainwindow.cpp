@@ -55,6 +55,8 @@
 #include <cmath>
 
 namespace {
+const QString programTitle = QStringLiteral(PROGRAM_NAME " " PROGRAM_VERSION);
+
 #ifdef Q_OS_MACOS
 // Locate EDuke32 inside the bundle without loading platform frameworks.
 QString macBundleExecutable(const QString &path)
@@ -88,7 +90,7 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
     m_recovery = std::make_unique<RecoveryFile>(RecoveryFile::newPath(RecoveryFile::directory()));
-    setWindowTitle("Duke Builder");
+    setWindowTitle(programTitle);
     resize(1280, 800);
 
     auto *editor = new MapEditor(this);
@@ -212,7 +214,7 @@ MainWindow::MainWindow(QWidget *parent)
         m_mapFilename = filename;
         rememberMap(filename);
         setWindowFilePath(filename);
-        setWindowTitle(QFileInfo(filename).fileName() + " - Duke Builder");
+        setWindowTitle(QFileInfo(filename).fileName() + " - " + programTitle);
         statusBar()->showMessage("Saved " + QFileInfo(filename).fileName(), 5000);
         return true;
     };
@@ -242,7 +244,7 @@ MainWindow::MainWindow(QWidget *parent)
         editor->newMap();
         m_mapFilename.clear();
         setWindowFilePath({});
-        setWindowTitle("Duke Builder");
+        setWindowTitle(programTitle);
     });
 
     auto *openMapAction = fileMenu->addAction("&Open Map");
@@ -258,7 +260,7 @@ MainWindow::MainWindow(QWidget *parent)
         m_mapFilename = filename;
         rememberMap(filename);
         setWindowFilePath(filename);
-        setWindowTitle(QFileInfo(filename).fileName() + " - Duke Builder");
+        setWindowTitle(QFileInfo(filename).fileName() + " - " + programTitle);
         statusBar()->showMessage("Opened " + QFileInfo(filename).fileName(), 5000);
     };
     connect(openMapAction, &QAction::triggered, this, [this, openMap, confirmMapReplacement, mapDirectory] {
@@ -719,7 +721,7 @@ MainWindow::MainWindow(QWidget *parent)
                 m_recoveryOrigin.clear();
                 m_mapFilename.clear();
                 setWindowFilePath({});
-                setWindowTitle(name + " (archive copy) - Duke Builder");
+                setWindowTitle(name + " (archive copy) - " + programTitle);
                 statusBar()->showMessage("Opened archive copy; use Save As to save it separately.", 5000);
                 raise();
                 activateWindow();
@@ -1120,7 +1122,7 @@ MainWindow::MainWindow(QWidget *parent)
             m_recoveryOrigin = snapshot.sourceFilename;
             m_mapFilename.clear(); // Save As protects the original map on disk.
             setWindowFilePath({});
-            setWindowTitle("Recovered map - Duke Builder");
+            setWindowTitle("Recovered map - " + programTitle);
             previous.remove();
             statusBar()->showMessage("Recovered unsaved work. Use Save As to save it as a map.", 10000);
             break;
